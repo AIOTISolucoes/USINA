@@ -7,14 +7,19 @@
 
   <!-- CSS -->
   <link rel="stylesheet" href="css/plant.css" />
-  <link rel="stylesheet" href="plant.css" />
+  <link rel="stylesheet" href="css/plant.css" />
   <link
     rel="stylesheet"
     href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
   />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
 
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 </head>
 
 <body>
@@ -24,14 +29,9 @@
   <!-- =================================================
        HEADER + WEATHER
   ================================================== -->
-  <section class="card plant-header-card header-grid">
-
-    <!-- RESUMO USINA -->
-    <div class="header-main">
-
-      <div class="card-header plant-header-title">
-
-        <!-- Linha 1: somente a seta -->
+  <section class="card plant-header-card">
+    <div class="plant-header-compact">
+      <div class="plant-head-left">
         <button class="back-btn back-btn--modern" onclick="history.back()" aria-label="Voltar">
           <svg class="back-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M14.5 5L8.5 12L14.5 19"
@@ -39,61 +39,72 @@
                   stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
-
-        <!-- Linha 2: plant badge + textos -->
         <div class="plant-title-row">
           <span class="plant-badge" aria-hidden="true">
             <i class="fa-solid fa-seedling"></i>
           </span>
-
           <div class="plant-title-text">
             <h2 class="plant-name" id="plantName">—</h2>
             <span class="plant-subline" id="plantSubline">Nenhum alarme ativo</span>
+            <div class="plant-header-actions plant-header-actions--inline-left">
+              <button id="plantAlarmMenuButton" class="plant-alarm-menu-btn is-clean" aria-expanded="false" aria-label="Abrir alarmes da usina">
+                <span class="plant-alarm-menu-icon" aria-hidden="true"></span>
+                <span class="plant-alarm-menu-label">Alarmes</span>
+                <span id="plantAlarmMenuCount" class="plant-alarm-menu-count">0</span>
+              </button>
+
+              <div id="plantAlarmMenuPanel" class="plant-alarm-menu-panel">
+                <div class="plant-alarm-menu-panel-header">
+                  <strong>Alarmes ativos</strong>
+                  <button id="plantAlarmMenuClose" class="plant-alarm-menu-close" type="button" aria-label="Fechar alarmes">×</button>
+                </div>
+                <div id="plantAlarmMenuEmptyState" class="plant-alarm-menu-empty">
+                  Nenhum alarme ativo
+                </div>
+                <div id="plantActiveAlarms" class="plant-alarm-menu-list"></div>
+              </div>
+            </div>
           </div>
         </div>
-
       </div>
 
-      <div class="summary-station">
-        <h3 class="weather-title">Resumo da usina</h3>
-        <div class="plant-kpis">
-          <div class="kpi">
-            <div class="kpi-label">Rated Power</div>
-            <strong id="headerRatedPower">—</strong>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Active Power</div>
-            <strong id="headerActivePower">—</strong>
-          </div>
-          <div class="kpi">
-            <div class="kpi-label">Capacidade</div>
-            <strong id="headerCapacity">—</strong>
-          </div>
+      <div class="plant-head-center">
+        <div class="kpi">
+          <div class="kpi-label">Rated Power</div>
+          <strong id="headerRatedPower">—</strong>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Active Power</div>
+          <strong id="headerActivePower">—</strong>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Capacidade</div>
+          <strong id="headerCapacity">—</strong>
         </div>
       </div>
-    </div>
 
-    <!-- WEATHER -->
-    <div class="weather-station">
-      <h3 class="weather-title">Weather Station</h3>
+      <div class="plant-head-right">
+        <div class="plant-weather-compact weather-station">
+          <h3 class="weather-title">Weather Station</h3>
+          <div class="weather-items-row">
+            <div class="weather-item">
+              <i class="fa-solid fa-sun weather-icon"></i>
+              <span>Irradiance POA</span>
+              <strong id="weatherIrradiance">—</strong>
+            </div>
 
-      <div class="weather-items-row">
-        <div class="weather-item">
-          <i class="fa-solid fa-sun weather-icon"></i>
-          <span>Irradiance POA</span>
-          <strong id="weatherIrradiance">—</strong>
-        </div>
+            <div class="weather-item">
+              <i class="fa-solid fa-temperature-half weather-icon"></i>
+              <span>Air Temperature</span>
+              <strong id="weatherAirTemp">—</strong>
+            </div>
 
-        <div class="weather-item">
-          <i class="fa-solid fa-temperature-half weather-icon"></i>
-          <span>Air Temperature</span>
-          <strong id="weatherAirTemp">—</strong>
-        </div>
-
-        <div class="weather-item">
-          <i class="fa-solid fa-microchip weather-icon"></i>
-          <span>Module Temp</span>
-          <strong id="weatherModuleTemp">—</strong>
+            <div class="weather-item">
+              <i class="fa-solid fa-microchip weather-icon"></i>
+              <span>Module Temp</span>
+              <strong id="weatherModuleTemp">—</strong>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -103,12 +114,7 @@
   <!-- =================================================
        ALARMES
   ================================================== -->
-  <section class="card plant-alarms-card">
-    <h3 class="card-title">Alarmes Ativos</h3>
-
-    <div id="plantActiveAlarms"></div>
-  </section>
-
+  <section class="card plant-alarms-card" aria-hidden="true"></section>
   <!-- =================================================
        NAV DISPOSITIVOS (BOTÕES CENTRALIZADOS)
   ================================================== -->
@@ -122,6 +128,16 @@
       <button class="device-nav-btn" type="button" data-target="#sec-relay">
         <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
         <span>Relé</span>
+      </button>
+
+      <button class="device-nav-btn" type="button" data-target="#sec-multimeter">
+        <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+        <span>Multimedidor</span>
+      </button>
+
+      <button class="device-nav-btn" id="trackersMenuToggle" type="button" data-target="#sec-trackers">
+        <i class="fa-solid fa-satellite-dish" aria-hidden="true"></i>
+        <span>Trackers</span>
       </button>
     </div>
   </section>
@@ -138,15 +154,28 @@
 
           <div class="chart-legend">
             <span class="legend-bars" aria-hidden="true">
+              <span class="bar bar--gray"></span>
               <span class="bar bar--green"></span>
               <span class="bar bar--yellow"></span>
             </span>
 
             <div class="legend-text">
+              <span class="legend-line legend-line--gray">Expected Power</span>
               <span class="legend-line legend-line--green">Active Power</span>
-              <span class="legend-line legend-line--yellow">Irradiância</span>
+              <span class="legend-line legend-line--yellow">Irradiance POA</span>
             </div>
           </div>
+        </div>
+        <div class="chart-toolbar" aria-label="Controles de zoom do gráfico diário">
+          <button id="dailyZoomInBtn" class="chart-zoom-btn" type="button" title="Zoom in" aria-label="Zoom in">
+            <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+          </button>
+          <button id="dailyZoomOutBtn" class="chart-zoom-btn" type="button" title="Zoom out" aria-label="Zoom out">
+            <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+          </button>
+          <button id="dailyZoomResetBtn" class="chart-zoom-btn" type="button" title="Reset zoom" aria-label="Reset zoom">
+            <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+          </button>
         </div>
       </div>
 
@@ -155,23 +184,49 @@
       </div>
     </section>
 
-    <section class="card plant-chart-card">
+    <section class="card plant-chart-card plant-chart-card--monthly">
       <div class="card-header">
-        <div>
-          <h2>Geração mensal acumulada</h2>
-          <span class="subtitle">Últimos 30 dias</span>
+        <div class="monthly-head-wrap">
+          <div>
+            <h2>Geração mensal</h2>
+            <span class="subtitle">Últimos 30 dias · kWh / dia</span>
+          </div>
+          <div class="monthly-kpis">
+            <div class="monthly-kpi-pill">
+              <span>Total real</span>
+              <strong id="monthlyKpiReal">—</strong>
+            </div>
+            <div class="monthly-kpi-pill">
+              <span>Esperado</span>
+              <strong id="monthlyKpiExp">—</strong>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <div class="monthly-legend-row">
+        <div class="monthly-leg"><span class="monthly-leg-sq monthly-leg-sq--real"></span> Geração real (acima do esperado)</div>
+        <div class="monthly-leg"><span class="monthly-leg-sq monthly-leg-sq--below"></span> Geração real (abaixo do esperado)</div>
+        <div class="monthly-leg"><span class="monthly-leg-sq monthly-leg-sq--exp"></span> Esperado</div>
       </div>
 
       <div class="chart-wrapper">
         <canvas id="plantMonthlyChart"></canvas>
+      </div>
+
+      <div class="monthly-progress-wrap">
+        <div class="monthly-progress-fill" id="monthlyProgressFill"></div>
+      </div>
+      <div class="monthly-bottom-meta">
+        <span id="monthlyBottomLeft">—</span>
+        <span id="monthlyBottomRight">—</span>
       </div>
     </section>
 
   </section>
 
   <!-- =================================================
-       DISPOSITIVOS — INVERSORES + RELÉ
+       DISPOSITIVOS — INVERSORES + RELÉ + TRACKERS
   ================================================== -->
   <section class="card plant-devices-card">
 
@@ -191,6 +246,7 @@
         <span>Freq</span>
         <span>PR</span>
         <span>Última leitura</span>
+        <span>Comandos</span>
       </div>
 
       <div id="invertersContainer"></div>
@@ -202,60 +258,124 @@
 
     <!-- RELÉ -->
     <section id="relaySection" style="margin-top:24px">
-    <h3 class="card-title">Relé</h3>
+      <h3 class="card-title">Relé</h3>
 
-    <!-- ✅ RELÉ CLEAN: bolinha + nome + badge ON/OFF + timestamp + kW -->
-    <div class="relay-row" id="relayRow">
-      <span class="status-dot" id="relayDot"></span>
+      <div class="device-mini-table">
+        <div class="device-mini-header">
+          <span></span>
+          <span>RelÃ©</span>
+          <span>Active Power</span>
+          <span>Apparent Power</span>
+          <span>Reactive Power</span>
+          <span>Ãšltima leitura</span>
+          <span>Comandos</span>
+        </div>
 
-      <div class="relay-left">
-        <div class="relay-title">Relé</div>
+        <div class="device-mini-stack">
+      <div class="relay-row" id="relayRow">
+        <span class="status-dot" id="relayDot"></span>
+
+        <div class="relay-left">
+          <div class="relay-title">Relé</div>
+        </div>
+
+        <div class="relay-right">
+          <span class="relay-last" id="relayLastUpdateText">—</span>
+          <span id="relayCommandBarWrap"></span>
+          <span class="relay-state relay-state--unknown" id="relayStateBadge">—</span>
+          <span class="relay-power" id="relayPowerText">— kW</span>
+          <span id="relayOnlineText" style="display:none;">—</span>
+          <span id="relayAvailabilityText" style="display:none;">—</span>
+        </div>
       </div>
 
-      <div class="relay-right">
-        <span class="relay-last" id="relayLastUpdateText">—</span>
-        <span class="relay-state relay-state--unknown" id="relayStateBadge">—</span>
-        <span class="relay-power" id="relayPowerText">— kW</span>
+          <div class="relay-details-panel" id="relayDetailsPanel"></div>
+        </div>
       </div>
-    </div>
+    </section>
 
-  </section>
+    <div id="sec-multimeter" class="scroll-anchor"></div>
+    <section id="multimeterSection" style="margin-top:24px">
+      <h3 class="card-title">Multimedidor</h3>
+
+      <div class="device-mini-table">
+        <div class="device-mini-header">
+          <span></span>
+          <span>Multimedidor</span>
+          <span>Active Power</span>
+          <span>Apparent Power</span>
+          <span>Reactive Power</span>
+          <span>Ãšltima leitura</span>
+          <span>Comandos</span>
+        </div>
+
+      <div class="relay-row" id="multimeterRow">
+        <span class="status-dot" id="multimeterDot"></span>
+
+        <div class="relay-left">
+          <div class="relay-title">Medidor Principal</div>
+        </div>
+
+        <div class="relay-right" id="multimeterRight">
+          <span class="relay-last" id="multimeterLastUpdateText">—</span>
+          <span id="multimeterCommandBarWrap"></span>
+          <span class="relay-state relay-state--unknown" id="multimeterOnlineBadge">—</span>
+          <span class="relay-power" id="multimeterPowerText">—</span>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <!-- TRACKERS -->
+    <div id="sec-trackers" class="scroll-anchor"></div>
+    <section id="trackersSection" class="trackers-section is-collapsed trackers-hidden" style="margin-top:24px">
+      <button id="trackersTabToggle" class="trackers-tab-toggle" type="button" aria-expanded="false">
+        <span>Trackers</span>
+        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+      </button>
+
+      <div id="trackersPanelBody" class="trackers-panel-body">
+      <div class="trackers-toolbar">
+        <h3 class="card-title">Trackers</h3>
+
+        <div class="trackers-search-box">
+          <input id="trackersSearchInput" type="search" placeholder="Buscar tracker por nome, ID ou tipo" />
+        </div>
+
+        <div class="trackers-mode-switch">
+          <button id="trackerModeState" class="tracker-mode-btn is-active" type="button">Estado</button>
+          <button id="trackerModeAngle" class="tracker-mode-btn" type="button">Ângulo</button>
+          <button id="trackerModeError" class="tracker-mode-btn" type="button">Erro</button>
+        </div>
+      </div>
+
+      <div class="trackers-layout">
+        <aside class="trackers-sidebar">
+          <div class="trackers-zoom-controls">
+            <button id="trackersZoomIn" class="tracker-mode-btn" type="button">Zoom +</button>
+            <button id="trackersZoomOut" class="tracker-mode-btn" type="button">Zoom −</button>
+            <button id="trackersZoomReset" class="tracker-mode-btn" type="button">Reset</button>
+          </div>
+
+          <div id="trackersLegend" class="trackers-legend"></div>
+        </aside>
+
+        <div id="trackersStageWrap" class="trackers-stage-wrap">
+          <div id="trackersMap" class="trackers-map" aria-label="Mapa de trackers"></div>
+          <div id="trackersMapFallback" class="trackers-map-fallback" hidden>
+            Trackers sem coordenadas configuradas.
+          </div>
+          <div id="trackerTooltip" class="tracker-tooltip" hidden></div>
+        </div>
+      </div>
+      </div>
+    </section>
 
   </section>
 
 </main>
 
-<!-- ✅ Navegação sem empilhar histórico -->
-<script>
-  (function deviceNavNoHistory() {
-    const btns = document.querySelectorAll('.device-nav-btn[data-target]');
-    if (!btns.length) return;
-
-    function scrollToTarget(selector) {
-      const el = document.querySelector(selector);
-      if (!el) return;
-
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-      // ✅ NÃO cria nova entrada no histórico (evita "voltar 2x")
-      try { history.replaceState(null, '', selector); } catch (_) {}
-    }
-
-    btns.forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        const target = btn.getAttribute('data-target');
-        scrollToTarget(target);
-      });
-    });
-
-    if (location.hash) {
-      const hash = location.hash;
-      setTimeout(() => scrollToTarget(hash), 0);
-    }
-  })();
-</script>
-
-<script src="./js/plant.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/plant.js"></script>
 </body>
 </html>
