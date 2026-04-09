@@ -16,7 +16,7 @@ let PLANT_STATE = {
 // ======================================================
 const INVERTER_ONLINE_AFTER_MS = 15 * 60 * 1000; // 15 min
 const INVERTER_NO_COMM_AFTER_MS = 15 * 60 * 1000; // 15 min
-let REFRESH_RUNNING = false;
+const STRING_STALE_AFTER_MS = 15 * 60 * 1000;
 
 // ======================================================
 // FUNÇÕES AUXILIARES
@@ -40,37 +40,16 @@ function formatKwhPtBR(v) {
   return `${formatNumberPtBR(n)} kWh`;
 }
 
-// ======================================================
-// WEATHER: parse robusto + stale timeout (30 min)
-// ======================================================
-const WEATHER_STALE_AFTER_MS = 30 * 60 * 1000;
-let WEATHER_CACHE = { data: null, ok_ms: 0 };
-
-function toNumOrNull(v) {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim().replace(",", ".").toLowerCase();
-  if (!s || s === "null" || s === "nan" || s === "undefined") return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+function formatKwPtBR(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${formatNumberPtBR(n)} kW`;
 }
 
-function parseTsToMsSafe(ts) {
-  if (!ts) return 0;
-  const ms = Date.parse(ts);
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function isWeatherStale(weatherObj) {
-  const ts =
-    weatherObj?.last_update ??
-    weatherObj?.lastUpdate ??
-    weatherObj?.ts ??
-    weatherObj?.timestamp ??
-    null;
-
-  const ms = parseTsToMsSafe(ts);
-  if (!ms) return true;
-  return (Date.now() - ms) > WEATHER_STALE_AFTER_MS;
+function formatWm2PtBR(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${formatNumberPtBR(n)} W/m²`;
 }
 
 function buildLastNDaysLabels(n) {
@@ -211,6 +190,12 @@ function normalizeDailyPayload(payload) {
     Array.isArray(payload.irradiance_wm2) ? payload.irradiance_wm2.slice() :
     [];
 
+  const expectedRaw =
+    Array.isArray(payload.expectedPower) ? payload.expectedPower.slice() :
+    Array.isArray(payload.expected_power_kw) ? payload.expected_power_kw.slice() :
+    Array.isArray(payload.expected_power) ? payload.expected_power.slice() :
+    [];
+
   if (!labelsRaw.length) return payload;
 
   // timestamp por ponto (se existir), para filtrar estritamente o DIA ATUAL
@@ -233,12 +218,12 @@ function normalizeDailyPayload(payload) {
     return hh * 60 + mm;
   };
 
-  const dateKeyInSaoPaulo = (d) => {
+  const dateKeyInFortaleza = (d) => {
     if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
-    return d.toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    return d.toLocaleDateString("en-CA", { timeZone: "America/Fortaleza" });
   };
 
-  const todayKeySP = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const todayKeyFortaleza = new Date().toLocaleDateString("en-CA", { timeZone: "America/Fortaleza" });
 
   const points = [];
   for (let i = 0; i < labelsRaw.length; i++) {
@@ -248,14 +233,15 @@ function normalizeDailyPayload(payload) {
     if (hasPointTimestamps) {
       const ts = pointTsRaw[i];
       const d = ts ? new Date(ts) : null;
-      const key = dateKeyInSaoPaulo(d);
-      if (!key || key !== todayKeySP) continue;
+      const key = dateKeyInFortaleza(d);
+      if (!key || key !== todayKeyFortaleza) continue;
     }
 
     points.push({
       minute,
       power: powerRaw[i] != null ? asNumber(powerRaw[i], 0) : 0,
-      irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : 0
+      irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : 0,
+      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : 0
     });
   }
 
@@ -264,67 +250,59 @@ function normalizeDailyPayload(payload) {
       ...payload,
       labels: [],
       activePower: [],
-      irradiance: []
+      irradiance: [],
+      expectedPower: []
     };
   }
 
   const mins = points.map(p => p.minute).sort((a, b) => a - b);
 
-  let step = 5; // ✅ trava em 5 min (SCADA)
+  // detecta o passo (1,5,10,15...) olhando o menor diff positivo
+  let step = 5; // fallback
+  if (mins.length >= 3) {
+    const diffs = [];
+    for (let i = 1; i < mins.length; i++) {
+      const d = mins[i] - mins[i - 1];
+      if (d > 0 && d <= 60) diffs.push(d);
+    }
+    if (diffs.length) step = Math.max(1, Math.min(...diffs));
+  }
 
   const mapP = new Map();
   const mapI = new Map();
-
-  // ✅ bucket: sempre pro INÍCIO do intervalo (floor), não "round"
-  const toBucket = (minute) => {
-    const b = Math.floor(minute / step) * step;
-    return Math.max(0, Math.min(23 * 60 + 55, b));
-  };
-
-  // ✅ se cair 2+ pontos no mesmo bucket:
-  // - power: mantém o ÚLTIMO (mais recente)
-  // - irradiância: mantém o MAIOR (evita zerar/oscilar)
+  const mapE = new Map();
   points.forEach(p => {
-    const b = toBucket(p.minute);
-
-    // power: último ganha
-    mapP.set(b, p.power);
-
-    // irradiância: não deixa um 0 sobrescrever um valor bom
-    const prevI = mapI.get(b);
-    const nextI = p.irr;
-
-    if (prevI === undefined) {
-      mapI.set(b, nextI);
-    } else {
-      // pega o maior (pico no bucket) e ignora "0" se já tinha algo >0
-      mapI.set(b, Math.max(Number(prevI) || 0, Number(nextI) || 0));
-    }
+    mapP.set(p.minute, p.power);
+    mapI.set(p.minute, p.irr);
+    mapE.set(p.minute, p.expected);
   });
 
-  // ✅ vai só até o último bucket com dado (não até 23:55)
+  // começa SEMPRE em 00:00 e termina no último minuto que chegou dado hoje
   const lastMin = Math.max(...mins);
-  const lastBucket = Math.floor(lastMin / step) * step;
 
   const labels = [];
   const activePower = [];
   const irradiance = [];
+  const expectedPower = [];
 
-  let lastIrr = 0;
-
-  for (let m = 0; m <= lastBucket; m += step) {
+  for (let m = 0; m <= lastMin; m += step) {
     const hh = String(Math.floor(m / 60)).padStart(2, "0");
     const mm = String(m % 60).padStart(2, "0");
     labels.push(`${hh}:${mm}`);
 
+    // sem buraco visual: minutos faltantes viram 0
     activePower.push(mapP.has(m) ? mapP.get(m) : 0);
-
-    // irradiância: carry-forward dentro do range
-    if (mapI.has(m)) lastIrr = mapI.get(m);
-    irradiance.push(lastIrr);
+    irradiance.push(mapI.has(m) ? mapI.get(m) : 0);
+    expectedPower.push(mapE.has(m) ? mapE.get(m) : 0);
   }
 
-  return { ...payload, labels, activePower, irradiance };
+  return {
+    ...payload,
+    labels,
+    activePower,
+    irradiance,
+    expectedPower
+  };
 }
 
 
@@ -333,16 +311,14 @@ function normalizeDailyPayload(payload) {
 // ======================================================
 let DAILY = null;
 let MONTHLY = null;
-let LAST_DAILY_FETCH_MS = 0;
-const DAILY_REFRESH_EVERY_MS = 60 * 1000; // 1 min
-let DAILY_DAY_KEY = null;
 let ACTIVE_ALARMS = [];
+let PLANT_ALARMS_MENU_OPEN = false;
 let INVERTERS_REALTIME = [];
-let INVERTERS_CACHE = { items: [], ok_ms: 0 };
-const INVERTERS_CACHE_TTL_MS = 2 * 60 * 1000; // 2 min
 let RELAY_REALTIME = null; // ✅ NEW
+let MULTIMETER_REALTIME = null;
 let OPEN_INVERTER_REAL_ID = null;
 let STRINGS_REFRESH_SEQ = 0;
+let IS_REFRESHING_PLANT = false;
 let INVERTER_EXTRAS_BY_ID = new Map(); // inverter_id (string) -> objeto inv completo
 
 let PLANT_CATALOG = {
@@ -351,6 +327,7 @@ let PLANT_CATALOG = {
 };
 
 let RELAY_SUPPORTED = null; // null = desconhecido / true / false
+let MULTIMETER_SUPPORTED = null; // null = desconhecido / true / false
 
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const PLANT_REFRESH_INTERVAL_MS = 10000;
@@ -361,6 +338,424 @@ function normalizeApiBody(data) {
     return typeof data.body === "string" ? JSON.parse(data.body) : data.body;
   }
   return data;
+}
+
+function normalizeAlarmState(value) {
+  const s = String(value ?? "").trim().toUpperCase();
+  if (!s) return "UNKNOWN";
+  if (["ACTIVE", "ACTIVO", "ATIVO", "OPEN", "ABERTO"].includes(s)) return "ACTIVE";
+  if (["CLEARED", "CLEAR", "RESOLVED", "RESOLVIDO", "INACTIVE", "FECHADO", "CLOSED"].includes(s)) return "CLEARED";
+  return s;
+}
+
+function normalizeAlarmSeverity(value) {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (!s) return "info";
+  if (["critical", "critico", "crítico", "high", "alta"].includes(s)) return "critical";
+  if (["warning", "warn", "media", "média", "medium"].includes(s)) return "warning";
+  if (["minor", "low", "baixa", "info", "informational"].includes(s)) return "info";
+  return s;
+}
+
+function dedupePlantAlarms(alarms) {
+  const map = new Map();
+  (Array.isArray(alarms) ? alarms : []).forEach((alarm) => {
+    const key = String(
+      alarm?.event_row_id ??
+      alarm?.alarm_id ??
+      alarm?.id ??
+      `${alarm?.event_code ?? "evt"}:${alarm?.timestamp ?? alarm?.started_at ?? ""}`
+    );
+    if (!map.has(key)) map.set(key, alarm);
+  });
+  return Array.from(map.values());
+}
+
+function hasActivePlantAlarms() {
+  return Array.isArray(ACTIVE_ALARMS) && ACTIVE_ALARMS.length > 0;
+}
+
+const DEVICE_COMMAND_STATE = new Map();
+let DEVICE_COMMAND_MENU_OPEN_KEY = null;
+
+function getDeviceKey(deviceType, deviceId) {
+  return `${String(deviceType || "")}:${String(deviceId ?? "")}`;
+}
+
+function getDevicePersistentState(deviceType, deviceId, fallback = "off") {
+  return DEVICE_COMMAND_STATE.get(getDeviceKey(deviceType, deviceId)) || fallback;
+}
+
+function setDevicePersistentState(deviceType, deviceId, state) {
+  if (state !== "on" && state !== "off") return;
+  DEVICE_COMMAND_STATE.set(getDeviceKey(deviceType, deviceId), state);
+}
+
+function isTruthyFlag(value) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  const s = String(value).trim().toLowerCase();
+  return ["1", "true", "on", "online", "yes", "y", "sim"].includes(s);
+}
+
+function isFalsyFlag(value) {
+  if (value === false) return true;
+  if (value === true || value == null) return false;
+  const s = String(value).trim().toLowerCase();
+  return ["0", "false", "off", "offline", "no", "n", "nao", "não"].includes(s);
+}
+
+function normalizeCommunicationFault(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(String(value).replace(",", ".").trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+function commFaultMeansOnline(value) {
+  const n = normalizeCommunicationFault(value);
+  if (n === null) return null;
+  if (n === 192) return true;
+  if (n === 28) return false;
+  return null;
+}
+
+function relayOnlineFromPayload(relayItem) {
+  const eventRaw = relayItem?.event?.raw ?? {};
+
+  const commCandidates = [
+    relayItem?.communication_fault,
+    relayItem?.event?.communication_fault,
+    eventRaw?.communication_fault
+  ];
+
+  for (const c of commCandidates) {
+    const commDecision = commFaultMeansOnline(c);
+    if (commDecision !== null) return commDecision;
+  }
+
+  const statusCandidates = [
+    relayItem?.is_online,
+    relayItem?.online,
+    relayItem?.isOnline,
+    relayItem?.event?.is_online,
+    eventRaw?.is_online,
+    eventRaw?.online,
+    eventRaw?.status_online
+  ];
+
+  for (const candidate of statusCandidates) {
+    if (isTruthyFlag(candidate)) return true;
+    if (isFalsyFlag(candidate)) return false;
+  }
+
+  return false;
+}
+
+function relayStateFromPayload(relayItem) {
+  if (!relayItem) return "off";
+
+  if (relayItem?.relay_on === true) return "on";
+  if (relayItem?.relay_on === false) return "off";
+
+  const eventRaw = relayItem?.event?.raw ?? {};
+  const commCandidates = [
+    relayItem?.communication_fault,
+    relayItem?.event?.communication_fault,
+    eventRaw?.communication_fault,
+    relayItem?.analog?.communication_fault
+  ];
+
+  for (const c of commCandidates) {
+    const decision = commFaultMeansOnline(c);
+    if (decision === true) return "on";
+    if (decision === false) return "off";
+  }
+
+  if (relayItem?.is_online === true || relayItem?.online === true) return "on";
+  if (relayItem?.is_online === false || relayItem?.online === false) return "off";
+
+  return "off";
+}
+
+function multimeterOnlineFromPayload(item) {
+  const analog = item?.analog ?? {};
+  const data = item?.data ?? {};
+
+  const commCandidates = [
+    item?.communication_fault,
+    analog?.communication_fault,
+    data?.communication_fault
+  ];
+
+  for (const c of commCandidates) {
+    const commDecision = commFaultMeansOnline(c);
+    if (commDecision !== null) return commDecision;
+  }
+
+  const statusCandidates = [
+    item?.is_online,
+    item?.online,
+    item?.isOnline,
+    item?.status_online,
+    analog?.is_online,
+    data?.is_online
+  ];
+
+  for (const candidate of statusCandidates) {
+    if (isTruthyFlag(candidate)) return true;
+    if (isFalsyFlag(candidate)) return false;
+  }
+
+  return false;
+}
+
+function renderDeviceCommandControl(deviceType, deviceId, currentState = "off") {
+  const safeType = String(deviceType || "");
+  const safeId = String(deviceId ?? "");
+  const state = getDevicePersistentState(safeType, safeId, currentState);
+  const stateClass = state === "on" ? "is-on" : "is-off";
+  const key = getDeviceKey(safeType, safeId);
+  return `
+    <div class="device-command-control ${stateClass}" data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}">
+      <button type="button" class="device-command-trigger" data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}" aria-label="Comandos do dispositivo"></button>
+      <div class="device-command-popover" data-device-key="${key}">
+        <button type="button" class="device-command-option device-command-option--on" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="on"><span class="dot"></span><span>ON</span></button>
+        <button type="button" class="device-command-option device-command-option--off" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="off"><span class="dot"></span><span>OFF</span></button>
+        <button type="button" class="device-command-option device-command-option--reset" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="reset"><span class="dot"></span><span>RESET</span></button>
+      </div>
+    </div>
+  `;
+}
+
+function applyDeviceVisualState(deviceType, deviceId, state) {
+  const key = getDeviceKey(deviceType, deviceId);
+  document.querySelectorAll(`.device-command-control[data-device-key="${key}"]`).forEach((el) => {
+    el.classList.remove("is-on", "is-off", "is-reset-flash");
+    el.classList.add(state === "on" ? "is-on" : "is-off");
+  });
+}
+
+function closeAllDeviceCommandMenus() {
+  DEVICE_COMMAND_MENU_OPEN_KEY = null;
+  document.querySelectorAll(".device-command-control.is-open").forEach((el) => {
+    el.classList.remove("is-open");
+  });
+}
+
+function ensureDeviceCommandModals() {
+  if (document.getElementById("deviceCommandAuthModal")) return;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <div id="deviceCommandAuthModal" class="device-command-modal hidden">
+      <div class="device-command-modal-card">
+        <h3>Autenticação</h3>
+        <p id="deviceCommandAuthLabel">Confirme usuário e senha</p>
+        <input id="deviceCommandUser" type="text" placeholder="Usuário" />
+        <input id="deviceCommandPass" type="password" placeholder="Senha" />
+        <div class="device-command-modal-actions">
+          <button id="deviceCommandCancelBtn" type="button">Cancelar</button>
+          <button id="deviceCommandConfirmBtn" type="button">Confirmar</button>
+        </div>
+      </div>
+    </div>
+    <div id="deviceCommandRunModal" class="device-command-modal hidden">
+      <div class="device-command-modal-card">
+        <h3 id="deviceCommandRunTitle">Executando comando</h3>
+        <p id="deviceCommandRunSub">Processando...</p>
+        <div class="device-command-progress-wrap"><div id="deviceCommandProgressBar"></div></div>
+        <div id="deviceCommandProgressPct">0%</div>
+        <p id="deviceCommandRunResult"></p>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+}
+
+function openCommandAuthFlow({ deviceType, deviceId, action }) {
+  ensureDeviceCommandModals();
+  const auth = document.getElementById("deviceCommandAuthModal");
+  const run = document.getElementById("deviceCommandRunModal");
+  const authLabel = document.getElementById("deviceCommandAuthLabel");
+  const cancelBtn = document.getElementById("deviceCommandCancelBtn");
+  const confirmBtn = document.getElementById("deviceCommandConfirmBtn");
+  const runTitle = document.getElementById("deviceCommandRunTitle");
+  const runSub = document.getElementById("deviceCommandRunSub");
+  const runResult = document.getElementById("deviceCommandRunResult");
+  const bar = document.getElementById("deviceCommandProgressBar");
+  const pct = document.getElementById("deviceCommandProgressPct");
+  if (!auth || !run || !confirmBtn || !cancelBtn || !bar || !pct || !runSub || !runTitle || !runResult) return;
+
+  authLabel.textContent = `${deviceType} ${deviceId} • ação ${action.toUpperCase()}`;
+  auth.classList.remove("hidden");
+
+  const closeAuth = () => auth.classList.add("hidden");
+  cancelBtn.onclick = closeAuth;
+
+  confirmBtn.onclick = () => {
+    closeAuth();
+    run.classList.remove("hidden");
+    runTitle.textContent = `${deviceType} ${deviceId}`;
+    runSub.textContent = action === "reset" ? "Resetando equipamento..." : `Executando ${action.toUpperCase()}...`;
+    runResult.textContent = "";
+    bar.style.width = "0%";
+    pct.textContent = "0%";
+
+    const previousState = getDevicePersistentState(deviceType, deviceId, "off");
+    const totalMs = 120000;
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      const progress = Math.min(100, Math.round((elapsed / totalMs) * 100));
+      bar.style.width = `${progress}%`;
+      pct.textContent = `${progress}%`;
+      if (progress >= 100) {
+        clearInterval(tick);
+        const success = true;
+        if (!success) {
+          runResult.textContent = "Falha ao executar comando.";
+          setTimeout(() => run.classList.add("hidden"), 1800);
+          return;
+        }
+
+        if (action === "on" || action === "off") {
+          setDevicePersistentState(deviceType, deviceId, action);
+          applyDeviceVisualState(deviceType, deviceId, action);
+          runResult.textContent = `Comando ${action.toUpperCase()} executado com sucesso.`;
+        } else {
+          runResult.textContent = "Reset realizado com sucesso.";
+          document.querySelectorAll(`.device-command-control[data-device-key="${getDeviceKey(deviceType, deviceId)}"]`).forEach((el) => {
+            el.classList.add("is-reset-flash");
+          });
+          setTimeout(() => {
+            document.querySelectorAll(`.device-command-control[data-device-key="${getDeviceKey(deviceType, deviceId)}"]`).forEach((el) => {
+              el.classList.remove("is-reset-flash");
+            });
+            applyDeviceVisualState(deviceType, deviceId, previousState);
+          }, 1500);
+        }
+        setTimeout(() => run.classList.add("hidden"), 2200);
+      }
+    }, 1000);
+  };
+}
+
+function wireDeviceCommandButtons(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll(".device-command-trigger").forEach((btn) => {
+    if (btn.dataset.wiredCmdTrigger === "true") return;
+    btn.dataset.wiredCmdTrigger = "true";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = btn.dataset.deviceKey || "";
+      if (!key) return;
+      const control = document.querySelector(`.device-command-control[data-device-key="${key}"]`);
+      if (!control) return;
+      const shouldOpen = DEVICE_COMMAND_MENU_OPEN_KEY !== key;
+      closeAllDeviceCommandMenus();
+      if (shouldOpen) {
+        control.classList.add("is-open");
+        DEVICE_COMMAND_MENU_OPEN_KEY = key;
+      }
+    });
+  });
+
+  rootEl.querySelectorAll(".device-command-option").forEach((btn) => {
+    if (btn.dataset.wiredCmdOption === "true") return;
+    btn.dataset.wiredCmdOption = "true";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const deviceType = btn.dataset.deviceType || "";
+      const deviceId = btn.dataset.deviceId || "";
+      const action = btn.dataset.action || "";
+      closeAllDeviceCommandMenus();
+      console.log("[device-command]", { deviceType, deviceId, action });
+      openCommandAuthFlow({ deviceType, deviceId, action });
+    });
+  });
+}
+
+function renderAlarmMenuButton() {
+  const btn = document.getElementById("plantAlarmMenuButton");
+  const count = document.getElementById("plantAlarmMenuCount");
+  const panel = document.getElementById("plantAlarmMenuPanel");
+  const empty = document.getElementById("plantAlarmMenuEmptyState");
+  const icon = btn?.querySelector(".plant-alarm-menu-icon");
+
+  if (!btn) return;
+
+  const hasAlarms = hasActivePlantAlarms();
+
+  btn.classList.toggle("is-clean", !hasAlarms);
+  btn.classList.toggle("is-alert", hasAlarms);
+  btn.setAttribute("aria-expanded", PLANT_ALARMS_MENU_OPEN ? "true" : "false");
+
+  if (count) {
+    count.textContent = String(ACTIVE_ALARMS.length || 0);
+    count.style.display = hasAlarms ? "inline-flex" : "none";
+  }
+
+  if (icon) {
+    icon.innerHTML = hasAlarms
+      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`
+      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+  }
+
+  if (panel) {
+    panel.classList.toggle("open", PLANT_ALARMS_MENU_OPEN);
+  }
+
+  if (empty) {
+    empty.style.display = hasAlarms ? "none" : "";
+  }
+}
+
+function setPlantAlarmMenuOpen(open) {
+  PLANT_ALARMS_MENU_OPEN = !!open;
+  renderAlarmMenuButton();
+}
+
+function setupPlantAlarmMenu() {
+  const btn = document.getElementById("plantAlarmMenuButton");
+  const panel = document.getElementById("plantAlarmMenuPanel");
+  const closeBtn = document.getElementById("plantAlarmMenuClose");
+
+  if (!btn || !panel) return;
+  if (btn.dataset.wiredAlarmMenu === "true") return;
+  btn.dataset.wiredAlarmMenu = "true";
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setPlantAlarmMenuOpen(!PLANT_ALARMS_MENU_OPEN);
+  });
+
+  panel.addEventListener("click", (e) => {
+    e.stopPropagation();
+  });
+
+  closeBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setPlantAlarmMenuOpen(false);
+  });
+
+  document.addEventListener("click", () => {
+    if (PLANT_ALARMS_MENU_OPEN) setPlantAlarmMenuOpen(false);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && PLANT_ALARMS_MENU_OPEN) {
+      setPlantAlarmMenuOpen(false);
+    }
+  });
+}
+
+function sortPlantAlarmsDesc(alarms) {
+  return (Array.isArray(alarms) ? alarms : []).slice().sort((a, b) => {
+    const ta = Date.parse(a?.started_at ?? a?.timestamp ?? "") || 0;
+    const tb = Date.parse(b?.started_at ?? b?.timestamp ?? "") || 0;
+    return tb - ta;
+  });
 }
 
 function getUserContext() {
@@ -432,8 +827,78 @@ async function fetchActiveAlarms(plantId) {
   const res = await fetch(`${API_BASE}/plants/${plantId}/alarms/active`, {
     headers: buildAuthHeaders()
   });
-  const data = await res.json();
-  return normalizeApiBody(data);
+  const data = normalizeApiBody(await res.json());
+  const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+  const normalized = items.map((alarm) => ({
+    ...alarm,
+    state: normalizeAlarmState(alarm?.state ?? alarm?.alarm_state ?? alarm?.status),
+    severity: normalizeAlarmSeverity(alarm?.severity ?? alarm?.alarm_severity ?? alarm?.level)
+  }));
+  return sortPlantAlarmsDesc(
+    dedupePlantAlarms(
+      normalized.filter((alarm) => alarm.state === "ACTIVE" && alarm.acknowledged !== true)
+    )
+  );
+}
+
+async function acknowledgePlantAlarm(alarm) {
+  const alarmId = alarm?.alarm_id ?? alarm?.id ?? alarm?.event_row_id;
+  if (!alarmId) throw new Error("alarm_id ausente para ACK");
+
+  const user = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user")) || {};
+    } catch {
+      return {};
+    }
+  })();
+
+  const response = await fetch(`${API_BASE}/alarms/${alarmId}/ack`, {
+    method: "POST",
+    headers: buildAuthHeaders(),
+    body: JSON.stringify({
+      event_row_id: alarm?.event_row_id ?? null,
+      power_plant_id: alarm?.power_plant_id ?? alarm?.plant_id ?? PLANT_ID ?? null,
+      acknowledged_by: user?.name ?? user?.email ?? user?.username ?? "frontend",
+      acknowledgment_note: "Reconhecido via operação SCADA"
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(`Falha ao reconhecer alarme (${response.status}): ${errorText}`);
+  }
+
+  return true;
+}
+
+async function fetchTrackersRealtime(plantId) {
+  const res = await fetch(`${API_BASE}/plants/${plantId}/trackers/realtime`, {
+    headers: buildAuthHeaders()
+  });
+
+  if (res.status === 404) {
+    console.warn("[trackers/realtime] 404");
+    return { items: [], plant_center: null, plant_bounds: null };
+  }
+
+  if (!res.ok) {
+    console.warn(`[trackers/realtime] HTTP ${res.status}`);
+    return [];
+  }
+
+  const raw = await res.json();
+  const data = normalizeApiBody(raw);
+  if (Array.isArray(data)) return { items: data, plant_center: null, plant_bounds: null };
+  const items =
+    Array.isArray(data?.items) ? data.items :
+    Array.isArray(data?.trackers) ? data.trackers :
+    Array.isArray(data?.item) ? data.item : [];
+  return {
+    items,
+    plant_center: data?.plant_center ?? null,
+    plant_bounds: data?.plant_bounds ?? null
+  };
 }
 
 async function fetchDailyEnergy(plantId) {
@@ -473,9 +938,58 @@ async function safeFetchRelayIfSupported(plantId) {
   return payload?.item ?? null;
 }
 
+async function safeFetchMultimeterIfSupported(plantId) {
+  if (MULTIMETER_SUPPORTED === false) return null;
+
+  const url = `${API_BASE}/plants/${plantId}/multimeter/realtime`;
+  const res = await fetch(url, { headers: buildAuthHeaders() });
+
+  if (res.status === 404) {
+    MULTIMETER_SUPPORTED = false;
+    return null;
+  }
+
+  if (!res.ok) {
+    console.warn(`[multimeter/realtime] HTTP ${res.status} em ${url}`);
+    return null;
+  }
+
+  MULTIMETER_SUPPORTED = true;
+  const payload = normalizeApiBody(await res.json());
+  return payload?.item ?? payload ?? null;
+}
+
 function setRelaySectionVisible(visible) {
   const relaySection = document.getElementById("relaySection");
   if (relaySection) relaySection.style.display = visible ? "" : "none";
+}
+
+function setMultimeterSectionVisible(visible) {
+  const section = document.getElementById("multimeterSection");
+  if (section) section.style.display = visible ? "" : "none";
+}
+
+function setTrackersSectionVisible(visible) {
+  const section = document.getElementById("trackersSection");
+  const btn = document.getElementById("trackersMenuToggle");
+  if (!section) return;
+  section.classList.toggle("trackers-hidden", !visible);
+  if (btn) {
+    btn.classList.toggle("on", visible);
+    btn.setAttribute("aria-expanded", visible ? "true" : "false");
+  }
+}
+
+function setTrackersCollapsed(collapsed) {
+  const section = document.getElementById("trackersSection");
+  const tabToggleEl = document.getElementById("trackersTabToggle");
+  if (!section) return;
+
+  section.classList.toggle("is-collapsed", !!collapsed);
+
+  if (tabToggleEl) {
+    tabToggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  }
 }
 
 // ✅ realtime por inversor
@@ -486,41 +1000,19 @@ async function fetchInvertersRealtime(plantId) {
   ];
 
   for (const url of candidates) {
-    try {
-      const res = await fetch(url, { headers: buildAuthHeaders() });
-      if (!res.ok) {
-        if (res.status === 404) continue;
-        console.warn(`[inverters realtime] HTTP ${res.status} em ${url}`);
-        continue;
-      }
-
+    const res = await fetch(url, { headers: buildAuthHeaders() });
+    if (res.ok) {
       const data = normalizeApiBody(await res.json());
-      const items = Array.isArray(data) ? data : (data?.items || []);
-
-      // ✅ só atualiza cache se vier algo minimamente válido
-      if (Array.isArray(items) && items.length > 0) {
-        INVERTERS_CACHE = { items, ok_ms: Date.now() };
-        return items;
-      }
-
-      // se vier vazio, NÃO derruba. tenta próximo endpoint.
-    } catch (e) {
-      console.warn(`[inverters realtime] fetch fail ${url}`, e);
+      return Array.isArray(data) ? data : (data?.items || []);
     }
+
+    if (res.status === 404) continue;
+    console.warn(`[inverters realtime] HTTP ${res.status} em ${url}`);
   }
 
-  // ✅ fallback no cache (igual weather)
-  const canUseCache =
-    Array.isArray(INVERTERS_CACHE.items) &&
-    INVERTERS_CACHE.items.length > 0 &&
-    (Date.now() - INVERTERS_CACHE.ok_ms) <= INVERTERS_CACHE_TTL_MS;
-
-  if (canUseCache) return INVERTERS_CACHE.items;
-
-  // último caso: mantém vazio mesmo
+  console.warn("[inverters realtime] nenhum endpoint disponível -> mantendo estático");
   return [];
 }
-
 
 // config (enabled/has_data)
 async function fetchInverterStrings(plantId, inverterRealId) {
@@ -718,9 +1210,6 @@ function ensureInverterRowsFromRealtime(inverters) {
   const preservedOpenId = OPEN_INVERTER_REAL_ID;
   const uniq = dedupInvertersById(Array.isArray(inverters) ? inverters : []);
 
-  // ✅ se vier vazio, não limpa o DOM (evita sumir/piscar)
-  if (uniq.length === 0 && container.children.length > 0) return;
-
   uniq.sort((a, b) => {
     const an = String(getInverterDisplayName(a, 0) || "");
     const bn = String(getInverterDisplayName(b, 0) || "");
@@ -756,7 +1245,15 @@ function ensureInverterRowsFromRealtime(inverters) {
     row.innerHTML = `
       <span class="status-dot"></span>
       <span class="inverter-name">${title}<i class="arrow fa-solid fa-chevron-down"></i></span>
-      <span>—</span><span>—</span><span>—</span><span>—</span><span>—</span><span>—</span>
+      <span>—</span>
+      <span>—</span>
+      <span>—</span>
+      <span>—</span>
+      <span>—</span>
+      <span>—</span>
+      <span class="device-command-cell">
+        ${renderDeviceCommandControl("inverter", realId, isOnlineByFreshness(inv) && !isZeroSnapshot(inv) ? "on" : "off")}
+      </span>
     `;
 
     const panel = document.createElement("div");
@@ -819,6 +1316,9 @@ function ensureInverterRowsFromRealtime(inverters) {
 
     container.appendChild(row);
     container.appendChild(panel);
+    wireDeviceCommandButtons(row);
+    const inferredState = isOnlineByFreshness(inv) && !isZeroSnapshot(inv) ? "on" : "off";
+    applyDeviceVisualState("inverter", String(realId), getDevicePersistentState("inverter", String(realId), inferredState));
   });
 
   if (preservedOpenId != null) {
@@ -867,36 +1367,22 @@ function renderWeather(data) {
   const elModule = document.getElementById("weatherModuleTemp");
 
   const hasWeather = !!(data && typeof data === "object");
-  const staleIncoming = !hasWeather || isWeatherStale(data);
 
-  // ✅ se vier bom, atualiza cache
-  if (!staleIncoming) {
-    WEATHER_CACHE = { data, ok_ms: Date.now() };
+  if (elIrr) {
+    const value = hasWeather ? (data.irradiance_poa_wm2 ?? data.irradiance_ghi_wm2) : null;
+    elIrr.textContent = value != null ? `${Number(value).toFixed(0)} W/m²` : "—";
   }
 
-  // ✅ se vier ruim, tenta usar cache (até 30 min)
-  const canUseCache =
-    WEATHER_CACHE.data &&
-    (Date.now() - WEATHER_CACHE.ok_ms) <= WEATHER_STALE_AFTER_MS;
-
-  const src = (!staleIncoming ? data : (canUseCache ? WEATHER_CACHE.data : null));
-
-  if (!src) {
-    if (elIrr) elIrr.textContent = "—";
-    if (elAir) elAir.textContent = "—";
-    if (elModule) elModule.textContent = "—";
-    return;
+  if (elAir) {
+    const value = hasWeather ? data.air_temperature_c : null;
+    elAir.textContent = value != null ? `${Number(value).toFixed(1)} °C` : "—";
   }
 
-  const irr = toNumOrNull(src.irradiance_poa_wm2) ?? toNumOrNull(src.irradiance_ghi_wm2);
-  const air = toNumOrNull(src.air_temperature_c);
-  const module = toNumOrNull(src.module_temperature_c);
-
-  if (elIrr) elIrr.textContent = irr != null ? `${irr.toFixed(0)} W/m²` : "—";
-  if (elAir) elAir.textContent = air != null ? `${air.toFixed(1)} °C` : "—";
-  if (elModule) elModule.textContent = module != null ? `${module.toFixed(1)} °C` : "—";
+  if (elModule) {
+    const value = hasWeather ? data.module_temperature_c : null;
+    elModule.textContent = value != null ? `${Number(value).toFixed(1)} °C` : "—";
+  }
 }
-
 
 // ======================================================
 // RENDER — ALARMES ATIVOS
@@ -907,33 +1393,68 @@ function renderAlarms(alarms) {
 
   const sublineEl = document.getElementById("plantSubline");
   container.innerHTML = "";
+  const filtered = sortPlantAlarmsDesc(
+    dedupePlantAlarms(
+      (Array.isArray(alarms) ? alarms : []).filter(
+        (alarm) => normalizeAlarmState(alarm?.state ?? alarm?.alarm_state ?? alarm?.status) === "ACTIVE" && alarm?.acknowledged !== true
+      )
+    )
+  );
 
-  if (!alarms || !alarms.length) {
-    container.textContent = "Nenhum alarme ativo";
+  if (!filtered.length) {
+    container.innerHTML = "";
     if (sublineEl) {
       sublineEl.textContent = "Nenhum alarme ativo";
       sublineEl.classList.remove("plant-subline--alarm");
     }
+    renderAlarmMenuButton();
     return;
   }
 
   if (sublineEl) {
-    sublineEl.textContent = `${alarms.length} alarme(s) ativo(s)`;
+    sublineEl.textContent = `${filtered.length} alarme(s) ativo(s)`;
     sublineEl.classList.add("plant-subline--alarm");
   }
 
-  alarms.forEach(a => {
+  filtered.forEach(a => {
     const row = document.createElement("div");
-    row.className = `alarm-row ${a.severity || ""}`.trim();
+    row.className = `alarm-row ${normalizeAlarmSeverity(a.severity) || ""}`.trim();
+    const deviceType =
+      a.device_type ??
+      a.device_type_name ??
+      a.event_source ??
+      "—";
+    const when =
+      a.started_at ??
+      a.timestamp ??
+      null;
 
     row.innerHTML = `
-      <span>${a.device_type || "—"} • ${a.device_name || "—"}</span>
-      <span>${a.event_name || (a.event_code != null ? `Evento ${a.event_code}` : "—")}</span>
-      <span>${a.started_at ? new Date(a.started_at).toLocaleString() : "—"}</span>
+      <span class="alarm-device">${deviceType} • ${a.device_name || "—"}</span>
+      <span class="alarm-desc">${a.event_name || (a.event_code != null ? `Evento ${a.event_code}` : "—")}</span>
+      <span class="alarm-time">${when ? new Date(when).toLocaleString("pt-BR") : "—"}</span>
     `;
+    row.title = "Duplo clique para reconhecer alarme";
+    row.addEventListener("dblclick", async () => {
+      row.style.opacity = "0.6";
+      try {
+        await acknowledgePlantAlarm(a);
+        ACTIVE_ALARMS = ACTIVE_ALARMS.filter((alarm) => String(alarm?.event_row_id ?? alarm?.alarm_id ?? alarm?.id) !== String(a?.event_row_id ?? a?.alarm_id ?? a?.id));
+        renderAlarms(ACTIVE_ALARMS);
+        renderAlarmMenuButton();
+        if (!ACTIVE_ALARMS.length) {
+          setPlantAlarmMenuOpen(false);
+        }
+      } catch (err) {
+        row.style.opacity = "";
+        console.error("[alarms][ack] erro", err);
+        alert("Não foi possível reconhecer o alarme. Tente novamente.");
+      }
+    });
 
     container.appendChild(row);
   });
+  renderAlarmMenuButton();
 }
 
 // ======================================================
@@ -944,8 +1465,11 @@ function ensureRelayUiScaffold() {
   const relayRow = document.getElementById("relayRow");
   if (!relayRow) return null;
 
-  const nameEl = relayRow.querySelector(".device-name");
+  const nameEl = relayRow.querySelector(".relay-left");
   const dotEl = document.getElementById("relayDot") || relayRow.querySelector(".status-dot");
+  const commandBarWrap = document.getElementById("relayCommandBarWrap");
+  const legacyRight = relayRow.querySelector(".relay-right");
+  const detailsPanel = document.getElementById("relayDetailsPanel");
 
   // Remove “extras antigos” visualmente (não remove do DOM, só não usa)
   const oldOnline = document.getElementById("relayOnlineText");
@@ -955,6 +1479,7 @@ function ensureRelayUiScaffold() {
   if (oldOnline) oldOnline.textContent = "—";
   if (oldAvail) oldAvail.textContent = "";
   if (oldLast) oldLast.textContent = "";
+  if (legacyRight) legacyRight.style.display = "none";
 
   // cria badge ONLINE/OFFLINE ao lado do nome
   let badgeOnline = relayRow.querySelector("#relayOnlineBadge");
@@ -978,87 +1503,292 @@ function ensureRelayUiScaffold() {
     if (nameEl) nameEl.appendChild(badgeOnline);
   }
 
-  // cria badge ON/OFF do relé
-  let badgeState = relayRow.querySelector("#relayStateBadge");
-  if (!badgeState) {
-    badgeState = document.createElement("span");
-    badgeState.id = "relayStateBadge";
-    badgeState.style.display = "inline-flex";
-    badgeState.style.alignItems = "center";
-    badgeState.style.justifyContent = "center";
-    badgeState.style.padding = "6px 10px";
-    badgeState.style.borderRadius = "999px";
-    badgeState.style.fontSize = "11px";
-    badgeState.style.letterSpacing = "0.06em";
-    badgeState.style.textTransform = "uppercase";
-    badgeState.style.border = "1px solid rgba(255,255,255,0.10)";
-    badgeState.style.background = "rgba(255,255,255,0.04)";
-    badgeState.style.color = "rgba(233,255,243,0.88)";
-    badgeState.style.marginLeft = "10px";
-    badgeState.style.whiteSpace = "nowrap";
+  const legacyStateEl = relayRow.querySelector("#relayStateBadge");
+  if (legacyStateEl) legacyStateEl.remove();
 
-    if (nameEl) nameEl.appendChild(badgeState);
+  if (commandBarWrap && commandBarWrap.parentElement !== relayRow) {
+    relayRow.appendChild(commandBarWrap);
   }
 
-  // cria o kW na direita (no lugar “—” que você quer)
-  let powerEl = relayRow.querySelector("#relayPowerText");
-  if (!powerEl) {
-    powerEl = document.createElement("span");
-    powerEl.id = "relayPowerText";
-    powerEl.style.justifySelf = "end";
-    powerEl.style.textAlign = "right";
-    powerEl.style.whiteSpace = "nowrap";
-    powerEl.style.fontWeight = "700";
-    powerEl.style.color = "rgba(233,255,243,0.92)";
-    powerEl.style.opacity = "0.95";
-    powerEl.style.textShadow = "0 0 12px rgba(57,229,140,0.10)";
+  relayRow.classList.add("relay-row--table");
+  relayRow.style.gridTemplateColumns = "14px minmax(220px,1.25fr) repeat(3, minmax(140px,0.92fr)) minmax(180px,1fr) max-content";
 
-    // garante grid com 3 colunas (dot | nome | direita)
-    relayRow.style.gridTemplateColumns = "14px 1fr auto";
-    relayRow.appendChild(powerEl);
+  let expandIcon = relayRow.querySelector("#relayExpandIcon");
+  if (!expandIcon) {
+    expandIcon = document.createElement("i");
+    expandIcon.id = "relayExpandIcon";
+    expandIcon.className = "fa-solid fa-chevron-down relay-expand-icon";
+    if (nameEl) nameEl.appendChild(expandIcon);
   }
 
-  // cria o timestamp discretinho abaixo do nome (opcional)
-  let tsEl = relayRow.querySelector("#relayTsText");
-  if (!tsEl) {
-    tsEl = document.createElement("div");
-    tsEl.id = "relayTsText";
-    tsEl.style.marginTop = "4px";
-    tsEl.style.fontSize = "12px";
-    tsEl.style.opacity = "0.75";
-    tsEl.style.color = "rgba(154,219,184,0.85)";
+  const ensureMetricCell = (id, gridColumn) => {
+    let el = relayRow.querySelector(`#${id}`);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = id;
+      el.className = "device-metric-cell";
+      relayRow.appendChild(el);
+    }
+    el.style.gridColumn = String(gridColumn);
+    return el;
+  };
 
-    // coloca dentro do device-name (abaixo do texto)
-    if (nameEl) nameEl.appendChild(tsEl);
+  const activePowerEl = ensureMetricCell("relayActivePowerValue", 3);
+  const apparentPowerEl = ensureMetricCell("relayApparentPowerValue", 4);
+  const reactivePowerEl = ensureMetricCell("relayReactivePowerValue", 5);
+  const tsEl = ensureMetricCell("relayTsText", 6);
+  tsEl.classList.add("relay-timestamp-cell");
+
+  if (commandBarWrap) {
+    commandBarWrap.style.gridColumn = "7";
+    commandBarWrap.style.justifySelf = "end";
   }
 
-  return { relayRow, nameEl, dotEl, badgeOnline, badgeState, powerEl, tsEl };
+  if (detailsPanel) {
+    detailsPanel.style.maxHeight = detailsPanel.classList.contains("open") ? "1200px" : "0px";
+  }
+
+  if (!relayRow.dataset.toggleBound) {
+    relayRow.dataset.toggleBound = "true";
+    relayRow.addEventListener("click", (event) => {
+      if (
+        event.target.closest("#relayCommandBarWrap") ||
+        event.target.closest(".device-command-control") ||
+        event.target.closest(".device-command-popover")
+      ) return;
+
+      const nextOpen = !detailsPanel?.classList.contains("open");
+      relayRow.classList.toggle("open", nextOpen);
+      detailsPanel?.classList.toggle("open", nextOpen);
+      if (detailsPanel) {
+        detailsPanel.style.maxHeight = nextOpen ? "1200px" : "0px";
+      }
+    });
+  }
+
+  return {
+    relayRow,
+    nameEl,
+    dotEl,
+    badgeOnline,
+    activePowerEl,
+    apparentPowerEl,
+    reactivePowerEl,
+    tsEl,
+    detailsPanel
+  };
+}
+
+function ensureDeviceMiniHeaders() {
+  const relayHeader = document.querySelector("#relaySection .device-mini-header");
+  const multimeterHeader = document.querySelector("#multimeterSection .device-mini-header");
+
+  const applyHeader = (headerEl) => {
+    if (!headerEl) return;
+    const cols = headerEl.querySelectorAll("span");
+    if (cols[1]) cols[1].textContent = "";
+    if (cols[2]) cols[2].textContent = "ACTIVE POWER";
+    if (cols[3]) cols[3].textContent = "APPARENT POWER";
+    if (cols[4]) cols[4].textContent = "REACTIVE POWER";
+    if (cols[5]) cols[5].textContent = "ÚLTIMA LEITURA";
+    if (cols[6]) cols[6].textContent = "COMANDOS";
+  };
+
+  applyHeader(relayHeader);
+  applyHeader(multimeterHeader);
+}
+
+function pickDeviceMetricValue(primary, secondary, keys) {
+  for (const key of keys) {
+    const secondaryValue = secondary?.[key];
+    if (secondaryValue !== null && secondaryValue !== undefined && secondaryValue !== "") return secondaryValue;
+    const primaryValue = primary?.[key];
+    if (primaryValue !== null && primaryValue !== undefined && primaryValue !== "") return primaryValue;
+  }
+  return null;
+}
+
+function formatMetricValue(value, unit, digits = 1) {
+  const n = Number(typeof value === "string" ? value.replace(",", ".") : value);
+  if (!Number.isFinite(n)) return "—";
+  return `${n.toFixed(digits)} ${unit}`;
+}
+
+function renderRelayDetailsPanel(relayItem) {
+  const panel = document.getElementById("relayDetailsPanel");
+  if (!panel) return;
+
+  if (!relayItem) {
+    panel.innerHTML = `<div class="relay-details-empty">Sem dados detalhados do relé.</div>`;
+    return;
+  }
+
+  const analog = relayItem?.analog ?? {};
+  const metric = (keys, unit, digits = 1) => formatMetricValue(pickDeviceMetricValue(relayItem, analog, keys), unit, digits);
+  const raw = (keys) => {
+    const value = pickDeviceMetricValue(relayItem, analog, keys);
+    return value === null || value === undefined || value === "" ? "—" : String(value);
+  };
+
+  const electricalItems = [
+    ["V AB", metric(["voltage_ab_v", "voltage_ab", "line_voltage_ab_v", "line_voltage_ab", "vab"], "V", 1)],
+    ["V BC", metric(["voltage_bc_v", "voltage_bc", "line_voltage_bc_v", "line_voltage_bc", "vbc"], "V", 1)],
+    ["V CA", metric(["voltage_ca_v", "voltage_ca", "line_voltage_ca_v", "line_voltage_ca", "vca"], "V", 1)],
+    ["Ia", metric(["current_a_a", "current_a", "ia"], "A", 1)],
+    ["Ib", metric(["current_b_a", "current_b", "ib"], "A", 1)],
+    ["Ic", metric(["current_c_a", "current_c", "ic"], "A", 1)],
+    ["Status Relay", raw(["status_relay"])]
+  ];
+
+  const flagItems = [
+    ["46", raw(["flag_46"])], ["50", raw(["flag_50"])], ["51-1", raw(["flag_51_1"])],
+    ["50N", raw(["flag_50N"])], ["51GS", raw(["flag_51GS"])], ["51N", raw(["flag_51N"])],
+    ["27", raw(["flag_27"])], ["59", raw(["flag_59"])], ["47", raw(["flag_47"])],
+    ["81 O", raw(["flag_81_O"])], ["81 U", raw(["flag_81_U"])], ["51-2", raw(["flag_51_2"])]
+  ];
+
+  panel.innerHTML = `
+    <div class="relay-details-card">
+      <div class="relay-details-title">Leituras elétricas</div>
+      <div class="relay-details-grid">
+        ${electricalItems.map(([label, value]) => `
+          <div class="relay-detail-chip">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="relay-details-card">
+      <div class="relay-details-title">Proteções</div>
+      <div class="relay-flag-grid">
+        ${flagItems.map(([label, value]) => `
+          <div class="relay-flag-pill ${String(value) === "1" ? "is-on" : "is-off"}">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function ensureMultimeterUiScaffold() {
+  const row = document.getElementById("multimeterRow");
+  if (!row) return null;
+
+  const onlineBadge = document.getElementById("multimeterOnlineBadge");
+  const commandBarWrap = document.getElementById("multimeterCommandBarWrap");
+  const legacyRight = document.getElementById("multimeterRight");
+  const leftBlock =
+    row?.querySelector(".relay-left") ||
+    row?.querySelector(".multimeter-left") ||
+    row?.children?.[1] ||
+    null;
+
+  if (legacyRight) legacyRight.style.display = "none";
+
+  if (leftBlock && onlineBadge && onlineBadge.parentElement !== leftBlock) {
+    leftBlock.appendChild(onlineBadge);
+  }
+  if (commandBarWrap && commandBarWrap.parentElement !== row) {
+    row.appendChild(commandBarWrap);
+  }
+
+  row.classList.add("relay-row--table");
+  row.style.gridTemplateColumns = "14px minmax(220px,1.25fr) repeat(3, minmax(140px,0.92fr)) minmax(180px,1fr) max-content";
+
+  const ensureMetricCell = (id, gridColumn) => {
+    let el = row.querySelector(`#${id}`);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = id;
+      el.className = "device-metric-cell";
+      row.appendChild(el);
+    }
+    el.style.gridColumn = String(gridColumn);
+    return el;
+  };
+
+  const activePowerEl = ensureMetricCell("multimeterActivePowerValue", 3);
+  const apparentPowerEl = ensureMetricCell("multimeterApparentPowerValue", 4);
+  const reactivePowerEl = ensureMetricCell("multimeterReactivePowerValue", 5);
+  const tsEl = ensureMetricCell("multimeterLastReadingValue", 6);
+  tsEl.classList.add("relay-timestamp-cell");
+
+  if (commandBarWrap) {
+    commandBarWrap.style.gridColumn = "7";
+    commandBarWrap.style.justifySelf = "end";
+  }
+
+  return {
+    row,
+    onlineBadge,
+    activePowerEl,
+    apparentPowerEl,
+    reactivePowerEl,
+    tsEl
+  };
+}
+
+function renderRelayCommandBar(deviceId, currentState = "off") {
+  const wrap = document.getElementById("relayCommandBarWrap");
+  if (!wrap) return;
+  const safeId = String(deviceId ?? "relay");
+  const normalizedState = currentState === "on" ? "on" : "off";
+  setDevicePersistentState("relay", safeId, normalizedState);
+  wrap.innerHTML = renderDeviceCommandControl("relay", safeId, normalizedState);
+  wireDeviceCommandButtons(wrap);
+  applyDeviceVisualState("relay", safeId, normalizedState);
+}
+
+function renderMultimeterCommandBar(deviceId) {
+  const wrap = document.getElementById("multimeterCommandBarWrap");
+  if (!wrap) return;
+  const safeId = String(deviceId ?? "multimeter");
+  wrap.innerHTML = renderDeviceCommandControl("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
+  wireDeviceCommandButtons(wrap);
+  applyDeviceVisualState("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
 }
 
 function renderRelayCard(relayItem) {
   const ui = ensureRelayUiScaffold();
   if (!ui) return;
 
-  const { relayRow, badgeOnline, badgeState, powerEl, tsEl } = ui;
+  const { relayRow, badgeOnline, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl, detailsPanel } = ui;
+  ensureDeviceMiniHeaders();
 
   // sem dados ainda
   if (!relayItem) {
-    relayRow.classList.remove("online", "offline");
-    badgeOnline.textContent = "—";
-    badgeState.textContent = "—";
-    powerEl.textContent = "— kW";
-    tsEl.textContent = "Última atualização: —";
+    relayRow.classList.remove("online", "offline", "open");
+    relayRow.classList.add("offline");
+    badgeOnline.textContent = "OFFLINE";
+    activePowerEl.textContent = "—";
+    apparentPowerEl.textContent = "—";
+    reactivePowerEl.textContent = "—";
+    tsEl.textContent = "—";
+    if (detailsPanel) {
+      detailsPanel.classList.remove("open");
+      detailsPanel.style.maxHeight = "0px";
+    }
+    renderRelayDetailsPanel(null);
+    renderRelayCommandBar("relay", "off");
     return;
   }
 
-  const isOnline = relayItem.is_online === true;
-  const relayOn = relayItem.relay_on; // true/false/null
-  const lastUpdate = relayItem.last_update ?? null;
-
-  const kw = relayItem?.analog?.active_power_kw;
-  const kwText = (kw === null || kw === undefined || Number.isNaN(Number(kw)))
-    ? "— kW"
-    : `${numFixedOrDash(kw, 1)} kW`;
+  const analog = relayItem?.analog ?? {};
+  const isOnline = relayOnlineFromPayload(relayItem);
+  const relayState = relayStateFromPayload(relayItem);
+  const activePower = pickDeviceMetricValue(relayItem, analog, ["active_power_kw", "power_kw", "active_power"]);
+  const apparentPower = pickDeviceMetricValue(relayItem, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
+  const reactivePower = pickDeviceMetricValue(relayItem, analog, ["reactive_power_kvar", "power_reactive_kvar", "reactive_power", "reactive_power_var"]);
+  const lastUpdate =
+    relayItem?.last_update ??
+    relayItem?.timestamp ??
+    relayItem?.analog?.timestamp ??
+    relayItem?.event?.timestamp ??
+    null;
+  const deviceId = relayItem?.device_id ?? relayItem?.relay_id ?? "relay";
 
   // classes do row (para a bolinha)
   relayRow.classList.remove("online", "offline");
@@ -1070,35 +1800,61 @@ function renderRelayCard(relayItem) {
   badgeOnline.style.background = isOnline ? "rgba(57,229,140,0.08)" : "rgba(255,92,92,0.08)";
   badgeOnline.style.color = isOnline ? "rgba(233,255,243,0.92)" : "rgba(255,255,255,0.92)";
 
-  // badge ON/OFF
-  let stateText = "—";
-  if (relayOn === true) stateText = "ON";
-  else if (relayOn === false) stateText = "OFF";
+  activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
+  apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
+  reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
+  tsEl.textContent = fmtDatePtBR(lastUpdate);
 
-  badgeState.textContent = stateText;
+  renderRelayDetailsPanel(relayItem);
+  if (detailsPanel?.classList.contains("open")) {
+    detailsPanel.style.maxHeight = "1200px";
+  }
+  renderRelayCommandBar(deviceId, relayState);
+}
 
-  if (stateText === "ON") {
-    badgeState.style.borderColor = "rgba(57,229,140,0.30)";
-    badgeState.style.background = "rgba(57,229,140,0.10)";
-    badgeState.style.color = "rgba(233,255,243,0.95)";
-    badgeState.style.boxShadow = "0 0 18px rgba(57,229,140,0.12)";
-  } else if (stateText === "OFF") {
-    badgeState.style.borderColor = "rgba(255,92,92,0.28)";
-    badgeState.style.background = "rgba(255,92,92,0.08)";
-    badgeState.style.color = "rgba(255,255,255,0.95)";
-    badgeState.style.boxShadow = "0 0 16px rgba(255,92,92,0.10)";
-  } else {
-    badgeState.style.borderColor = "rgba(255,255,255,0.10)";
-    badgeState.style.background = "rgba(255,255,255,0.04)";
-    badgeState.style.color = "rgba(233,255,243,0.88)";
-    badgeState.style.boxShadow = "none";
+function renderMultimeterCard(item) {
+  const ui = ensureMultimeterUiScaffold();
+  if (!ui) return;
+
+  const { row, onlineBadge, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl } = ui;
+  const dot = document.getElementById("multimeterDot");
+  ensureDeviceMiniHeaders();
+
+  if (!item) {
+    row.classList.remove("online", "offline");
+    row.classList.add("offline");
+    if (onlineBadge) onlineBadge.textContent = "OFFLINE";
+    activePowerEl.textContent = "—";
+    apparentPowerEl.textContent = "—";
+    reactivePowerEl.textContent = "—";
+    tsEl.textContent = "—";
+    if (dot) dot.style.opacity = "0.65";
+    renderMultimeterCommandBar("multimeter");
+    return;
   }
 
-  // kW à direita
-  powerEl.textContent = kwText;
+  const analog = item?.analog ?? item?.data ?? {};
+  const isOnline = multimeterOnlineFromPayload(item);
+  const activePower = pickDeviceMetricValue(item, analog, ["active_power_kw", "p_kw", "power_kw", "active_power"]);
+  const apparentPower = pickDeviceMetricValue(item, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
+  const reactivePower = pickDeviceMetricValue(item, analog, ["reactive_power_kvar", "power_reactive_kvar", "reactive_power", "reactive_power_var"]);
+  const lastUpdate = item.last_update ?? item.timestamp ?? null;
 
-  // timestamp
-  tsEl.textContent = `Última atualização: ${fmtDatePtBR(lastUpdate)}`;
+  renderMultimeterCommandBar(item?.device_id ?? item?.multimeter_id ?? "multimeter");
+
+  row.classList.remove("online", "offline");
+  row.classList.add(isOnline ? "online" : "offline");
+
+  if (onlineBadge) {
+    onlineBadge.textContent = isOnline ? "ONLINE" : "OFFLINE";
+    onlineBadge.classList.remove("relay-state--on", "relay-state--off", "relay-state--unknown");
+    onlineBadge.classList.add(isOnline ? "relay-state--on" : "relay-state--off");
+  }
+
+  activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
+  apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
+  reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
+  tsEl.textContent = fmtDatePtBR(lastUpdate);
 }
 
 // ======================================================
@@ -1256,14 +2012,30 @@ function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
     const rt = rtMap.get(i);
 
     const enabled = cfg ? !!cfg.enabled : true;
+    const disabledByPref = isDisabledPref(inverterRealId, i);
+    const effective_enabled = disabledByPref ? false : !!enabled;
     const has_data = (rt?.has_data ?? cfg?.has_data ?? false) === true;
+    const exists_in_config = !!cfg;
+    const exists_in_realtime = !!rt;
+    const exists_in_api = exists_in_config || exists_in_realtime;
+
+    const monitorable = exists_in_api && effective_enabled;
 
     strings.push({
       string_index: i,
+      exists_in_config,
+      exists_in_realtime,
+      exists_in_api,
       enabled,
+      effective_enabled,
       has_data,
       current_a: rt?.current_a ?? null,
-      last_ts: rt?.last_ts ?? null
+      last_ts: rt?.last_ts ?? null,
+      monitorable,
+      alarm_active: rt?.alarm_active ?? cfg?.alarm_active ?? null,
+      alarm_state: rt?.alarm_state ?? cfg?.alarm_state ?? null,
+      alarm_reason: rt?.alarm_reason ?? cfg?.alarm_reason ?? null,
+      alarm_code: rt?.alarm_code ?? cfg?.alarm_code ?? null
     });
   }
 
@@ -1272,6 +2044,59 @@ function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
     max_strings: maxStrings,
     strings
   };
+}
+
+function isStringMonitorable(str) {
+  if (!str) return false;
+  if (str.effective_enabled === false) return false;
+  if (str.exists_in_api !== true) return false;
+  return str.monitorable === true;
+}
+
+function getInverterOnlineStateById(inverterRealId) {
+  const inv = INVERTER_EXTRAS_BY_ID.get(String(inverterRealId));
+  if (!inv) return false;
+  return isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+}
+
+function isStringInAlarm(str, inverterOnline) {
+  if (!isStringMonitorable(str)) return false;
+  if (!inverterOnline) return false;
+
+  // futura integração backend: quando alarm_active vier pronto, ele manda na regra local.
+  if (str.alarm_active === true) return true;
+  if (str.alarm_active === false) return false;
+
+  const noData = str.has_data !== true;
+  const nullCurrent = str.current_a === null || str.current_a === undefined || str.current_a === "";
+
+  let stale = false;
+  if (str.last_ts) {
+    const ts = new Date(str.last_ts);
+    if (!Number.isNaN(ts.getTime())) {
+      stale = (Date.now() - ts.getTime()) > STRING_STALE_AFTER_MS;
+    }
+  }
+
+  return noData || nullCurrent || stale;
+}
+
+function setInverterStringAlarmBadge(inverterRealId, show) {
+  const row = document.querySelector(`.inverter-toggle[data-inverter-real-id="${inverterRealId}"]`);
+  if (!row) return;
+  row.classList.toggle("has-string-alarm", !!show);
+
+  let badge = row.querySelector(".string-alarm-badge");
+  if (show) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "string-alarm-badge";
+      badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+      row.appendChild(badge);
+    }
+  } else if (badge) {
+    badge.remove();
+  }
 }
 
 // ======================================================
@@ -1286,6 +2111,7 @@ function renderStringsGrid(gridEl, payload) {
   gridEl.innerHTML = "";
 
   if (!strings.length || inverterRealId == null) {
+    if (inverterRealId != null) setInverterStringAlarmBadge(inverterRealId, false);
     gridEl.innerHTML = `<div style="color:#9adbb8; opacity:.7; padding:6px 2px;">Sem dados de strings</div>`;
     return;
   }
@@ -1305,13 +2131,22 @@ function renderStringsGrid(gridEl, payload) {
   const visibleStrings = strings.filter(isEffectiveEnabled);
   const hiddenStrings = strings.filter(s => !isEffectiveEnabled(s));
 
+  const inverterOnline = getInverterOnlineStateById(inverterRealId);
+  let hasAlarmOnAnyMonitorable = false;
+
   visibleStrings.forEach(str => {
     const el = document.createElement("div");
     el.className = "string-card";
     el.dataset.string = str.string_index;
-
-    if (!str.has_data) el.classList.add("nodata");
-    else el.classList.add("active");
+    const inAlarm = isStringInAlarm(str, inverterOnline);
+    if (inAlarm) {
+      el.classList.add("string-alarm");
+      hasAlarmOnAnyMonitorable = true;
+    } else if (!str.has_data) {
+      el.classList.add("nodata");
+    } else {
+      el.classList.add("active");
+    }
 
     const ampText = str.has_data ? fmtAmp(str.current_a) : "—";
 
@@ -1379,6 +2214,8 @@ function renderStringsGrid(gridEl, payload) {
 
     gridEl.appendChild(addBtn);
   }
+
+  setInverterStringAlarmBadge(inverterRealId, hasAlarmOnAnyMonitorable);
 }
 
 // ======================================================
@@ -1497,43 +2334,32 @@ function renderSummaryStrip() {
 let dailyChartInstance = null;
 let monthlyChartInstance = null;
 let LAST_INVERTER_ROWS_SIGNATURE = "";
+let DAILY_CHART_ZOOM_WIRED = false;
 
-function dayKeySPNow() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+function resetDailyChartZoom() {
+  if (!dailyChartInstance || typeof dailyChartInstance.resetZoom !== "function") return;
+  try {
+    dailyChartInstance.resetZoom();
+  } catch (err) {
+    console.warn("[dailyChart] erro ao resetar zoom:", err);
+  }
 }
 
-async function refreshDailyChartIfNeeded(force = false) {
-  const now = Date.now();
+function wireDailyChartZoomControlsOnce() {
+  if (DAILY_CHART_ZOOM_WIRED) return;
+  DAILY_CHART_ZOOM_WIRED = true;
 
-  const todayKey = dayKeySPNow();
-  if (DAILY_DAY_KEY !== todayKey) {
-    // ✅ virou o dia: reseta e força reload
-    DAILY_DAY_KEY = todayKey;
-    DAILY = null;
-    force = true;
-    if (dailyChartInstance) {
-      dailyChartInstance.destroy();
-      dailyChartInstance = null;
-    }
-  }
+  document.getElementById("dailyZoomInBtn")?.addEventListener("click", () => {
+    if (!dailyChartInstance || typeof dailyChartInstance.zoom !== "function") return;
+    dailyChartInstance.zoom({ x: 1.2 });
+  });
 
-  if (!force && (now - LAST_DAILY_FETCH_MS) < DAILY_REFRESH_EVERY_MS) return;
-  LAST_DAILY_FETCH_MS = now;
+  document.getElementById("dailyZoomOutBtn")?.addEventListener("click", () => {
+    if (!dailyChartInstance || typeof dailyChartInstance.zoom !== "function") return;
+    dailyChartInstance.zoom({ x: 0.8 });
+  });
 
-  const daily = await fetchDailyEnergy(PLANT_ID);
-  if (daily?.labels?.length) {
-    DAILY = normalizeDailyPayload(daily);
-
-    // ✅ se já existe chart, só atualiza dataset (mais leve)
-    if (dailyChartInstance) {
-      dailyChartInstance.data.labels = DAILY.labels;
-      dailyChartInstance.data.datasets[0].data = DAILY.activePower;
-      dailyChartInstance.data.datasets[1].data = DAILY.irradiance;
-      dailyChartInstance.update("none");
-    } else {
-      renderDailyChart();
-    }
-  }
+  document.getElementById("dailyZoomResetBtn")?.addEventListener("click", resetDailyChartZoom);
 }
 
 // ======================================================
@@ -1542,6 +2368,8 @@ async function refreshDailyChartIfNeeded(force = false) {
 function renderDailyChart() {
   const canvas = document.getElementById("plantMainChart");
   if (!canvas || !DAILY?.labels?.length) return;
+  const ratedPower = asNumber(PLANT_STATE.rated_power_kwp, 0);
+  const powerAxisMax = ratedPower > 0 ? Math.ceil(ratedPower) : 1250;
 
   const ctx = canvas.getContext("2d");
 
@@ -1551,13 +2379,13 @@ function renderDailyChart() {
   }
 
   const greenGradient = ctx.createLinearGradient(0, 0, 0, 320);
-  greenGradient.addColorStop(0, "rgba(57,229,140,0.55)");
-  greenGradient.addColorStop(0.6, "rgba(57,229,140,0.35)");
-  greenGradient.addColorStop(1, "rgba(57,229,140,0.05)");
+  greenGradient.addColorStop(0, "rgba(57,229,140,0.36)");
+  greenGradient.addColorStop(0.6, "rgba(57,229,140,0.20)");
+  greenGradient.addColorStop(1, "rgba(57,229,140,0.03)");
 
   const yellowGradient = ctx.createLinearGradient(0, 0, 0, 320);
-  yellowGradient.addColorStop(0, "rgba(255,216,77,0.45)");
-  yellowGradient.addColorStop(1, "rgba(255,216,77,0.05)");
+  yellowGradient.addColorStop(0, "rgba(255,216,77,0.24)");
+  yellowGradient.addColorStop(1, "rgba(255,216,77,0.02)");
 
   dailyChartInstance = new Chart(ctx, {
     type: "line",
@@ -1565,6 +2393,20 @@ function renderDailyChart() {
       labels: DAILY.labels,
       datasets: [
         {
+          label: "Esperado",
+          data: Array.isArray(DAILY.expectedPower) ? DAILY.expectedPower : [],
+          borderColor: "rgba(205, 213, 225, 0.70)",
+          fill: false,
+          tension: 0.28,
+          pointRadius: 0,
+          borderWidth: 1.5,
+          borderDash: [6, 6],
+          yAxisID: "yPower",
+          spanGaps: true,
+          order: 0
+        },
+        {
+          label: "Potência Ativa",
           data: DAILY.activePower,
           borderColor: "#39e58c",
           backgroundColor: greenGradient,
@@ -1573,9 +2415,11 @@ function renderDailyChart() {
           pointRadius: 0,
           borderWidth: 2,
           yAxisID: "yPower",
-          spanGaps: false
+          spanGaps: true,
+          order: 1
         },
         {
+          label: "Irradiância POA",
           data: DAILY.irradiance,
           borderColor: "#ffd84d",
           backgroundColor: yellowGradient,
@@ -1584,7 +2428,8 @@ function renderDailyChart() {
           pointRadius: 0,
           borderWidth: 2,
           yAxisID: "yIrr",
-          spanGaps: false
+          spanGaps: true,
+          order: 2
         }
       ]
     },
@@ -1592,7 +2437,58 @@ function renderDailyChart() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "rgba(6,18,14,0.96)",
+          borderColor: "rgba(57,229,140,0.18)",
+          borderWidth: 1,
+          titleColor: "#dbe7ef",
+          bodyColor: "#dbe7ef",
+          padding: 10,
+          displayColors: true,
+          usePointStyle: true,
+          callbacks: {
+            label: (item) => {
+              const label = item?.dataset?.label || "";
+              const value = Number(item?.raw ?? 0);
+
+              if (label === "Esperado") {
+                return `Esperado: ${formatKwPtBR(value)}`;
+              }
+              if (label === "Potência Ativa") {
+                return `Potência Ativa: ${formatKwPtBR(value)}`;
+              }
+              if (label === "Irradiância POA") {
+                return `Irradiância POA: ${formatWm2PtBR(value)}`;
+              }
+
+              return `${label}: ${formatNumberPtBR(value)}`;
+            }
+          }
+        },
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: "x"
+          },
+          zoom: {
+            wheel: {
+              enabled: true
+            },
+            pinch: {
+              enabled: true
+            },
+            drag: {
+              enabled: false
+            },
+            mode: "x"
+          },
+          limits: {
+            x: { minRange: 6 }
+          }
+        }
+      },
       scales: {
         x: {
           ticks: { color: "#9adbb8", maxTicksLimit: 12 },
@@ -1601,7 +2497,7 @@ function renderDailyChart() {
         yPower: {
           position: "left",
           min: 0,
-          max: 2000,
+          suggestedMax: powerAxisMax,
           ticks: { color: "#39e58c", callback: v => `${v} kW` },
           grid: { color: "rgba(255,255,255,0.05)" }
         },
@@ -1627,6 +2523,12 @@ function normalizeMonthlyPayload(payload) {
 
   const dailyNew = Array.isArray(payload.daily_kwh) ? payload.daily_kwh.slice() : null;
   const mtdNew = Array.isArray(payload.mtd_kwh) ? payload.mtd_kwh.slice() : null;
+  const irrDailyNew = Array.isArray(payload.irradiation_daily_kwh_m2)
+    ? payload.irradiation_daily_kwh_m2.slice()
+    : null;
+  const expectedDailyNew = Array.isArray(payload.expected_daily_kwh)
+    ? payload.expected_daily_kwh.slice()
+    : (Array.isArray(payload.expectedDailyKwh) ? payload.expectedDailyKwh.slice() : null);
   const energyLegacy = Array.isArray(payload.energy_kwh) ? payload.energy_kwh.slice() : null;
 
   let daily = (dailyNew ?? energyLegacy ?? []).map(v => Number(v) || 0);
@@ -1658,12 +2560,33 @@ function normalizeMonthlyPayload(payload) {
 
   let acc = 0;
   mtd = daily.map(v => (acc += (Number(v) || 0)));
+  const irradiationDaily = (irrDailyNew ?? []).slice(0, daily.length).map(v => Number(v) || 0);
+  while (irradiationDaily.length < daily.length) irradiationDaily.push(0);
+
+  let expectedDaily = (expectedDailyNew ?? []).slice(0, daily.length).map(v => Number(v) || 0);
+  while (expectedDaily.length < daily.length) expectedDaily.push(0);
+
+  const expectedMtdFromPayload =
+    Array.isArray(payload.expected_mtd_kwh) ? payload.expected_mtd_kwh.slice() :
+    Array.isArray(payload.expectedMtdKwh) ? payload.expectedMtdKwh.slice() :
+    null;
+
+  let expectedMtd = [];
+  if (expectedMtdFromPayload && expectedMtdFromPayload.length >= expectedDaily.length) {
+    expectedMtd = expectedMtdFromPayload.slice(0, expectedDaily.length).map(v => Number(v) || 0);
+  } else {
+    let accExpected = 0;
+    expectedMtd = expectedDaily.map(v => (accExpected += (Number(v) || 0)));
+  }
 
   return {
     ...payload,
     labels: finalLabels,
     daily_kwh: daily,
     mtd_kwh: mtd,
+    expected_daily_kwh: expectedDaily,
+    expected_mtd_kwh: expectedMtd,
+    irradiation_daily_kwh_m2: irradiationDaily,
     energy_kwh: daily
   };
 }
@@ -1679,8 +2602,36 @@ function renderMonthlyChart() {
   const daily = Array.isArray(MONTHLY?.daily_kwh)
     ? MONTHLY.daily_kwh.map(v => Number(v) || 0)
     : (Array.isArray(MONTHLY?.energy_kwh) ? MONTHLY.energy_kwh.map(v => Number(v) || 0) : []);
+  const expectedDaily = Array.isArray(MONTHLY?.expected_daily_kwh)
+    ? MONTHLY.expected_daily_kwh.map(v => Number(v) || 0)
+    : [];
 
   if (!labels.length || !daily.length) return;
+
+  const expectedPadded = expectedDaily.slice(0, daily.length);
+  while (expectedPadded.length < daily.length) expectedPadded.push(0);
+
+  const totalReal = daily.reduce((a, b) => a + (Number(b) || 0), 0);
+  const totalExpected = expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0);
+  const deviation = totalExpected > 0 ? ((totalReal - totalExpected) / totalExpected) * 100 : 0;
+  const daysWithGeneration = daily.filter(v => Number(v) > 0).length;
+
+  const kpiRealEl = document.getElementById("monthlyKpiReal");
+  const kpiExpEl = document.getElementById("monthlyKpiExp");
+  const kpiDevEl = document.getElementById("monthlyKpiDev");
+  const progressEl = document.getElementById("monthlyProgressFill");
+  const bottomLeftEl = document.getElementById("monthlyBottomLeft");
+  const bottomRightEl = document.getElementById("monthlyBottomRight");
+
+  if (kpiRealEl) kpiRealEl.textContent = formatKwhPtBR(totalReal);
+  if (kpiExpEl) kpiExpEl.textContent = formatKwhPtBR(totalExpected);
+  if (kpiDevEl) {
+    kpiDevEl.textContent = `${deviation >= 0 ? "+" : ""}${deviation.toFixed(1)}%`;
+    kpiDevEl.style.color = deviation >= 0 ? "#7FD055" : "#ff6b6b";
+  }
+  if (progressEl) progressEl.style.width = `${((daysWithGeneration / daily.length) * 100).toFixed(1)}%`;
+  if (bottomLeftEl) bottomLeftEl.textContent = `${daysWithGeneration} dias com geração de ${daily.length}`;
+  if (bottomRightEl) bottomRightEl.textContent = "Mês atual";
 
   const ctx = canvas.getContext("2d");
 
@@ -1691,6 +2642,16 @@ function renderMonthlyChart() {
 
   const maxDaily = Math.max(...daily, 0);
   const suggestedMaxDaily = maxDaily > 0 ? Math.ceil(maxDaily * 1.25) : undefined;
+  const realColors = daily.map((v, idx) => {
+    const exp = Number(expectedPadded[idx] ?? 0);
+    if (v === 0) return "rgba(255,255,255,.06)";
+    return v >= exp ? "rgba(127,208,85,.92)" : "rgba(127,208,85,.50)";
+  });
+  const realBorders = daily.map((v, idx) => {
+    const exp = Number(expectedPadded[idx] ?? 0);
+    if (v === 0) return "rgba(255,255,255,.06)";
+    return v >= exp ? "#7FD055" : "rgba(127,208,85,.70)";
+  });
 
   monthlyChartInstance = new Chart(ctx, {
     type: "bar",
@@ -1698,12 +2659,33 @@ function renderMonthlyChart() {
       labels,
       datasets: [
         {
+          label: "Esperado",
+          data: expectedPadded,
+          backgroundColor: "rgba(190,200,210,.28)",
+          borderColor: "rgba(190,200,210,.38)",
+          borderWidth: 1,
+          borderRadius: { topLeft: 5, topRight: 5 },
+          borderSkipped: "bottom",
+          barThickness: 14,
+          maxBarThickness: 20,
+          categoryPercentage: 0.78,
+          barPercentage: 0.92,
+          order: 0,
+          hoverBackgroundColor: "rgba(190,200,210,.46)"
+        },
+        {
+          label: "Real",
           data: daily,
-          backgroundColor: "rgba(200,200,200,0.75)",
-          borderRadius: 8,
-          barThickness: 18,
-          categoryPercentage: 0.9,
-          barPercentage: 0.9
+          backgroundColor: realColors,
+          borderColor: realBorders,
+          borderWidth: 1,
+          borderRadius: { topLeft: 4, topRight: 4 },
+          borderSkipped: "bottom",
+          barThickness: 9,
+          maxBarThickness: 16,
+          categoryPercentage: 0.78,
+          barPercentage: 0.70,
+          order: 1
         }
       ]
     },
@@ -1714,22 +2696,61 @@ function renderMonthlyChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
+          backgroundColor: "rgba(6,18,14,0.96)",
+          borderColor: "rgba(57,229,140,0.18)",
+          borderWidth: 1,
+          titleColor: "#dbe7ef",
+          bodyColor: "#dbe7ef",
+          padding: 10,
+          displayColors: false,
           callbacks: {
             title: (items) => items?.[0]?.label ? `Dia ${items[0].label}` : "",
-            label: (item) => `Geração do dia: ${formatKwhPtBR(item?.raw)}`
+            label: (item) => {
+              const idx = item?.dataIndex ?? 0;
+              const real = Number(daily[idx] ?? 0);
+              const expected = Number(expectedPadded[idx] ?? 0);
+              if (item?.dataset?.label === "Esperado") return `Esperado: ${formatKwhPtBR(expected)}`;
+              if (item?.dataset?.label === "Real") return `Real: ${formatKwhPtBR(real)}`;
+              return "";
+            },
+            afterBody: (items) => {
+              const idx = items?.[0]?.dataIndex ?? 0;
+              const real = Number(daily[idx] ?? 0);
+              const expected = Number(expectedPadded[idx] ?? 0);
+              const deviation = expected > 0 ? ((real - expected) / expected) * 100 : 0;
+              const sign = deviation > 0 ? "+" : "";
+              return `Desvio: ${sign}${deviation.toFixed(1)}%`;
+            }
           }
         }
       },
       scales: {
         x: {
-          ticks: { color: "#9adbb8", maxTicksLimit: 8 },
+          offset: true,
+          ticks: {
+            color: "#9adbb8",
+            maxTicksLimit: 6,
+            autoSkip: true,
+            maxRotation: 0,
+            minRotation: 0,
+            padding: 8
+          },
           grid: { display: false }
         },
         y: {
           beginAtZero: true,
           suggestedMax: suggestedMaxDaily,
-          ticks: { color: "#9adbb8", callback: (v) => formatNumberPtBR(v) },
-          grid: { color: "rgba(255,255,255,0.04)" }
+          grace: "12%",
+          ticks: {
+            color: "#9adbb8",
+            maxTicksLimit: 6,
+            padding: 8,
+            callback: (v) => formatNumberPtBR(v)
+          },
+          grid: {
+            color: "rgba(255,255,255,0.04)",
+            drawBorder: false
+          }
         }
       }
     }
@@ -1822,8 +2843,6 @@ async function refreshOpenStringsPanels() {
 }
 
 function renderPlantName(realtime) {
-  if (!realtime || typeof realtime !== "object") return;
-
   const name =
     realtime?.power_plant_name ??
     realtime?.powerPlantName ??
@@ -1840,80 +2859,537 @@ function renderPlantName(realtime) {
 // ✅ REFRESH (realtime + alarms + inverters rows + strings abertas + relay)
 // ======================================================
 async function refreshRealtimeEverything() {
-  if (REFRESH_RUNNING) return;
-  REFRESH_RUNNING = true;
+  if (IS_REFRESHING_PLANT) return;
+  IS_REFRESHING_PLANT = true;
 
   let realtime = null;
-  let alarms = [];
-  let inverters = [];
-  let relayItem = null;
-
   try {
-    try { realtime = await fetchPlantRealtime(PLANT_ID); } catch (e) { console.warn("[realtime] fail", e); }
-    try { alarms = await fetchActiveAlarms(PLANT_ID); } catch (e) { console.warn("[alarms] fail", e); }
-    try { inverters = await fetchInvertersRealtime(PLANT_ID); } catch (e) { console.warn("[inverters] fail", e); }
-    try { relayItem = await safeFetchRelayIfSupported(PLANT_ID); } catch (e) { console.warn("[relay] fail", e); }
-
-    renderPlantName(realtime);
-
-    if (realtime) {
-      const rated = asNumber(realtime.rated_power_kw, PLANT_STATE.rated_power_kwp);
-      const active = asNumber(realtime.active_power_kw, PLANT_STATE.active_power_kw);
-      const prPct = normalizePercentMaybe(realtime.performance_ratio);
-
-      PLANT_STATE = {
-        ...PLANT_STATE,
-        rated_power_kwp: rated,
-        active_power_kw: active,
-        capacity_percent: rated > 0 ? (active / rated) * 100 : PLANT_STATE.capacity_percent,
-        pr_percent: prPct != null ? prPct : PLANT_STATE.pr_percent
-      };
+    try {
+      realtime = await fetchPlantRealtime(PLANT_ID);
+      renderPlantName(realtime);
+      if (realtime) {
+        const rated = asNumber(
+          realtime.rated_power_kw ?? realtime.rated_power_ac_kw ?? realtime.rated_power_kwp,
+          PLANT_STATE.rated_power_kwp
+        );
+        const active = asNumber(
+          realtime.active_power_kw ?? realtime.active_power_inverter_kw ?? realtime.active_power_meter_kw,
+          PLANT_STATE.active_power_kw
+        );
+        const prPct = normalizePercentMaybe(
+          realtime.performance_ratio ?? realtime.pr_daily_pct ?? realtime.pr_percent
+        );
+        PLANT_STATE = {
+          ...PLANT_STATE,
+          rated_power_kwp: rated,
+          active_power_kw: active,
+          capacity_percent: rated > 0 ? (active / rated) * 100 : PLANT_STATE.capacity_percent,
+          pr_percent: prPct != null ? prPct : PLANT_STATE.pr_percent
+        };
+      }
+    } catch (e) {
+      console.error("[refreshRealtimeEverything][realtime] erro", e);
     }
 
-    ACTIVE_ALARMS = Array.isArray(alarms) ? alarms : [];
-    renderAlarms(ACTIVE_ALARMS);
+    const [alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes] = await Promise.allSettled([
+      fetchActiveAlarms(PLANT_ID),
+      fetchInvertersRealtime(PLANT_ID),
+      safeFetchRelayIfSupported(PLANT_ID),
+      safeFetchMultimeterIfSupported(PLANT_ID),
+      fetchTrackersRealtime(PLANT_ID)
+    ]);
 
-    INVERTERS_REALTIME = Array.isArray(inverters) ? inverters : [];
-    INVERTER_EXTRAS_BY_ID = new Map();
-    dedupInvertersById(INVERTERS_REALTIME).forEach(inv => {
-      const id = getInverterRealId(inv);
-      if (id != null) INVERTER_EXTRAS_BY_ID.set(String(id), inv);
-    });
+    if (alarmsRes.status === "fulfilled") {
+      ACTIVE_ALARMS = Array.isArray(alarmsRes.value) ? alarmsRes.value : [];
+      renderAlarms(ACTIVE_ALARMS);
+      renderAlarmMenuButton();
+    } else {
+      ACTIVE_ALARMS = [];
+      renderAlarms(ACTIVE_ALARMS);
+      renderAlarmMenuButton();
+      console.error("[refreshRealtimeEverything][alarms] erro", alarmsRes.reason);
+    }
 
-    const dedup = dedupInvertersById(INVERTERS_REALTIME);
-    PLANT_CATALOG.inverters = dedup;
-    PLANT_STATE = {
-      ...PLANT_STATE,
-      inverter_total: dedup.length,
-      inverter_online: countOnlineInverters(dedup)
-    };
+    if (invertersRes.status === "fulfilled") {
+      INVERTERS_REALTIME = invertersRes.value;
+      INVERTER_EXTRAS_BY_ID = new Map();
+      dedupInvertersById(INVERTERS_REALTIME).forEach(inv => {
+        const id = getInverterRealId(inv);
+        if (id != null) INVERTER_EXTRAS_BY_ID.set(String(id), inv);
+      });
 
-    ensureInverterRowsFromRealtime(INVERTERS_REALTIME);
-    renderInvertersRows(INVERTERS_REALTIME);
-    refreshInverterStatusChips(INVERTERS_REALTIME);
+      const dedup = dedupInvertersById(INVERTERS_REALTIME);
+      PLANT_CATALOG.inverters = dedup;
+      PLANT_STATE = {
+        ...PLANT_STATE,
+        inverter_total: dedup.length,
+        inverter_online: countOnlineInverters(dedup)
+      };
 
-    RELAY_REALTIME = relayItem;
-    PLANT_CATALOG.hasRelay = !!relayItem;
-    setRelaySectionVisible(RELAY_SUPPORTED !== false);
-    if (RELAY_SUPPORTED !== false) renderRelayCard(relayItem);
+      ensureInverterRowsFromRealtime(INVERTERS_REALTIME);
+      renderInvertersRows(INVERTERS_REALTIME);
+      refreshInverterStatusChips(INVERTERS_REALTIME);
+    } else {
+      console.error("[refreshRealtimeEverything][inverters] erro", invertersRes.reason);
+    }
+
+    if (relayRes.status === "fulfilled") {
+      const relayItem = relayRes.value;
+      RELAY_REALTIME = relayItem;
+      PLANT_CATALOG.hasRelay = !!relayItem;
+      setRelaySectionVisible(RELAY_SUPPORTED !== false);
+      if (RELAY_SUPPORTED !== false) renderRelayCard(relayItem);
+    } else {
+      console.error("[refreshRealtimeEverything][relay] erro", relayRes.reason);
+    }
+
+    if (multimeterRes.status === "fulfilled") {
+      const multimeterItem = multimeterRes.value;
+      MULTIMETER_REALTIME = multimeterItem;
+      setMultimeterSectionVisible(MULTIMETER_SUPPORTED !== false);
+      if (MULTIMETER_SUPPORTED !== false) renderMultimeterCard(multimeterItem);
+    } else {
+      console.error("[refreshRealtimeEverything][multimeter] erro", multimeterRes.reason);
+    }
+
+    if (trackersRes.status === "fulfilled") {
+      const trackersPayload = trackersRes.value;
+      TRACKERS_DATA = Array.isArray(trackersPayload?.items) ? trackersPayload.items : [];
+      TRACKERS_PLANT_CENTER = trackersPayload?.plant_center ?? null;
+      TRACKERS_PLANT_BOUNDS = trackersPayload?.plant_bounds ?? null;
+      const hasTrackers = Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.some(
+        (t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
+      );
+      if (hasTrackers) {
+        TRACKERS_LAST_HAS_DATA = true;
+      }
+
+      if (!TRACKERS_USER_OPENED) {
+        setTrackersSectionVisible(hasTrackers);
+      } else {
+        setTrackersSectionVisible(TRACKERS_LAST_HAS_DATA);
+      }
+
+      if (TRACKERS_LAST_HAS_DATA) {
+        const trackersSection = document.getElementById("trackersSection");
+        const trackersVisible =
+          trackersSection &&
+          !trackersSection.classList.contains("trackers-hidden") &&
+          !trackersSection.classList.contains("is-collapsed");
+        if (trackersVisible && hasTrackers) renderTrackersPanel();
+      }
+    } else {
+      TRACKERS_DATA = [];
+      TRACKERS_PLANT_CENTER = null;
+      TRACKERS_PLANT_BOUNDS = null;
+      renderTrackersPanel();
+      console.error("[refreshRealtimeEverything][trackers] erro", trackersRes.reason);
+    }
 
     renderHeaderSummary();
     renderWeather(realtime?.weather ?? null);
     renderSummaryStrip();
 
-    try { await refreshOpenStringsPanels(); } catch (e) { console.warn("[strings] fail", e); }
-
-    if (OPEN_INVERTER_REAL_ID != null) {
-      const inv = INVERTER_EXTRAS_BY_ID.get(String(OPEN_INVERTER_REAL_ID));
-      renderInverterExtras(OPEN_INVERTER_REAL_ID, inv);
+    try {
+      await refreshOpenStringsPanels();
+      if (OPEN_INVERTER_REAL_ID != null) {
+        const inv = INVERTER_EXTRAS_BY_ID.get(String(OPEN_INVERTER_REAL_ID));
+        renderInverterExtras(OPEN_INVERTER_REAL_ID, inv);
+      }
+    } catch (e) {
+      console.error("[refreshRealtimeEverything][strings] erro", e);
     }
-
-    try { await refreshDailyChartIfNeeded(false); } catch(e) { console.warn("[daily] fail", e); }
   } finally {
-    REFRESH_RUNNING = false;
+    IS_REFRESHING_PLANT = false;
   }
 }
 
+// ======================================================
+// TRACKERS (MOCK LOCAL) — MÓDULO INDEPENDENTE
+// ======================================================
+let TRACKER_VIEW_MODE = "state";
+let TRACKERS_DATA = [];
+let TRACKERS_FILTER_TEXT = "";
+let TRACKERS_TRANSFORM = { scale: 1, x: 0, y: 0 };
+let TRACKERS_PLANT_CENTER = null;
+let TRACKERS_PLANT_BOUNDS = null;
+let TRACKERS_HAS_FITTED_ONCE = false;
+let TRACKERS_USER_OPENED = false;
+let TRACKERS_LAST_HAS_DATA = false;
+let TRACKERS_MAP = null;
+let TRACKERS_MARKERS_LAYER = null;
+
+function createMockTrackers(count = 220) {
+  const items = [];
+  const cols = 22;
+  const spacingX = 65;
+  const spacingY = 78;
+  const states = [
+    "off",
+    "manual_daytime",
+    "auto_daytime",
+    "manual_tracking",
+    "auto_tracking",
+    "manual_nighttime",
+    "auto_nighttime",
+    "manual_sleep",
+    "auto_sleep"
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const offline = i % 17 === 0;
+    const stateCode = offline ? "no_comm" : states[i % states.length];
+    const angle = offline ? null : -60 + ((i * 7) % 131);
+    const error = offline ? null : Number(((i * 1.7) % 11).toFixed(1));
+
+    items.push({
+      id: `TRK-${String(i + 1).padStart(4, "0")}`,
+      name: `Tracker ${String(i + 1).padStart(3, "0")}`,
+      kind: i % 2 === 0 ? "tcu" : "rsu",
+      x: 50 + col * spacingX + (row % 2 ? 12 : 0),
+      y: 45 + row * spacingY,
+      state_code: stateCode,
+      angle_deg: angle,
+      error_value: error,
+      is_online: !offline
+    });
+  }
+  return items;
+}
+
+function getTrackersLegendItems(mode) {
+  if (mode === "state") {
+    return [
+      ["tracker desligado", "#707b86"],
+      ["manual + daytime", "#f6bd60"],
+      ["automático + daytime", "#f2e85e"],
+      ["manual + tracking", "#4f9dff"],
+      ["automático + tracking", "#2ad37f"],
+      ["manual + nighttime", "#7f8cff"],
+      ["automático + nighttime", "#6375ff"],
+      ["manual sleep", "#b47dff"],
+      ["automático sleep", "#9255ff"],
+      ["sem comunicação", "#4a5057"]
+    ];
+  }
+
+  if (mode === "angle") {
+    return [
+      ["-60 a -50", "#7b1fa2"],
+      ["-50 a -40", "#5c2dd6"],
+      ["-40 a -30", "#3949ab"],
+      ["-30 a -20", "#1e88e5"],
+      ["-20 a -10", "#00acc1"],
+      ["-10 a 0", "#26a69a"],
+      ["0 a 10", "#43a047"],
+      ["10 a 20", "#7cb342"],
+      ["20 a 30", "#c0ca33"],
+      ["30 a 40", "#fdd835"],
+      ["40 a 50", "#ffb300"],
+      ["50 a 60", "#fb8c00"],
+      ["60 a 70", "#ef6c00"],
+      ["sem comunicação", "#4a5057"]
+    ];
+  }
+
+  return [
+    ["erro <= 5", "#2ad37f"],
+    ["erro > 5", "#ff8a65"],
+    ["offline", "#4a5057"]
+  ];
+}
+
+function getTrackerColorByMode(item, mode) {
+  if (!item?.is_online) return "#4a5057";
+
+  if (mode === "state") {
+    const map = {
+      off: "#707b86",
+      manual_daytime: "#f6bd60",
+      auto_daytime: "#f2e85e",
+      manual_tracking: "#4f9dff",
+      auto_tracking: "#2ad37f",
+      manual_nighttime: "#7f8cff",
+      auto_nighttime: "#6375ff",
+      manual_sleep: "#b47dff",
+      auto_sleep: "#9255ff",
+      no_comm: "#4a5057"
+    };
+    return map[item.state_code] || "#8a949d";
+  }
+
+  if (mode === "angle") {
+    const a = Number(item.angle_deg);
+    if (!Number.isFinite(a)) return "#4a5057";
+    const ranges = [
+      [-60, -50, "#7b1fa2"], [-50, -40, "#5c2dd6"], [-40, -30, "#3949ab"],
+      [-30, -20, "#1e88e5"], [-20, -10, "#00acc1"], [-10, 0, "#26a69a"],
+      [0, 10, "#43a047"], [10, 20, "#7cb342"], [20, 30, "#c0ca33"],
+      [30, 40, "#fdd835"], [40, 50, "#ffb300"], [50, 60, "#fb8c00"], [60, 70, "#ef6c00"]
+    ];
+    const found = ranges.find(([lo, hi]) => a >= lo && a < hi);
+    return found ? found[2] : "#ef6c00";
+  }
+
+  const err = Number(item.error_value);
+  if (!Number.isFinite(err)) return "#4a5057";
+  return err <= 5 ? "#2ad37f" : "#ff8a65";
+}
+
+function renderTrackersLegend() {
+  const legendEl = document.getElementById("trackersLegend");
+  if (!legendEl) return;
+  const items = getTrackersLegendItems(TRACKER_VIEW_MODE);
+  legendEl.innerHTML = items
+    .map(([label, color]) => `
+      <div class="trackers-legend-item">
+        <span class="trackers-legend-dot" style="background:${color}"></span>
+        <span>${label}</span>
+      </div>
+    `)
+    .join("");
+}
+
+function applyTrackersTransform() {
+  if (!TRACKERS_MAP) return;
+  TRACKERS_MAP.invalidateSize();
+}
+
+function renderTrackersNodes() {
+  if (!TRACKERS_MAP || !TRACKERS_MARKERS_LAYER) return;
+  TRACKERS_MARKERS_LAYER.clearLayers();
+
+  const filterText = TRACKERS_FILTER_TEXT.trim().toLowerCase();
+  const filtered = TRACKERS_DATA.filter((t) => {
+    if (!filterText) return true;
+    const hay = `${t.name || ""} ${t.id || ""} ${t.tracker_id || ""} ${t.kind || ""} ${t.tracker_type || ""}`.toLowerCase();
+    return hay.includes(filterText);
+  });
+
+  const valid = filtered.filter(t =>
+    Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
+  );
+
+  const fallback = document.getElementById("trackersMapFallback");
+  if (!valid.length) {
+    if (fallback) fallback.hidden = false;
+    return;
+  }
+  if (fallback) fallback.hidden = true;
+
+  const bounds = [];
+  const markerIcon = (color) => L.divIcon({
+    className: "",
+    html: `<div class="tracker-map-marker" style="background:${color}"></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
+  });
+
+  valid.forEach((tracker) => {
+    const lat = Number(tracker.latitude);
+    const lng = Number(tracker.longitude);
+    bounds.push([lat, lng]);
+
+    const color = getTrackerColorByMode(tracker, TRACKER_VIEW_MODE);
+    const m = L.marker([lat, lng], { icon: markerIcon(color) });
+    const displayName = tracker.name || tracker.tracker_code || tracker.tracker_id || "Tracker";
+    const displayType = String(tracker.tracker_type || tracker.kind || "—").toUpperCase();
+    m.bindPopup(`
+      <strong>${displayName}</strong><br>
+      Tipo: ${displayType}<br>
+      Estado: ${tracker.state_code ?? "—"}<br>
+      Ângulo: ${tracker.angle_deg ?? "—"}<br>
+      Erro: ${tracker.error_value ?? "—"}<br>
+      Status: ${tracker.is_online ? "online" : "offline"}<br>
+      Atualização: ${fmtDatePtBR(tracker.last_update)}
+    `);
+    m.addTo(TRACKERS_MARKERS_LAYER);
+  });
+
+  if (!TRACKERS_HAS_FITTED_ONCE) {
+    if (TRACKERS_PLANT_BOUNDS &&
+        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
+        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
+        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
+        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
+      TRACKERS_MAP.fitBounds([
+        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
+        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
+      ], { padding: [20, 20] });
+    } else if (TRACKERS_PLANT_CENTER &&
+        Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
+        Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
+      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
+    } else if (bounds.length) {
+      TRACKERS_MAP.fitBounds(bounds, { padding: [20, 20] });
+    }
+    TRACKERS_HAS_FITTED_ONCE = true;
+  }
+}
+
+function renderTrackersPanel() {
+  renderTrackersLegend();
+  renderTrackersNodes();
+}
+
+function setTrackerMode(mode) {
+  TRACKER_VIEW_MODE = mode;
+  document.getElementById("trackerModeState")?.classList.toggle("is-active", mode === "state");
+  document.getElementById("trackerModeAngle")?.classList.toggle("is-active", mode === "angle");
+  document.getElementById("trackerModeError")?.classList.toggle("is-active", mode === "error");
+  renderTrackersPanel();
+}
+
+function filterTrackers(searchText) {
+  TRACKERS_FILTER_TEXT = searchText || "";
+  renderTrackersNodes();
+}
+
+function initTrackersPanel() {
+  const sectionEl = document.getElementById("trackersSection");
+  const stageWrapEl = document.getElementById("trackersStageWrap");
+  const mapEl = document.getElementById("trackersMap");
+  if (!sectionEl || !stageWrapEl || !mapEl || typeof L === "undefined") return;
+  const tabToggleEl = document.getElementById("trackersTabToggle");
+  const menuToggleEl = document.getElementById("trackersMenuToggle");
+
+  if (tabToggleEl) {
+    tabToggleEl.addEventListener("click", () => {
+      const collapsed = !sectionEl.classList.contains("is-collapsed");
+      setTrackersCollapsed(collapsed);
+      const expanded = !collapsed;
+      if (expanded) applyTrackersTransform();
+    });
+  }
+
+  if (menuToggleEl) {
+    menuToggleEl.addEventListener("click", () => {
+      const section = document.getElementById("trackersSection");
+      if (!section) return;
+
+      const isHidden = section.classList.contains("trackers-hidden");
+      const willShow = isHidden;
+
+      TRACKERS_USER_OPENED = true;
+
+      if (willShow) {
+        setTrackersSectionVisible(true);
+        setTrackersCollapsed(false);
+        TRACKERS_LAST_HAS_DATA = true;
+        requestAnimationFrame(() => {
+          applyTrackersTransform();
+          if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
+            renderTrackersPanel();
+          }
+        });
+      } else {
+        setTrackersSectionVisible(false);
+      }
+    });
+  }
+
+  TRACKERS_DATA = [];
+  TRACKERS_TRANSFORM = { scale: 1, x: 0, y: 0 };
+  TRACKERS_HAS_FITTED_ONCE = false;
+  TRACKERS_MAP = L.map(mapEl, {
+    zoomControl: false,
+    attributionControl: false
+  }).setView([-14.235, -51.9253], 4);
+
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    subdomains: "abcd",
+    maxZoom: 20
+  }).addTo(TRACKERS_MAP);
+  TRACKERS_MARKERS_LAYER = L.layerGroup().addTo(TRACKERS_MAP);
+
+  document.getElementById("trackerModeState")?.addEventListener("click", () => setTrackerMode("state"));
+  document.getElementById("trackerModeAngle")?.addEventListener("click", () => setTrackerMode("angle"));
+  document.getElementById("trackerModeError")?.addEventListener("click", () => setTrackerMode("error"));
+  document.getElementById("trackersSearchInput")?.addEventListener("input", (e) => filterTrackers(e.target.value));
+
+  document.getElementById("trackersZoomIn")?.addEventListener("click", () => {
+    if (TRACKERS_MAP) TRACKERS_MAP.zoomIn();
+  });
+  document.getElementById("trackersZoomOut")?.addEventListener("click", () => {
+    if (TRACKERS_MAP) TRACKERS_MAP.zoomOut();
+  });
+  document.getElementById("trackersZoomReset")?.addEventListener("click", () => {
+    if (!TRACKERS_MAP) return;
+    if (TRACKERS_PLANT_BOUNDS &&
+      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
+      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
+      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
+      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
+      TRACKERS_MAP.fitBounds([
+        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
+        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
+      ], { padding: [20, 20] });
+    } else if (TRACKERS_PLANT_CENTER &&
+      Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
+      Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
+      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
+    } else {
+      TRACKERS_MAP.setView([-14.235, -51.9253], 4);
+    }
+  });
+
+  renderTrackersPanel();
+  setTrackersSectionVisible(false);
+  setTrackersCollapsed(true);
+}
+
+function setupDeviceNav() {
+  const btns = document.querySelectorAll(".device-nav-btn[data-target]");
+  if (!btns.length) return;
+
+  function scrollToTarget(target) {
+    if (!target) return;
+
+    if (target === "#sec-trackers") {
+      const section = document.getElementById("trackersSection");
+      const tab = document.getElementById("trackersTabToggle");
+      if (!section) return;
+
+      TRACKERS_USER_OPENED = true;
+      setTrackersSectionVisible(true);
+      setTrackersCollapsed(false);
+      TRACKERS_LAST_HAS_DATA = true;
+      tab?.setAttribute("aria-expanded", "true");
+
+      const anchor = document.querySelector(target);
+      if (anchor) {
+        anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      requestAnimationFrame(() => {
+        applyTrackersTransform();
+        if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
+          renderTrackersPanel();
+        }
+      });
+
+      return;
+    }
+
+    const el = document.querySelector(target);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  btns.forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      scrollToTarget(btn.getAttribute("data-target"));
+    });
+  });
+
+  if (location.hash) {
+    const hash = location.hash;
+    setTimeout(() => scrollToTarget(hash), 0);
+  }
+}
 
 // ======================================================
 // INIT
@@ -1921,37 +3397,50 @@ async function refreshRealtimeEverything() {
 document.addEventListener("DOMContentLoaded", async () => {
   document.body.classList.add("plant-enter");
   setTimeout(() => document.body.classList.remove("plant-enter"), 500);
+  setupInverterToggles();
+  wireDailyChartZoomControlsOnce();
+  initTrackersPanel();
+  setupDeviceNav();
+  setupPlantAlarmMenu();
+  renderAlarmMenuButton();
+  renderRelayCommandBar("relay");
+  renderMultimeterCommandBar("multimeter");
+  wireDeviceCommandButtons(document);
+  document.addEventListener("click", () => closeAllDeviceCommandMenus());
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeAllDeviceCommandMenus();
+  });
+
   if (!PLANT_ID) {
     console.warn("[plant] plant_id ausente na URL; mantendo tela sem dados de fallback.");
     renderHeaderSummary();
     renderSummaryStrip();
     return;
   }
-  setupInverterToggles();
 
   try {
-    await refreshRealtimeEverything();
+    const refreshPromise = refreshRealtimeEverything();
 
-    const grids = document.querySelectorAll(".strings-grid[data-inverter-real-id]");
-    for (const grid of grids) {
-      const realId = grid.dataset.inverterRealId;
-      await refreshStringsForRealInverter(realId);
+    const [dailyRaw, monthlyRaw] = await Promise.all([
+      fetchDailyEnergy(PLANT_ID),
+      fetchMonthlyEnergy(PLANT_ID)
+    ]);
 
-      const panel = document.getElementById(`strings-${realId}`);
-      if (panel?.classList.contains("open")) {
-        panel.style.maxHeight = panel.scrollHeight + "px";
-      }
+    if (dailyRaw) {
+      DAILY = normalizeDailyPayload(dailyRaw);
+      renderDailyChart();
     }
 
-    await refreshDailyChartIfNeeded(true);
-
-    const monthlyRaw = await fetchMonthlyEnergy(PLANT_ID);
     if (monthlyRaw) {
       MONTHLY = normalizeMonthlyPayload(monthlyRaw);
       renderMonthlyChart();
     }
 
-    setInterval(refreshRealtimeEverything, PLANT_REFRESH_INTERVAL_MS);
+    await refreshPromise;
+
+    setInterval(() => {
+      void refreshRealtimeEverything();
+    }, PLANT_REFRESH_INTERVAL_MS);
 
     document.addEventListener("visibilitychange", async () => {
       if (!document.hidden) {
