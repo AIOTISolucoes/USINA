@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AIOTI · Empresa</title>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@200;300;400;600;700;800;900&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --g0:#020804;
+  --green:#6bd34b;
+  --green-bright:#90f06f;
+  --green-soft:#a9f78d;
+  --border:rgba(107,211,75,0.18);
+  --text:#e8f7e3;
+  --dim:#8bc57a;
+  --mono:'JetBrains Mono',monospace;
+  --head:'Exo 2',sans-serif;
+  --max:1180px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  background:
+    radial-gradient(circle at top right,rgba(107,211,75,.05),transparent 30%),
+    radial-gradient(circle at bottom left,rgba(107,211,75,.04),transparent 28%),
+    var(--g0);
+  color:var(--text);
+  font-family:var(--head);
+  overflow-x:hidden;
+  cursor:none;
+}
+a{text-decoration:none;color:inherit;}
+
+#cur{
+  position:fixed;width:10px;height:10px;background:var(--green);border-radius:50%;
+  pointer-events:none;z-index:9999;transform:translate(-50%,-50%);
+  box-shadow:0 0 12px var(--green),0 0 28px rgba(107,211,75,.35);
+  transition:width .15s,height .15s;
+}
+#curR{
+  position:fixed;width:34px;height:34px;border:1px solid rgba(107,211,75,.45);
+  border-radius:50%;pointer-events:none;z-index:9998;transform:translate(-50%,-50%);
+  transition:width .2s,height .2s;
+}
+@media(pointer:coarse){
+  #cur,#curR{display:none;}
+  body{cursor:auto;}
+}
+
+#bgC{position:fixed;inset:0;width:100%;height:100%;z-index:0;opacity:.42;}
+.grid-bg{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(107,211,75,.04) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(107,211,75,.04) 1px,transparent 1px);
+  background-size:56px 56px;
+}
+.scanline{
+  position:fixed;left:0;top:-2px;width:100%;height:2px;z-index:1;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(107,211,75,.28),transparent);
+  animation:scan 10s linear infinite;
+}
+@keyframes scan{
+  0%{top:-2px;}
+  100%{top:100vh;}
+}
+
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;height:68px;padding:0 6vw;
+  display:flex;align-items:center;justify-content:space-between;
+  background:rgba(2,8,4,.9);backdrop-filter:blur(14px);
+  border-bottom:1px solid rgba(107,211,75,.08);
+}
+.nl{display:flex;align-items:center;gap:12px;}
+.nl-logo{
+  height:38px;display:block;object-fit:contain;
+  filter:drop-shadow(0 0 12px rgba(107,211,75,.16));
+}
+.back-btn{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--dim);border:1px solid rgba(107,211,75,.2);background:transparent;
+  padding:8px 16px;border-radius:6px;cursor:none;transition:.22s;
+  display:flex;align-items:center;gap:8px;
+}
+.back-btn:hover{border-color:rgba(107,211,75,.45);color:var(--green-bright);}
+
+.wrap{max-width:var(--max);margin:0 auto;padding:0 6vw;position:relative;z-index:2;}
+.hd{
+  height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);
+  margin:0 6vw;position:relative;z-index:2;
+}
+
+.empresa-hero{padding:110px 0 56px;position:relative;z-index:2;}
+.breadcrumb{
+  font-family:var(--mono);font-size:.62rem;letter-spacing:.18em;color:var(--dim);
+  margin-bottom:22px;display:flex;align-items:center;gap:10px;text-transform:uppercase;
+}
+.breadcrumb a{color:var(--dim);transition:.2s;cursor:none;}
+.breadcrumb a:hover{color:var(--green-bright);}
+.breadcrumb span{color:rgba(107,211,75,.3);}
+.eh-top{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:32px;flex-wrap:wrap;margin-bottom:36px;
+}
+.eh-initials-big{
+  width:80px;height:80px;border-radius:18px;background:rgba(107,211,75,.08);
+  border:1px solid rgba(107,211,75,.2);display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:1.1rem;font-weight:500;color:var(--green-bright);
+  margin-bottom:20px;
+}
+.eh-name{
+  font-size:clamp(2.2rem,5vw,3.8rem);font-weight:900;line-height:1.05;
+  letter-spacing:-.02em;margin-bottom:10px;
+}
+.eh-name span{
+  color:var(--green-bright);
+  text-shadow:0 0 10px rgba(107,211,75,.45),0 0 22px rgba(107,211,75,.16);
+}
+.eh-cats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+.eh-cat{
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;
+  padding:5px 12px;border-radius:999px;border:1px solid rgba(107,211,75,.22);
+  background:rgba(107,211,75,.05);color:var(--green-soft);
+}
+.eh-desc{
+  font-size:1rem;line-height:1.85;color:var(--dim);max-width:680px;font-weight:300;
+}
+.eh-right{
+  display:flex;flex-direction:column;align-items:flex-end;gap:14px;flex-shrink:0;
+}
+.site-link{
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  padding:12px 22px;border:1px solid rgba(107,211,75,.28);background:rgba(107,211,75,.05);
+  color:var(--green-bright);border-radius:8px;display:flex;align-items:center;gap:8px;
+  transition:.22s;cursor:none;
+}
+.site-link:hover{background:rgba(107,211,75,.12);border-color:rgba(107,211,75,.5);}
+.eh-stat{text-align:right;}
+.eh-stat-n{font-size:1.8rem;font-weight:800;color:var(--green-bright);}
+.eh-stat-l{
+  font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--dim);
+}
+
+.produtos-sec{padding:20px 0 100px;position:relative;z-index:2;}
+.slabel{
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.24em;color:var(--green-bright);
+  text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:10px;
+}
+.slabel::before{content:'';display:block;width:28px;height:1px;background:var(--green);}
+.sec-title{font-size:clamp(1.7rem,3vw,2.4rem);font-weight:800;margin-bottom:40px;}
+.sec-title span{color:var(--green-bright);}
+
+.produtos-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;}
+.produto-card{
+  border:1px solid var(--border);border-radius:18px;background:rgba(6,18,8,.8);
+  overflow:hidden;transition:.26s;backdrop-filter:blur(8px);cursor:none;
+}
+.produto-card:hover{
+  transform:translateY(-5px);
+  border-color:rgba(107,211,75,.32);
+  box-shadow:0 18px 44px rgba(0,0,0,.34),0 0 28px rgba(107,211,75,.07);
+}
+.pc-img{
+  width:100%;aspect-ratio:4/3;
+  background:
+    linear-gradient(135deg,rgba(107,211,75,.1),rgba(107,211,75,.03)),
+    radial-gradient(circle at top right,rgba(144,240,111,.1),transparent 35%),
+    #0b140d;
+  display:flex;align-items:center;justify-content:center;
+  border-bottom:1px solid rgba(107,211,75,.1);
+  overflow:hidden;position:relative;
+}
+.pc-img img{
+  width:100%;height:100%;object-fit:cover;display:block;
+}
+.pc-img-placeholder{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--green-soft);opacity:.6;text-align:center;padding:20px;
+  display:flex;align-items:center;justify-content:center;width:100%;height:100%;
+}
+.pc-img-idx{
+  position:absolute;bottom:12px;right:14px;font-family:var(--mono);font-size:.58rem;
+  letter-spacing:.14em;color:rgba(107,211,75,.4);z-index:2;
+}
+.pc-body{padding:20px 20px 22px;}
+.pc-title{font-size:1.02rem;font-weight:700;color:#fff;margin-bottom:9px;}
+.pc-desc{font-size:.87rem;line-height:1.72;color:var(--dim);}
+.pc-tag{
+  display:inline-block;margin-top:14px;font-family:var(--mono);font-size:.56rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--green-soft);
+  padding:4px 10px;border-radius:999px;border:1px solid rgba(107,211,75,.18);
+  background:rgba(107,211,75,.04);
+}
+
+footer{
+  position:relative;z-index:2;border-top:1px solid var(--border);padding:34px 6vw;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;
+  background:rgba(2,8,4,.9);
+}
+.fl{display:flex;align-items:center;}
+.fl-logo{
+  height:30px;display:block;object-fit:contain;
+  filter:drop-shadow(0 0 10px rgba(107,211,75,.14));
+}
+.fc{font-family:var(--mono);font-size:.6rem;letter-spacing:.14em;color:var(--dim);}
+
+.not-found{padding:160px 0;text-align:center;}
+.not-found h2{font-size:2rem;font-weight:800;margin-bottom:16px;}
+.not-found p{color:var(--dim);font-size:.95rem;margin-bottom:28px;}
+.nf-btn{
+  font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;
+  padding:12px 24px;border:1px solid rgba(107,211,75,.28);background:rgba(107,211,75,.05);
+  color:var(--green-bright);border-radius:8px;display:inline-flex;align-items:center;gap:8px;
+  transition:.22s;cursor:none;
+}
+.nf-btn:hover{background:rgba(107,211,75,.12);}
+
+@media(max-width:960px){
+  .produtos-grid{grid-template-columns:1fr 1fr;}
+}
+@media(max-width:640px){
+  .produtos-grid{grid-template-columns:1fr;}
+  .eh-top{flex-direction:column;}
+  .eh-right{align-items:flex-start;}
+}
+</style>
+</head>
+<body>
+
+<div id="cur"></div>
+<div id="curR"></div>
+<canvas id="bgC"></canvas>
+<div class="grid-bg"></div>
+<div class="scanline"></div>
+
+<nav>
+  <a href="produtos.html" class="nl">
+    <img src="assets/logo-aioti.png" alt="AIOTI" class="nl-logo"/>
+  </a>
+  <a href="produtos.html" class="back-btn">← Voltar</a>
+</nav>
+
+<div id="pageContent"></div>
+
+<footer>
+  <div class="fl"><img src="assets/logo-aioti.png" alt="AIOTI" class="fl-logo"/></div>
+  <div class="fc">© <span id="yr"></span> AIOTI Soluções Industriais</div>
+</footer>
+
+<script>
+const cur=document.getElementById('cur');
+const curR=document.getElementById('curR');
+let mx=0,my=0,rx=0,ry=0;
+
+document.addEventListener('mousemove',e=>{
+  mx=e.clientX;my=e.clientY;
+  cur.style.left=mx+'px';
+  cur.style.top=my+'px';
+});
+(function ac(){
+  rx+=(mx-rx)*.12;
+  ry+=(my-ry)*.12;
+  curR.style.left=rx+'px';
+  curR.style.top=ry+'px';
+  requestAnimationFrame(ac);
+})();
+function hoverOn(){
+  cur.style.width='6px';
+  cur.style.height='6px';
+  curR.style.width='50px';
+  curR.style.height='50px';
+}
+function hoverOff(){
+  cur.style.width='10px';
+  cur.style.height='10px';
+  curR.style.width='34px';
+  curR.style.height='34px';
+}
+document.querySelectorAll('a,button').forEach(el=>{
+  el.addEventListener('mouseenter',hoverOn);
+  el.addEventListener('mouseleave',hoverOff);
+});
+
+const canvas=document.getElementById('bgC');
+const ctx=canvas.getContext('2d');
+let W,H,pts=[];
+
+function resize(){
+  W=canvas.width=innerWidth;
+  H=canvas.height=innerHeight;
+  buildPts();
+}
+function buildPts(){
+  pts=[];
+  const n=Math.min(Math.floor(W*H/12000),70);
+  for(let i=0;i<n;i++){
+    pts.push({
+      x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.14,vy:-.05-Math.random()*.18,
+      s:.4+Math.random()*1.3,a:.1+Math.random()*.42,c:Math.random()>.5?'107,211,75':'88,191,57',
+      t:Math.random()*Math.PI*2,ts:.007+Math.random()*.011
+    });
+  }
+}
+window.addEventListener('resize',resize);
+resize();
+
+function drawBg(){
+  ctx.clearRect(0,0,W,H);
+  for(let i=0;i<pts.length;i++){
+    for(let j=i+1;j<pts.length;j++){
+      const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<120){
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x,pts[i].y);
+        ctx.lineTo(pts[j].x,pts[j].y);
+        ctx.strokeStyle=`rgba(95,190,70,${(1-d/120)*.07})`;
+        ctx.lineWidth=.5;
+        ctx.stroke();
+      }
+    }
+  }
+  pts.forEach(p=>{
+    p.t+=p.ts;
+    const a=p.a*(.6+.4*Math.sin(p.t));
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.s,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${p.c},${a})`;
+    ctx.fill();
+    p.x+=p.vx;
+    p.y+=p.vy;
+    if(p.y<-10){p.y=H+10;p.x=Math.random()*W;}
+    if(p.x<-10)p.x=W+10;
+    if(p.x>W+10)p.x=-10;
+  });
+  requestAnimationFrame(drawBg);
+}
+drawBg();
+
+const EMPRESAS_DEMO = {
+  conexled: {
+    nome: "Conexled",
+    initials: "CX",
+    desc: "Parceiro e marca com confiança técnica na linha de luminárias, com soluções voltadas para ambientes industriais, comerciais e aplicações especiais.",
+    url: "https://conexled.com/produtos/",
+    categorias: ["luminárias"],
+    produtos: [
+      { nome: "Luminária Industrial Hermética", desc: "Luminária Hermética Industrial LED com alto rendimento e longa vida útil, ideal para ambientes industriais agressivos e comerciais.", tag: "Hermética", img: "assets/Conexled-1.png" },
+      { nome: "Blindada Industrial", desc: "Luminária LED blindada para ambientes industriais com proteção IP66, corpo em alumínio fundido e instalação prática com borne integrado.", tag: "Blindada", img: "assets/Conexled-2.png" },
+      { nome: "Galpão / High Bay", desc: "Luminária LED High Bay Industrial CLI-H(F), com alta eficiência luminosa de 170 lm/W, corpo em alumínio resistente, opções de ângulo de abertura de 60°, 90° e 110°, e vida útil de até 100.000 horas.", tag: "High Bay", img: "assets/Conexled-3.png" },
+      { nome: "Projetor Portátil", desc: "Para utilização em obras e equipamentos, em todas as áreas que necessitem de uma luminária autônoma sem a necessidade de conectá-la à rede elétrica.", tag: "Portátil", img: "assets/Conexled-4.png" }
+    ]
+  },
+  digitrol: {
+    nome: "Digitrol",
+    initials: "DG",
+    desc: "Empresa voltada para instrumentação e soluções de medição, monitoramento e controle, com portfólio técnico para aplicações industriais e utilidades.",
+    url: "https://digitrol.com.br/produtos/",
+    categorias: ["instrumentação"],
+    produtos: [
+      { nome: "Chave de Nível Ultrassônica ULS200 Siemens", desc: "A Pointek ULS200 da Siemens é uma chave ultrassônica sem contato com 2 relés de chaveamento para detecção de nível de sólidos, líquidos e lodos em uma ampla gama de indústrias.", tag: "Nível", img: "assets/Digitrol-1.png" },
+      { nome: "Transmissor de Pressão – Compressores", desc: "O JUMO MIDAS C12 CA é projetado como um transmissor de pressão especialmente para requisitos na área de medição de pressão de compressor.", tag: "Pressão", img: "assets/Digitrol-2.png" },
+      { nome: "Transmissor de Pressão DS III Siemens", desc: "Os Transmissores de Pressão Manométrica da Série SITRANS P DS III da Siemens medem pressão absoluta e manométrica com uma precisão de 0,075%.", tag: "SITRANS", img: "assets/Digitrol-3.png" },
+      { nome: "DGT_ULTRA Medidor Ultrassônico de Volume de Água", desc: "O DGT_ULTRA é um medidor eletrônico de volume de água com princípio de medição ultrassônico, desenvolvido e fabricado no Brasil pela Digitrol.", tag: "Ultrassônico", img: "assets/Digitrol-4.png" }
+    ]
+  },
+  atlascopco: {
+    nome: "Atlas Copco",
+    initials: "AC",
+    desc: "Marca reconhecida em ferramentas industriais, aperto controlado e equipamentos para aplicações de alto desempenho e confiabilidade em campo e fábrica.",
+    url: "https://www.atlascopco.com/en-us/itba",
+    categorias: ["ferramentas"],
+    produtos: [
+      { nome: "Parafusadeira Angular sem Fio XTB", desc: "Com um transdutor de torque robusto, o XTB proporciona excelente controle de processo para aplicações de qualidade crítica.", tag: "Parafusadeira", img: "assets/AtlasCopco-1.png" },
+      { nome: "Pistola de Bateria Nutrunner SRB81", desc: "O SRB81 possui três níveis de funcionalidade, cada um projetado para atender diferentes usuários. Todos os modelos são equipados com um transdutor.", tag: "Nutrunner", img: "assets/AtlasCopco-2.png" },
+      { nome: "Ferramenta de Pulso sem Fio tipo Pistola TBP-S", desc: "Com o mesmo hardware do TBP, mas com uma versão de software mais enxuta, adequada para apertos que exigem alta qualidade.", tag: "Pulso", img: "assets/AtlasCopco-3.png" },
+      { nome: "Bombas de Torque Hidráulico", desc: "A gama de bombas de torque hidráulico é perfeitamente adequada para operações industriais e em campo, em regime de funcionamento contínuo.", tag: "Torque", img: "assets/AtlasCopco-4.png" }
+    ]
+  },
+  poleoduto: {
+    nome: "Poleoduto",
+    initials: "PO",
+    desc: "Empresa com foco em infraestrutura industrial para suporte, passagem e organização de cabos, fios e instalações técnicas.",
+    url: "https://poleoduto.com.br/produtos/",
+    categorias: ["infraestrutura"],
+    produtos: [
+      { nome: "Leitos para Cabos", desc: "Suportes construídos em chapa de aço carbono e constituídos de duas longarinas dobradas.", tag: "Cabos", img: "assets/Polieduto-1.png" },
+      { nome: "Eletrocalhas", desc: "Estrutura para passar cabos, fios elétricos, dados e imagens. Muito comuns em empresas e estabelecimentos comerciais.", tag: "Eletrocalha", img: "assets/Poleoduto-2.png" }
+    ]
+  },
+  enmac: {
+    nome: "Enmac",
+    initials: "EN",
+    desc: "Empresa voltada para soluções estruturais e componentes de infraestrutura com materiais de alta resistência mecânica e à corrosão.",
+    url: "https://enmac.com.br/produtos/",
+    categorias: ["infraestrutura"],
+    produtos: [
+      { nome: "Pultrudados", desc: "Elevada resistência mecânica que permite sua utilização também como suportes de sustentação ou racks.", tag: "Pultrudado", img: "assets/Enmac-1.png" },
+      { nome: "Grades e Degraus", desc: "Grades de Piso Pultrudadas com resistência à corrosão, elevada resistência mecânica, resistência ao impacto, alta resistência à fadiga, baixo peso, elevada rigidez, superfície antiderrapante, baixa manutenção, baixa condutividade térmica e fácil montagem.", tag: "Grades", img: "assets/Enmac-2.png" }
+    ]
+  },
+  microautomacao: {
+    nome: "Micro Automação",
+    initials: "MA",
+    desc: "Parceiro em automação com soluções compactas e confiáveis para controle de fluidos, válvulas e aplicações industriais especializadas.",
+    url: "https://br.microautomacion.com/pt/produtos/",
+    categorias: ["automação"],
+    produtos: [
+      { nome: "Estações de Válvulas", desc: "As estações de válvulas multipolo oferecem soluções compactas e confiáveis em várias aplicações, em diferentes tipos de indústrias.", tag: "Válvulas", img: "assets/MIcroAutomações-1.png" },
+      { nome: "Eletroválvulas Piezoelétricas e Antiexplosivas", desc: "A tecnologia piezoelétrica utiliza uma cerâmica que muda sua forma ao circular corrente. São multitensão, resistem a campos magnéticos, para equipamentos NON STOP e aplicações antiexplosivas.", tag: "Piezoelétrica", img: "assets/MIcroAutomações-2.png" }
+    ]
+  },
+  siemens: {
+    nome: "Siemens",
+    initials: "SM",
+    desc: "Marca global em automação industrial, com soluções de controle, PLCs e plataformas robustas para aplicações de automação básica e avançada.",
+    url: "https://www.siemens.com/pt-br/products/simatic/s7-1200-g2/",
+    categorias: ["automação"],
+    produtos: [
+      { nome: "PLC SIMATIC S7-1200 G2", desc: "O SIMATIC S7-1200 G2 é a escolha inteligente para automação básica. Este PLC compacto aumenta a produtividade com desempenho aprimorado em um design que economiza espaço.", tag: "PLC", img: "assets/Siemens-1.png" }
+    ]
+  },
+  delta: {
+    nome: "Delta",
+    initials: "DL",
+    desc: "Empresa com forte atuação em automação industrial, controle, robótica, conectividade IIoT e acionamentos para aplicações de alto desempenho.",
+    url: "https://delta-electronics.com.br/produtos/clp-de-medio-porte-serie-as/",
+    categorias: ["automação"],
+    produtos: [
+      { nome: "CLP de Médio Porte Série AS", desc: "O CLP compacto modular de faixa intermediária da série AS da Delta é um controlador para diversas finalidades com alto desempenho, projetado para todos os tipos de equipamentos automatizados.", tag: "CLP", img: "assets/Delta-1.png" },
+      { nome: "Robô Articulado", desc: "Os Robôs Articulados da Delta, Série DRV, com controlador de robô série DCV, facilitam integração perfeita com outros dispositivos periféricos da Delta para estabelecer estações de trabalho robotizadas altamente integradas.", tag: "Robótica", img: "assets/Delta-2.png" }
+    ]
+  },
+  sick: {
+    nome: "SICK",
+    initials: "SK",
+    desc: "Empresa com forte atuação em automação e sensoriamento industrial, com portfólio técnico para detecção, segurança e monitoramento.",
+    url: "https://www.sick.com/br/pt/produtos/c/g568268",
+    categorias: ["automação"],
+    produtos: []
+  }
+};
+
+document.getElementById('yr').textContent=new Date().getFullYear();
+
+const raw = sessionStorage.getItem('aioti_empresa');
+const content = document.getElementById('pageContent');
+const AIOTI_WHATSAPP = "5585991931240";
+
+function escapeHtml(str=''){
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#039;');
+}
+
+function assetPath(path=''){
+  return encodeURI(path);
+}
+
+function getEmpresaData(){
+  const params = new URLSearchParams(window.location.search);
+  const slug = params.get('empresa');
+
+  if (slug && EMPRESAS_DEMO[slug]) return EMPRESAS_DEMO[slug];
+
+  if (raw) {
+    try {
+      return JSON.parse(raw);
+    } catch(e){}
+  }
+
+  return EMPRESAS_DEMO.conexled;
+}
+
+function openWhatsAppForProduct(empresaNome, produtoNome){
+  const mensagem = `Olá! Tenho interesse no produto ${produtoNome} da empresa ${empresaNome}. Gostaria de conversar com +55 85 99193-1240 no WhatsApp.`;
+  const url = `https://wa.me/${AIOTI_WHATSAPP}?text=${encodeURIComponent(mensagem)}`;
+  window.open(url, '_blank');
+}
+
+const emp = getEmpresaData();
+
+if(!emp){
+  content.innerHTML=`
+    <section class="not-found">
+      <div class="wrap" style="position:relative;z-index:2;">
+        <div class="not-found">
+          <h2>Empresa não encontrada</h2>
+          <p>Acesse a página de empresas e selecione um card para ver os detalhes.</p>
+          <a href="produtos.html" class="nf-btn">← Ver Empresas</a>
+        </div>
+      </div>
+    </section>`;
+} else {
+  document.title = `AIOTI · ${emp.nome}`;
+
+  const produtosHTML = emp.produtos.map((p,i)=>`
+    <article class="produto-card" data-empresa="${escapeHtml(emp.nome)}" data-produto="${escapeHtml(p.nome)}" role="button" tabindex="0" aria-label="Abrir WhatsApp sobre ${escapeHtml(p.nome)}">
+      <div class="pc-img">
+        ${
+          p.img
+          ? `
+            <img
+              src="${assetPath(p.img)}"
+              alt="${escapeHtml(p.nome)}"
+              loading="lazy"
+              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+            />
+            <span class="pc-img-placeholder" style="display:none;">Imagem do produto</span>
+          `
+          : `
+            <span class="pc-img-placeholder">Imagem do produto</span>
+          `
+        }
+        <span class="pc-img-idx">${String(i+1).padStart(2,'0')}</span>
+      </div>
+      <div class="pc-body">
+        <h3 class="pc-title">${escapeHtml(p.nome)}</h3>
+        <p class="pc-desc">${escapeHtml(p.desc)}</p>
+        <span class="pc-tag">${escapeHtml(p.tag)}</span>
+      </div>
+    </article>
+  `).join('');
+
+  content.innerHTML=`
+    <section class="empresa-hero">
+      <div class="wrap">
+        <div class="breadcrumb">
+          <a href="produtos.html">Empresas</a>
+          <span>/</span>
+          <span style="color:var(--green-bright)">${escapeHtml(emp.nome)}</span>
+        </div>
+        <div class="eh-top">
+          <div class="eh-left">
+            <div class="eh-initials-big">${escapeHtml(emp.initials)}</div>
+            <h1 class="eh-name"><span>${escapeHtml(emp.nome)}</span></h1>
+            <div class="eh-cats">
+              ${emp.categorias.map(c=>`<span class="eh-cat">${escapeHtml(c.charAt(0).toUpperCase()+c.slice(1))}</span>`).join('')}
+            </div>
+            <p class="eh-desc">${escapeHtml(emp.desc)}</p>
+          </div>
+          <div class="eh-right">
+            <a href="${escapeHtml(emp.url)}" target="_blank" rel="noopener" class="site-link">Visitar site oficial ↗</a>
+            <div class="eh-stat">
+              <div class="eh-stat-n">${emp.produtos.length}</div>
+              <div class="eh-stat-l">produtos listados</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="hd"></div>
+
+    <section class="produtos-sec">
+      <div class="wrap">
+        <div class="slabel">Produtos</div>
+        <h2 class="sec-title">Linha <span>${escapeHtml(emp.nome)}</span></h2>
+        <div class="produtos-grid">${produtosHTML}</div>
+      </div>
+    </section>`;
+
+  document.querySelectorAll('.produto-card,.site-link,.nf-btn,.back-btn').forEach(el=>{
+    el.addEventListener('mouseenter',hoverOn);
+    el.addEventListener('mouseleave',hoverOff);
+  });
+
+  document.querySelectorAll('.produto-card').forEach(card=>{
+    card.addEventListener('click',()=>{
+      const empresa = card.dataset.empresa;
+      const produto = card.dataset.produto;
+      openWhatsAppForProduct(empresa, produto);
+    });
+
+    card.addEventListener('keydown',(e)=>{
+      if(e.key === 'Enter' || e.key === ' '){
+        e.preventDefault();
+        const empresa = card.dataset.empresa;
+        const produto = card.dataset.produto;
+        openWhatsAppForProduct(empresa, produto);
+      }
+    });
+  });
+}
+</script>
+</body>
+</html>

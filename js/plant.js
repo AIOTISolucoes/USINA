@@ -1,4 +1,4 @@
-// ======================================================
+﻿// ======================================================
 // ESTADO ÚNICO DA USINA (FONTE DA VERDADE NO FRONT)
 // ======================================================
 let PLANT_STATE = {
@@ -1511,7 +1511,11 @@ function ensureRelayUiScaffold() {
   }
 
   relayRow.classList.add("relay-row--table");
+<<<<<<< HEAD
   relayRow.style.gridTemplateColumns = "14px minmax(220px,1.25fr) repeat(3, minmax(140px,0.92fr)) minmax(180px,1fr) max-content";
+=======
+  relayRow.style.gridTemplateColumns = "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 64px";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 
   let expandIcon = relayRow.querySelector("#relayExpandIcon");
   if (!expandIcon) {
@@ -1541,7 +1545,11 @@ function ensureRelayUiScaffold() {
 
   if (commandBarWrap) {
     commandBarWrap.style.gridColumn = "7";
+<<<<<<< HEAD
     commandBarWrap.style.justifySelf = "end";
+=======
+    commandBarWrap.style.justifySelf = "center";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   }
 
   if (detailsPanel) {
@@ -1585,6 +1593,7 @@ function ensureDeviceMiniHeaders() {
 
   const applyHeader = (headerEl) => {
     if (!headerEl) return;
+<<<<<<< HEAD
     const cols = headerEl.querySelectorAll("span");
     if (cols[1]) cols[1].textContent = "";
     if (cols[2]) cols[2].textContent = "ACTIVE POWER";
@@ -1592,6 +1601,30 @@ function ensureDeviceMiniHeaders() {
     if (cols[4]) cols[4].textContent = "REACTIVE POWER";
     if (cols[5]) cols[5].textContent = "ÚLTIMA LEITURA";
     if (cols[6]) cols[6].textContent = "COMANDOS";
+=======
+    let spans = headerEl.querySelectorAll("span");
+
+    if (spans.length < 7) {
+      headerEl.innerHTML = `
+        <span></span>
+        <span></span>
+        <span>ACTIVE POWER</span>
+        <span>APPARENT POWER</span>
+        <span>REACTIVE POWER</span>
+        <span>ÚLTIMA LEITURA</span>
+        <span>COMANDOS</span>
+      `;
+      spans = headerEl.querySelectorAll("span");
+    } else {
+      spans[0].textContent = "";
+      spans[1].textContent = "";
+      spans[2].textContent = "ACTIVE POWER";
+      spans[3].textContent = "APPARENT POWER";
+      spans[4].textContent = "REACTIVE POWER";
+      spans[5].textContent = "ÚLTIMA LEITURA";
+      spans[6].textContent = "COMANDOS";
+    }
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   };
 
   applyHeader(relayHeader);
@@ -1696,7 +1729,11 @@ function ensureMultimeterUiScaffold() {
   }
 
   row.classList.add("relay-row--table");
+<<<<<<< HEAD
   row.style.gridTemplateColumns = "14px minmax(220px,1.25fr) repeat(3, minmax(140px,0.92fr)) minmax(180px,1fr) max-content";
+=======
+  row.style.gridTemplateColumns = "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 64px";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 
   const ensureMetricCell = (id, gridColumn) => {
     let el = row.querySelector(`#${id}`);
@@ -1718,7 +1755,11 @@ function ensureMultimeterUiScaffold() {
 
   if (commandBarWrap) {
     commandBarWrap.style.gridColumn = "7";
+<<<<<<< HEAD
     commandBarWrap.style.justifySelf = "end";
+=======
+    commandBarWrap.style.justifySelf = "center";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   }
 
   return {
@@ -1738,6 +1779,12 @@ function renderRelayCommandBar(deviceId, currentState = "off") {
   const normalizedState = currentState === "on" ? "on" : "off";
   setDevicePersistentState("relay", safeId, normalizedState);
   wrap.innerHTML = renderDeviceCommandControl("relay", safeId, normalizedState);
+<<<<<<< HEAD
+=======
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.justifyContent = "center";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   wireDeviceCommandButtons(wrap);
   applyDeviceVisualState("relay", safeId, normalizedState);
 }
@@ -1747,6 +1794,12 @@ function renderMultimeterCommandBar(deviceId) {
   if (!wrap) return;
   const safeId = String(deviceId ?? "multimeter");
   wrap.innerHTML = renderDeviceCommandControl("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
+<<<<<<< HEAD
+=======
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.justifyContent = "center";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   wireDeviceCommandButtons(wrap);
   applyDeviceVisualState("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
 }
@@ -1799,6 +1852,8 @@ function renderRelayCard(relayItem) {
   badgeOnline.style.borderColor = isOnline ? "rgba(57,229,140,0.26)" : "rgba(255,92,92,0.25)";
   badgeOnline.style.background = isOnline ? "rgba(57,229,140,0.08)" : "rgba(255,92,92,0.08)";
   badgeOnline.style.color = isOnline ? "rgba(233,255,243,0.92)" : "rgba(255,255,255,0.92)";
+  badgeOnline.style.marginLeft = "8px";
+  badgeOnline.style.whiteSpace = "nowrap";
 
   activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
   apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
@@ -1849,6 +1904,10 @@ function renderMultimeterCard(item) {
     onlineBadge.textContent = isOnline ? "ONLINE" : "OFFLINE";
     onlineBadge.classList.remove("relay-state--on", "relay-state--off", "relay-state--unknown");
     onlineBadge.classList.add(isOnline ? "relay-state--on" : "relay-state--off");
+<<<<<<< HEAD
+=======
+    onlineBadge.style.marginLeft = "8px";
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   }
 
   activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);

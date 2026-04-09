@@ -1820,6 +1820,7 @@ body::after{
   }
 }
 
+<<<<<<< HEAD
 #multimeterRow{
   display: grid !important;
   grid-template-columns: 14px max-content 1fr max-content !important;
@@ -1872,6 +1873,8 @@ body::after{
   z-index: 12;
 }
 
+=======
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 /* =========================================================
    MOBILE / TABLET RESPONSIVE (iPhone + Android)
 ========================================================= */
@@ -3209,7 +3212,13 @@ body.plant-enter #relaySection{
   display:flex;
 }
 
+<<<<<<< HEAD
 /* relay / multimeter table layout */
+=======
+/* =========================================================
+   RELÉ / MULTIMEDIDOR — TABELA HORIZONTAL CORRIGIDA
+========================================================= */
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 .device-mini-table{
   display:flex;
   flex-direction:column;
@@ -3223,10 +3232,16 @@ body.plant-enter #relaySection{
 
 .device-mini-header{
   display:grid;
+<<<<<<< HEAD
   grid-template-columns:14px minmax(220px,1.35fr) repeat(3, minmax(130px,0.9fr)) minmax(180px,1fr) max-content;
   align-items:center;
   column-gap:14px;
   justify-items:center;
+=======
+  grid-template-columns: 14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 64px;
+  align-items:center;
+  column-gap:14px;
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   padding:12px 16px;
   border-radius:10px;
   background:rgba(255,255,255,0.03);
@@ -3235,6 +3250,7 @@ body.plant-enter #relaySection{
   font-size:11px;
   font-weight:700;
   letter-spacing:.06em;
+<<<<<<< HEAD
   text-align:center;
   text-transform:uppercase;
 }
@@ -3251,6 +3267,47 @@ body.plant-enter #relaySection{
 
 .relay-row--table .relay-right,
 #multimeterRow .relay-right{
+=======
+  text-transform:uppercase;
+}
+
+.device-mini-header > span{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  white-space:nowrap;
+}
+
+.device-mini-header > span:nth-child(2){
+  justify-content:flex-start;
+  text-align:left;
+}
+
+.relay-row--table,
+#multimeterRow{
+  display:grid !important;
+  grid-template-columns: 14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 64px !important;
+  align-items:center !important;
+  column-gap:14px !important;
+  padding:14px 16px !important;
+}
+
+.relay-row--table .relay-left,
+#multimeterRow .relay-left,
+#multimeterRow .multimeter-left{
+  grid-column:2;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:nowrap;
+}
+
+.relay-row--table .relay-right,
+#multimeterRow .relay-right,
+#multimeterRight{
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   display:none !important;
 }
 
@@ -3260,7 +3317,13 @@ body.plant-enter #relaySection{
   justify-content:center;
   min-width:0;
   white-space:nowrap;
+<<<<<<< HEAD
   font-size:13px;
+=======
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:14px;
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   font-weight:800;
   color:rgba(233,255,243,0.94);
   text-align:center;
@@ -3269,8 +3332,15 @@ body.plant-enter #relaySection{
 
 .relay-timestamp-cell{
   font-size:12px;
+<<<<<<< HEAD
   font-weight:600;
   color:rgba(154,219,184,0.78);
+=======
+  font-weight:700;
+  color:rgba(154,219,184,0.78);
+  text-align:center;
+  justify-content:center;
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 }
 
 #relaySection .device-mini-header span:nth-child(2),
@@ -3279,16 +3349,71 @@ body.plant-enter #relaySection{
 }
 
 .relay-expand-icon{
+<<<<<<< HEAD
   margin-left:4px;
   font-size:11px;
   color:rgba(154,219,184,0.74);
   transition:transform .18s ease;
+=======
+  margin-left:6px;
+  font-size:11px;
+  color:rgba(154,219,184,0.74);
+  transition:transform .18s ease;
+  flex:0 0 auto;
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 }
 
 .relay-row.open .relay-expand-icon{
   transform:rotate(180deg);
 }
 
+<<<<<<< HEAD
+=======
+#relayCommandBarWrap,
+#multimeterCommandBarWrap{
+  grid-column:7 !important;
+  justify-self:center !important;
+  align-self:center !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  min-width:64px !important;
+}
+
+#relayTsText,
+#multimeterLastReadingValue{
+  justify-content:center !important;
+  text-align:center !important;
+}
+
+#relayActivePowerValue,
+#relayApparentPowerValue,
+#relayReactivePowerValue,
+#multimeterActivePowerValue,
+#multimeterApparentPowerValue,
+#multimeterReactivePowerValue{
+  justify-content:center !important;
+  text-align:center !important;
+}
+
+#relayOnlineBadge,
+#multimeterOnlineBadge{
+  height:28px;
+  min-width:66px;
+  padding:0 12px;
+  border-radius:999px;
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  margin-left:8px !important;
+}
+
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 .relay-details-panel{
   overflow:hidden;
   max-height:0;
@@ -3370,21 +3495,42 @@ body.plant-enter #relaySection{
 }
 
 @media (max-width: 900px){
+<<<<<<< HEAD
   .device-mini-header,
   .relay-row--table{
     grid-template-columns:14px 1fr !important;
     row-gap:10px;
   }
 
+=======
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   .device-mini-header{
     display:none;
   }
 
+<<<<<<< HEAD
+=======
+  .relay-row--table,
+  #multimeterRow{
+    grid-template-columns: 14px 1fr !important;
+    row-gap:10px !important;
+  }
+
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   .device-metric-cell,
   #relayCommandBarWrap,
   #multimeterCommandBarWrap{
     grid-column:2 !important;
     justify-self:start !important;
+<<<<<<< HEAD
+=======
+    justify-content:flex-start !important;
+    text-align:left !important;
+  }
+
+  .relay-timestamp-cell{
+    justify-content:flex-start !important;
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
   }
 
   .relay-details-panel.open{

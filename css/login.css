@@ -403,6 +403,54 @@ body.login-page {
   color: var(--error);
   letter-spacing: 0.02em;
   animation: errorShake 0.4s cubic-bezier(0.36,0.07,0.19,0.97);
+<<<<<<< HEAD
+}
+
+@keyframes errorShake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-6px); }
+  40%       { transform: translateX(6px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+
+/* ================================
+   FOOTER TAG
+================================ */
+.card-footer {
+  margin-top: 28px;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: rgba(106,173,138,0.35);
+  letter-spacing: 0.15em;
+}
+
+/* ================================
+   RESPONSIVE
+================================ */
+@media (max-width: 480px) {
+  .login-container {
+    padding: 12px;
+  }
+  .login-card {
+    padding: 36px 24px 32px;
+  }
+  .logo-name {
+    font-size: 2rem;
+  }
+  .logo-svg {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .login-card {
+    padding: 28px 18px 26px;
+  }
+=======
+>>>>>>> cc6ee50 (Align relay and multimeter table layouts)
 }
 
 @keyframes errorShake {
