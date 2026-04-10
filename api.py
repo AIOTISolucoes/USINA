@@ -3170,9 +3170,14 @@ def lambda_handler(event, context):
                     MAX(CASE WHEN r.point_name = 'resistance_insulation_mohm' THEN r.point_value END) AS resistance_insulation_mohm,
                     MAX(CASE WHEN r.point_name = 'cumulative_active_energy_kwh' THEN r.point_value END) AS cumulative_active_energy_kwh,
                     MAX(CASE WHEN r.point_name = 'power_dc_kw' THEN r.point_value END) AS power_dc_kw,
+                    MAX(d.cabin_id) AS cabin_id,
+                    MAX(c.code) AS cabin_code,
+                    MAX(c.name) AS cabin_name,
+                    MAX(c.display_order) AS cabin_display_order,
                     MAX(r."timestamp") AS last_reading_ts
                   FROM {tbl} r
                   LEFT JOIN public.device d ON d.id = r.device_id
+                  LEFT JOIN public.cabin c ON c.id = d.cabin_id
                   WHERE r.power_plant_id = %(plant_id)s
                     AND LOWER(COALESCE(r.device_type_name, '')) = 'inverter'
                     AND LOWER(COALESCE(r.reading_source, '')) = 'inverter'
@@ -3205,6 +3210,10 @@ def lambda_handler(event, context):
                   pv.string_voltage_v,
                   pv.power_dc_kw,
                   pv.resistance_insulation_mohm,
+                  pv.cabin_id,
+                  pv.cabin_code,
+                  pv.cabin_name,
+                  pv.cabin_display_order,
                   pv.working_status,
                   NULL::text AS inverter_status,
                   pv.state_operation,
@@ -3286,6 +3295,10 @@ def lambda_handler(event, context):
                     "string_voltage_v": fnum(r, "string_voltage_v"),
                     "power_dc_kw": fnum(r, "power_dc_kw"),
                     "resistance_insulation_mohm": fnum(r, "resistance_insulation_mohm"),
+                    "cabin_id": int(r["cabin_id"]) if r.get("cabin_id") is not None else None,
+                    "cabin_code": r.get("cabin_code"),
+                    "cabin_name": r.get("cabin_name"),
+                    "cabin_display_order": int(r["cabin_display_order"]) if r.get("cabin_display_order") is not None else None,
 
                     "working_status": inum(r, "working_status"),
                     "inverter_status": r.get("inverter_status"),
