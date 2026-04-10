@@ -3130,8 +3130,8 @@ def lambda_handler(event, context):
     # ========================================================
     # GET /plants/{plant_id}/inverters/realtime
     # ========================================================
-    if method == "GET" and plant_id and is_path(path, "/inverters/realtime"):
-        conn = get_conn()
+            if method == "GET" and plant_id and is_path(path, "/inverters/realtime"):
+             conn = get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
             cur.execute("SET LOCAL statement_timeout = '30000ms';")
@@ -3170,9 +3170,17 @@ def lambda_handler(event, context):
                     MAX(CASE WHEN r.point_name = 'resistance_insulation_mohm' THEN r.point_value END) AS resistance_insulation_mohm,
                     MAX(CASE WHEN r.point_name = 'cumulative_active_energy_kwh' THEN r.point_value END) AS cumulative_active_energy_kwh,
                     MAX(CASE WHEN r.point_name = 'power_dc_kw' THEN r.point_value END) AS power_dc_kw,
+                    MAX(d.cabin_id) AS cabin_id,
+                    MAX(c.code) AS cabin_code,
+                    MAX(c.name) AS cabin_name,
+                    MAX(c.display_order) AS cabin_display_order,
                     MAX(r."timestamp") AS last_reading_ts
                   FROM {tbl} r
-                  LEFT JOIN public.device d ON d.id = r.device_id
+                  JOIN public.device d
+                    ON d.id = r.device_id
+                   AND d.is_active = true
+                  LEFT JOIN public.cabin c
+                    ON c.id = d.cabin_id
                   WHERE r.power_plant_id = %(plant_id)s
                     AND LOWER(COALESCE(r.device_type_name, '')) = 'inverter'
                     AND LOWER(COALESCE(r.reading_source, '')) = 'inverter'
@@ -3205,11 +3213,19 @@ def lambda_handler(event, context):
                   pv.string_voltage_v,
                   pv.power_dc_kw,
                   pv.resistance_insulation_mohm,
+                  pv.cabin_id,
+                  pv.cabin_code,
+                  pv.cabin_name,
+                  pv.cabin_display_order,
                   pv.working_status,
                   NULL::text AS inverter_status,
                   pv.state_operation,
                   NULL::int AS communication_fault_code,
                   true AS is_communication_ok,
+                  pv.cabin_id,
+                  pv.cabin_code,
+                  pv.cabin_name,
+                  pv.cabin_display_order,
                   COALESCE(pv.state_operation, pv.working_status) AS status_code_raw,
                   CASE
                     WHEN pv.state_operation = 2 THEN 'RUNNING'
@@ -3221,7 +3237,10 @@ def lambda_handler(event, context):
                 FROM pivot pv
                 JOIN public.power_plant p ON p.id = pv.power_plant_id
                 WHERE (%(is_superuser)s = true OR p.customer_id = %(customer_id)s)
-                ORDER BY pv.device_id;
+                ORDER BY
+                  pv.cabin_display_order NULLS LAST,
+                  pv.cabin_name NULLS LAST,
+                  pv.device_id;
             """).format(
                 tbl=q(RT_SCHEMA, "mart_latest_reading")
             ), {
@@ -3292,6 +3311,7 @@ def lambda_handler(event, context):
                     "state_operation": inum(r, "state_operation"),
                     "communication_fault_code": r.get("communication_fault_code"),
                     "is_communication_ok": r.get("is_communication_ok"),
+
                 }
 
                 items.append(item)
