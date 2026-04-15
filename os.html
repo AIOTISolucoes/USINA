@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Ordens de Serviço · AIOTI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="os.css" />
+  <style>
+  body.theme-light{--bg-main:#f0f4f2;--bg-card:#fff;--bg-card-alt:#eaf4ee;--text-main:#0b0f0c;--text-muted:#5f6f66;--accent:#1fd67a;--border-soft:#e0e8e4;--accent-soft:rgba(31,214,122,.10);--col-bg:rgba(255,255,255,.7);--col-border:rgba(31,214,122,.15);}
+  body.theme-dark{--bg-main:#030608;--bg-card:#070d0a;--bg-card-alt:#0a1410;--text-main:#e6f5ec;--text-muted:#6a8e7a;--accent:#2aff7b;--border-soft:rgba(255,255,255,.07);--accent-soft:rgba(42,255,123,.08);--col-bg:rgba(7,14,10,.85);--col-border:rgba(42,255,123,.12);}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:"Roboto",sans-serif;background:var(--bg-main);color:var(--text-main);overflow-x:hidden;
+    background-image:radial-gradient(800px 500px at 15% 5%,rgba(42,255,123,.04),transparent 60%),radial-gradient(600px 400px at 80% 90%,rgba(42,255,123,.03),transparent 60%);background-attachment:fixed;}
+  .layout{display:grid;grid-template-columns:68px 1fr;min-height:100vh;}
+  /* sidebar */
+  .os-sidebar{background:var(--bg-card);border-right:1px solid var(--border-soft);display:flex;flex-direction:column;align-items:center;padding:0 0 16px;height:100vh;position:sticky;top:0;z-index:100;width:68px;}
+  .os-sidebar-logo{width:68px;height:56px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border-soft);flex-shrink:0;}
+  .os-sidebar-logo img{width:38px;height:38px;object-fit:contain;}
+  .os-sidebar-logo-fallback{font-family:"Exo 2",sans-serif;font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.1em;}
+  .os-sidebar-nav{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;padding:10px 8px 0;}
+  .os-nav-item{width:52px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);cursor:pointer;transition:.15s;text-decoration:none;}
+  .os-nav-item svg{width:20px;height:20px;flex-shrink:0;transition:.15s;}
+  .os-nav-item span{font-size:9px;font-family:"Exo 2",sans-serif;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
+  .os-nav-item:hover,.os-nav-item.active{background:var(--accent-soft);border-color:rgba(42,255,123,.35);color:var(--accent);}
+  .os-sidebar-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 8px;}
+  .os-icon-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-soft);background:var(--bg-card-alt);color:var(--text-muted);cursor:pointer;font-size:14px;transition:.15s;}
+  .os-icon-btn:hover{color:var(--accent);border-color:rgba(42,255,123,.4);}
+  /* topbar */
+  .main{display:flex;flex-direction:column;min-width:0;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border-soft);background:var(--bg-card);gap:12px;}
+  .topbar-left{display:flex;flex-direction:column;gap:1px;}
+  .topbar-title{font-family:"Exo 2",sans-serif;font-size:15px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:8px;}
+  .topbar-sub{font-size:11px;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;}
+  .topbar-right{display:flex;align-items:center;gap:10px;}
+  .topbar-search{display:flex;align-items:center;gap:8px;background:var(--bg-card-alt);border:1px solid var(--border-soft);border-radius:8px;padding:6px 12px;min-width:200px;}
+  .topbar-search input{background:none;border:none;outline:none;color:var(--text-main);font-size:13px;width:100%;}
+  .topbar-search input::placeholder{color:var(--text-muted);}
+  .topbar-search i{color:var(--text-muted);font-size:13px;}
+  .icon-btn{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-soft);background:var(--bg-card-alt);color:var(--text-muted);cursor:pointer;font-size:14px;transition:.15s;}
+  .icon-btn:hover{color:var(--accent);border-color:rgba(42,255,123,.4);}
+  .user-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;border:1px solid var(--border-soft);background:var(--bg-card-alt);font-size:12px;}
+  .avatar{width:22px;height:22px;border-radius:50%;background:#112218;border:1px solid rgba(42,255,123,.3);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--accent);}
+  .hidden{display:none!important;}
+  </style>
+  <script src="app.js"></script>
+  <script src="os.js" defer></script>
+</head>
+<body class="theme-dark">
+<div class="layout">
+
+  <!-- ═══ SIDEBAR OS ═══ -->
+  <aside class="os-sidebar">
+    <div class="os-sidebar-logo">
+      <img src="assets/logo-aioti.png" alt="AIOTI"
+           onerror="this.style.display='none';document.getElementById('logoFallback').style.display='flex';" />
+      <span id="logoFallback" style="display:none;" class="os-sidebar-logo-fallback">AIOTI</span>
+    </div>
+    <nav class="os-sidebar-nav">
+      <!-- HOME -->
+      <a href="resumo.html" class="os-nav-item" title="Home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/>
+          <polyline points="9 21 9 12 15 12 15 21"/>
+        </svg>
+        <span>Home</span>
+      </a>
+      <!-- TAREFAS (kanban) -->
+      <a href="os.html" class="os-nav-item active" title="Tarefas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="8" rx="1.5"/>
+          <rect x="14" y="3" width="7" height="5" rx="1.5"/>
+          <rect x="14" y="12" width="7" height="9" rx="1.5"/>
+          <rect x="3" y="15" width="7" height="6" rx="1.5"/>
+        </svg>
+        <span>Tarefas</span>
+      </a>
+      <!-- ATIVOS -->
+      <a href="#" class="os-nav-item" id="navAtivos" title="Ativos">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
+        </svg>
+        <span>Ativos</span>
+      </a>
+    </nav>
+    <div class="os-sidebar-bottom">
+      <button class="os-icon-btn" id="themeToggleBtn" title="Alternar tema"><i id="themeIcon" class="fa-solid fa-moon"></i></button>
+      <button class="os-icon-btn" id="logoutBtn" title="Sair"><i class="fa-solid fa-right-from-bracket"></i></button>
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN ═══ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;color:var(--accent)">
+            <rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/>
+            <rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/>
+          </svg>
+          Tarefas
+        </div>
+        <div class="topbar-sub">Vista Kanban</div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="kbSearchInput" placeholder="Buscar OS, ativo..." />
+        </div>
+        <button class="icon-btn" id="kbFilterBtn" title="Filtros"><i class="fa-solid fa-sliders"></i></button>
+        <button class="icon-btn" id="kbRefreshBtn" title="Atualizar"><i class="fa-solid fa-rotate-right"></i></button>
+        <div class="user-pill">
+          <div class="avatar" id="userAvatar">?</div>
+          <span id="userNameDisplay" style="font-size:12px;"></span>
+        </div>
+      </div>
+    </header>
+
+    <div class="kb-board" id="kbBoard">
+      <div class="kb-col" data-status="pendente">
+        <div class="kb-col-header">
+          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#f59e0b;"></span><span class="kb-col-title">Tarefas pendentes</span><span class="kb-col-count" id="count-pendente">0</span></div>
+          <button class="kb-col-refresh" data-col="pendente"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <div class="kb-col-body" id="col-pendente"><div class="kb-loading" id="loading-pendente"><span class="kb-spinner"></span></div></div>
+      </div>
+      <div class="kb-col" data-status="em_processo">
+        <div class="kb-col-header">
+          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#3b82f6;"></span><span class="kb-col-title">OSs em Processo</span><span class="kb-col-count" id="count-em_processo">0</span></div>
+          <button class="kb-col-refresh" data-col="em_processo"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <div class="kb-col-body" id="col-em_processo"><div class="kb-loading" id="loading-em_processo"><span class="kb-spinner"></span></div></div>
+      </div>
+      <div class="kb-col" data-status="em_verificacao">
+        <div class="kb-col-header">
+          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#a855f7;"></span><span class="kb-col-title">OSs em Verificação</span><span class="kb-col-count" id="count-em_verificacao">0</span></div>
+          <button class="kb-col-refresh" data-col="em_verificacao"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <div class="kb-col-body" id="col-em_verificacao"><div class="kb-loading" id="loading-em_verificacao"><span class="kb-spinner"></span></div></div>
+      </div>
+      <div class="kb-col" data-status="concluida">
+        <div class="kb-col-header">
+          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#2aff7b;box-shadow:0 0 6px rgba(42,255,123,.5);"></span><span class="kb-col-title">OSs Concluídas</span><span class="kb-col-count" id="count-concluida">0</span></div>
+          <button class="kb-col-refresh" data-col="concluida"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <div class="kb-col-body" id="col-concluida"><div class="kb-loading" id="loading-concluida"><span class="kb-spinner"></span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FAB -->
+<button class="kb-fab" id="kbFab" title="Nova Ordem de Serviço">
+  <svg viewBox="0 0 60 60" fill="none" class="fab-hex">
+    <polygon points="30,2 56,16 56,44 30,58 4,44 4,16" fill="rgba(10,25,18,.95)" stroke="rgba(42,255,123,.7)" stroke-width="1.5"/>
+    <line x1="30" y1="20" x2="30" y2="40" stroke="#2aff7b" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="20" y1="30" x2="40" y2="30" stroke="#2aff7b" stroke-width="2.5" stroke-linecap="round"/>
+  </svg>
+  <div class="fab-ring"></div>
+</button>
+
+<!-- ═══ WIZARD ═══ -->
+<div class="wz-overlay hidden" id="wzOverlay">
+  <div class="wz-modal">
+    <div class="wz-header">
+      <div class="wz-header-left">
+        <button class="wz-back-btn hidden" id="wzBackBtn"><i class="fa-solid fa-arrow-left"></i></button>
+        <div class="wz-header-title">Tarefa Não programada</div>
+      </div>
+      <button class="wz-close-btn" id="wzCloseBtn"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="wz-steps">
+      <div class="wz-step active" data-step="1"><div class="wz-step-circle">1</div><div class="wz-step-label">Ativo</div></div>
+      <div class="wz-step-line"></div>
+      <div class="wz-step" data-step="2"><div class="wz-step-circle">2</div><div class="wz-step-label">Tarefa</div></div>
+      <div class="wz-step-line"></div>
+      <div class="wz-step" data-step="3"><div class="wz-step-circle">3</div><div class="wz-step-label">SubTarefas</div></div>
+      <div class="wz-step-line"></div>
+      <div class="wz-step" data-step="4"><div class="wz-step-circle">4</div><div class="wz-step-label">Recursos</div></div>
+    </div>
+
+    <div class="wz-body">
+
+      <!-- STEP 1: ATIVO -->
+      <div class="wz-step-content" id="wz-step-1">
+        <div class="wz-field-group">
+          <label class="wz-label required">Ativo</label>
+          <div class="wz-asset-selected hidden" id="assetSelected">
+            <i class="fa-regular fa-eye" style="color:var(--accent);"></i>
+            <span id="assetSelectedName">—</span>
+            <button class="wz-asset-clear" id="assetClearBtn"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <button class="wz-asset-search-btn" id="assetSearchBtn">
+            <i class="fa-solid fa-magnifying-glass"></i><span>Selecionar ativo...</span>
+            <i class="fa-solid fa-chevron-down" style="margin-left:auto;font-size:11px;"></i>
+          </button>
+          <div class="wz-error hidden" id="err-asset">Ativo não pode ficar em branco</div>
+        </div>
+        <div class="wz-row-2">
+          <div class="wz-field-group">
+            <label class="wz-label required">Data do Incidente</label>
+            <div class="wz-input-icon"><input type="datetime-local" id="f-incident-date" class="wz-input" /><i class="fa-regular fa-calendar"></i></div>
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Requerido por</label>
+            <input type="text" id="f-requested-by" class="wz-input" readonly />
+          </div>
+        </div>
+        <div class="wz-check-row">
+          <label class="wz-checkbox-label" id="failedCheckLabel">
+            <div class="wz-custom-check" id="failedCheck"></div><span>O ativo falhou?</span>
+          </label>
+        </div>
+        <div class="wz-failure-fields hidden" id="failureFields">
+          <div class="wz-row-3">
+            <div class="wz-field-group">
+              <label class="wz-label required">Tipo de falha</label>
+              <select id="f-failure-type" class="wz-input wz-select">
+                <option value="">Selecionar...</option>
+                <option>Ambiental</option><option>Armazenamento e Manuseio</option><option>Civil</option>
+                <option>Conectividade/Comunicação</option><option>Controle</option><option>Corrosão</option>
+                <option>Desligamento</option><option>Elétrica</option><option>Erosão</option>
+                <option>Fadiga</option><option>Falha de Projeto</option><option>Falha Humana</option>
+                <option>Falha no Processo</option><option>Instrumentação</option><option>Mecânica</option>
+                <option>Pressão</option><option>Temperatura</option><option>Vibração</option><option>Outros</option>
+              </select>
+              <div class="wz-error hidden" id="err-failure-type">Tipo de falha não pode ficar em branco</div>
+            </div>
+            <div class="wz-field-group">
+              <label class="wz-label required">Causa da falha</label>
+              <select id="f-failure-cause" class="wz-input wz-select">
+                <option value="">Selecionar...</option>
+                <option>Desgaste normal</option><option>Sobrecarga</option><option>Corrosão</option>
+                <option>Contaminação</option><option>Erro humano</option><option>Falha de projeto</option>
+                <option>Falha de fabricação</option><option>Manutenção inadequada</option>
+                <option>Material inadequado</option><option>Vibração excessiva</option>
+                <option>Temperatura excessiva</option><option>Sobretensão</option><option>Curto-circuito</option>
+                <option>Falha de isolamento</option><option>Raio/Surto</option><option>Outros</option>
+              </select>
+              <div class="wz-error hidden" id="err-failure-cause">Causa da falha não pode ficar em branco</div>
+            </div>
+            <div class="wz-field-group">
+              <label class="wz-label required">Método de Detecção da Falha</label>
+              <select id="f-detection-method" class="wz-input wz-select">
+                <option value="">Selecionar...</option>
+                <option>Alarme automático</option><option>Inspeção visual</option>
+                <option>Monitoramento remoto</option><option>Medição/Instrumentação</option>
+                <option>Teste funcional</option><option>Relatório de operador</option>
+                <option>Manutenção preventiva</option><option>Análise de vibração</option>
+                <option>Termografia</option><option>Outros</option>
+              </select>
+              <div class="wz-error hidden" id="err-detection-method">Método de Detecção não pode ficar em branco</div>
+            </div>
+          </div>
+          <div class="wz-row-3">
+            <div class="wz-field-group">
+              <label class="wz-label">Severidade das Falhas</label>
+              <select id="f-failure-severity" class="wz-input wz-select">
+                <option value="">— Sem severidade definida</option>
+                <option value="insignificante">Insignificante</option><option value="menor">Menor</option>
+                <option value="moderada">Moderada</option><option value="critica">Crítica</option><option value="catastrofica">Catastrófica</option>
+              </select>
+            </div>
+            <div class="wz-field-group">
+              <label class="wz-label">Tipo de dano</label>
+              <select id="f-damage-type" class="wz-input wz-select">
+                <option value="Nenhum">Nenhum</option>
+                <option>Dano ao equipamento</option><option>Dano às instalações</option>
+                <option>Perda de produção</option><option>Dano ao meio ambiente</option>
+                <option>Lesão pessoal</option><option>Perda de dados</option>
+              </select>
+            </div>
+            <div class="wz-field-group">
+              <label class="wz-label">Causou interrupção de outros ativos?</label>
+              <div class="wz-input-icon">
+                <input type="text" id="f-interruption-duration" class="wz-input" placeholder="000:00" value="000:00" />
+                <i class="fa-regular fa-clock" style="font-size:13px;"></i>
+              </div>
+            </div>
+          </div>
+          <div class="wz-check-row" style="padding-left:0;">
+            <label class="wz-checkbox-label" id="serviceCheckLabel">
+              <div class="wz-custom-check" id="serviceCheck"></div>
+              <span>Essa tarefa também deve ser encerrada para que o Ativo volte a entrar no serviço?</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2: TAREFA -->
+      <div class="wz-step-content hidden" id="wz-step-2">
+        <div class="wz-field-group">
+          <label class="wz-label required">Descrição da tarefa</label>
+          <input type="text" id="f-task-desc" class="wz-input" placeholder="Ex: Religamento da Cabine 1" />
+          <div class="wz-error hidden" id="err-task-desc">Descrição não pode ficar em branco</div>
+        </div>
+        <div class="wz-field-group">
+          <label class="wz-label">Observação</label>
+          <textarea id="f-observation" class="wz-input wz-textarea" rows="4" placeholder="Notas técnicas, contexto adicional..."></textarea>
+        </div>
+        <div class="wz-row-3">
+          <div class="wz-field-group">
+            <label class="wz-label required">Tipo de tarefa</label>
+            <select id="f-task-type" class="wz-input wz-select">
+              <option value="">Selecionar...</option>
+              <option>Administrativa</option>
+              <option>Corretiva</option>
+              <option>Corretiva Emergencial</option>
+              <option>Handover</option>
+              <option>Inspeção</option>
+              <option>Preditiva</option>
+              <option>Preventiva</option>
+              <option>Ronda</option>
+            </select>
+            <div class="wz-error hidden" id="err-task-type">Tipo de tarefa não pode ficar em branco</div>
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Classificação 1</label>
+            <select id="f-class1" class="wz-input wz-select">
+              <option value="">Selecionar...</option>
+              <option>Calibração</option>
+              <option>Coleta de Óleo</option>
+              <option>Emergencial</option>
+              <option>Não Programada</option>
+              <option>Programada</option>
+              <option>Religamento</option>
+              <option>Termografia</option>
+            </select>
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Classificação 2</label>
+            <select id="f-class2" class="wz-input wz-select">
+              <option value="">Selecionar...</option>
+              <option>Automação e Controle</option>
+              <option>Civil</option>
+              <option>Elétrica</option>
+              <option>Mecânica</option>
+              <option>Segurança do Trabalho</option>
+            </select>
+          </div>
+        </div>
+        <div class="wz-row-3">
+          <div class="wz-field-group">
+            <label class="wz-label">Criticidade</label>
+            <select id="f-criticality" class="wz-input wz-select">
+              <option value="baixa">Baixa</option>
+              <option value="media" selected>Médio</option>
+              <option value="alta">Alta</option>
+              <option value="critica">Crítica</option>
+            </select>
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Duração estimada</label>
+            <input type="text" id="f-duration" class="wz-input" value="000:10" />
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Número de Solicitação</label>
+            <input type="text" id="f-request-num" class="wz-input" placeholder="NS-0000" />
+          </div>
+        </div>
+
+        <!-- "Já foi realizada?" -->
+        <div class="wz-check-row" style="padding-left:0;">
+          <label class="wz-checkbox-label" id="alreadyDoneLabel">
+            <div class="wz-custom-check" id="alreadyDoneCheck"></div>
+            <span>Esta tarefa já foi realizada?</span>
+          </label>
+        </div>
+
+        <!-- Opções quando NÃO realizada -->
+        <div class="wz-radio-group" id="radioGroupNormal">
+          <div class="wz-radio-label">Opções:</div>
+          <label class="wz-radio-item">
+            <input type="radio" name="sendTo" value="pendente" checked id="sendToPending" />
+            <span class="wz-radio-custom"></span><span>Enviar para tarefas pendentes</span>
+          </label>
+          <label class="wz-radio-item">
+            <input type="radio" name="sendTo" value="em_processo" id="sendToProcess" />
+            <span class="wz-radio-custom"></span><span>Enviar para OSs em Processos</span>
+          </label>
+        </div>
+
+        <!-- Opções quando JÁ realizada (hidden) -->
+        <div class="wz-radio-group hidden" id="radioGroupDone">
+          <div class="wz-radio-label">Enviar para Ordem de Serviço:</div>
+          <label class="wz-radio-item">
+            <input type="radio" name="sendToDone" value="em_verificacao" checked id="sendToVerif" />
+            <span class="wz-radio-custom"></span><span>Verificação</span>
+          </label>
+          <label class="wz-radio-item">
+            <input type="radio" name="sendToDone" value="concluida" id="sendToFinal" />
+            <span class="wz-radio-custom"></span><span>Finalizados</span>
+          </label>
+        </div>
+
+        <!-- Responsável (visível só quando já realizada) -->
+        <div class="wz-field-group hidden" id="responsavelGroup">
+          <label class="wz-label required">Responsável</label>
+          <button class="wz-asset-search-btn" id="responsavelBtn">
+            <i class="fa-regular fa-user"></i>
+            <span id="responsavelBtnLabel">Selecionar responsável...</span>
+            <i class="fa-solid fa-chevron-down" style="margin-left:auto;font-size:11px;"></i>
+          </button>
+          <div class="wz-error hidden" id="err-responsavel">Responsável não pode ficar em branco</div>
+        </div>
+
+        <div class="wz-row-2">
+          <div class="wz-field-group">
+            <label class="wz-label">Data Programada</label>
+            <div class="wz-input-icon"><input type="datetime-local" id="f-scheduled-date" class="wz-input" /><i class="fa-regular fa-calendar"></i></div>
+          </div>
+          <div class="wz-field-group">
+            <label class="wz-label">Data Inicial</label>
+            <div class="wz-input-icon"><input type="datetime-local" id="f-start-date" class="wz-input" /><i class="fa-regular fa-calendar"></i></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3: SUBTAREFAS -->
+      <div class="wz-step-content hidden" id="wz-step-3">
+        <div class="wz-subtasks-header">
+          <div class="wz-subtasks-title">Subtarefas</div>
+          <button class="wz-add-subtask-btn" id="addSubtaskBtn"><i class="fa-solid fa-plus"></i> Adicionar subtarefa</button>
+        </div>
+        <div class="wz-subtasks-list" id="subtasksList">
+          <div class="wz-subtasks-empty"><i class="fa-regular fa-circle-check"></i><span>Nenhuma subtarefa adicionada</span></div>
+        </div>
+      </div>
+
+      <!-- STEP 4: RECURSOS -->
+      <div class="wz-step-content hidden" id="wz-step-4">
+        <div class="wz-resources-header">
+          <div class="wz-subtasks-title">Recursos necessários</div>
+          <button class="wz-add-subtask-btn" id="addResourceBtn"><i class="fa-solid fa-plus"></i> Adicionar recurso</button>
+        </div>
+        <div class="wz-subtasks-list" id="resourcesList">
+          <div class="wz-subtasks-empty"><i class="fa-regular fa-toolbox"></i><span>Nenhum recurso adicionado</span></div>
+        </div>
+        <div class="wz-summary-box">
+          <div class="wz-summary-title">Resumo da OS</div>
+          <div class="wz-summary-grid" id="wzSummaryGrid"></div>
+        </div>
+      </div>
+
+    </div><!-- /wz-body -->
+
+    <div class="wz-footer">
+      <button class="wz-btn-ghost" id="wzCancelBtn">Cancelar</button>
+      <div style="display:flex;gap:10px;">
+        <button class="wz-btn-ghost hidden" id="wzPrevBtn"><i class="fa-solid fa-arrow-left"></i> Anterior</button>
+        <button class="wz-btn-primary" id="wzNextBtn">Próximo <i class="fa-solid fa-arrow-right"></i></button>
+        <button class="wz-btn-primary hidden" id="wzSubmitBtn">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><polyline points="4 10 8 14 16 6"/></svg>
+          Gerar OS
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ASSET DRAWER -->
+<div class="asset-drawer-overlay hidden" id="assetDrawerOverlay"></div>
+<div class="asset-drawer hidden" id="assetDrawer">
+  <div class="asset-drawer-header">
+    <button class="asset-drawer-back" id="assetDrawerBack"><i class="fa-solid fa-arrow-left"></i></button>
+    <div class="asset-drawer-title">Pesquisa por Ativos</div>
+    <div style="display:flex;gap:8px;">
+      <button class="icon-btn" id="assetFilterToggle"><i class="fa-solid fa-sliders"></i></button>
+      <button class="icon-btn" id="assetDrawerSettingsBtn"><i class="fa-solid fa-gear"></i></button>
+    </div>
+  </div>
+  <div class="asset-filter-panel hidden" id="assetFilterPanel">
+    <div class="afp-header">
+      <button class="asset-drawer-back" id="assetFilterBack"><i class="fa-solid fa-arrow-left"></i></button>
+      <div class="asset-drawer-title">Filtro</div>
+    </div>
+    <div class="afp-body">
+      <div class="wz-field-group"><label class="wz-label">Localização</label><select id="flt-location" class="wz-input wz-select"><option value="">Todas</option></select></div>
+      <div class="wz-field-group"><label class="wz-label">Tipo de Ativo</label><select id="flt-asset-type" class="wz-input wz-select"><option value="">Todos</option><option>Instalações</option><option>Equipamento</option><option>Instrumento</option></select></div>
+      <div class="wz-field-group"><label class="wz-label">Descrição</label><input type="text" id="flt-desc" class="wz-input" placeholder="Pesquisar..." /></div>
+      <div class="wz-field-group"><label class="wz-label">Código</label><input type="text" id="flt-code" class="wz-input" placeholder="Pesquisar..." /></div>
+      <div class="wz-field-group"><label class="wz-label">Unidade</label><input type="text" id="flt-unit" class="wz-input" placeholder="Pesquisar..." /></div>
+      <div class="wz-field-group"><label class="wz-label">Código de Barras</label><input type="text" id="flt-barcode" class="wz-input" placeholder="Pesquisar..." /></div>
+      <div class="wz-field-group"><label class="wz-label">Criticidade</label><select id="flt-criticality" class="wz-input wz-select"><option value="">Todas</option><option>Muito alto</option><option>Alto</option><option>Médio</option><option>Baixo</option></select></div>
+      <div class="wz-field-group"><label class="wz-label">Tipo</label><select id="flt-type" class="wz-input wz-select"><option value="">Todos</option><option>Fixo</option><option>Móvel</option><option>Virtual</option></select></div>
+      <div class="wz-field-group"><label class="wz-label">Classificação 1</label><select id="flt-class1" class="wz-input wz-select"><option value="">Todas</option></select></div>
+    </div>
+    <div class="afp-footer">
+      <button class="wz-btn-ghost" id="afpClearBtn"><i class="fa-solid fa-trash"></i> Limpar filtros</button>
+      <button class="wz-btn-primary" id="afpApplyBtn"><i class="fa-solid fa-filter"></i> Aplicar filtros</button>
+    </div>
+  </div>
+  <div class="asset-search-box">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <input type="text" id="assetSearchInput" placeholder="Buscar por nome, código..." />
+  </div>
+  <div class="asset-results">
+    <div class="asset-loading hidden" id="assetLoading"><span class="kb-spinner"></span><span>Buscando ativos...</span></div>
+    <div class="asset-empty hidden" id="assetEmpty"><i class="fa-regular fa-folder-open"></i><span>Nenhum ativo encontrado</span></div>
+    <div id="assetResultsList"></div>
+    <div class="asset-results-footer" id="assetResultsFooter"></div>
+  </div>
+</div>
+
+<!-- RESPONSÁVEL DRAWER -->
+<div class="asset-drawer-overlay hidden" id="respDrawerOverlay"></div>
+<div class="resp-drawer hidden" id="respDrawer">
+  <div class="resp-drawer-header">
+    <button class="asset-drawer-back" id="respDrawerBack"><i class="fa-solid fa-arrow-left"></i></button>
+    <div class="asset-drawer-title" style="flex:1;">Responsável pela ordem de serviço</div>
+    <div class="resp-search-inline">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input type="text" id="respSearchInput" placeholder="Pesquisar..." />
+      <button class="wz-asset-clear" id="respSearchClear"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+  </div>
+  <div class="resp-controls">
+    <div class="wz-input-icon" style="max-width:170px;">
+      <input type="date" id="respDatePicker" class="wz-input" style="font-size:12px;" />
+      <i class="fa-regular fa-calendar" style="font-size:12px;"></i>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;">
+      <button class="icon-btn" title="Filtros"><i class="fa-solid fa-sliders"></i></button>
+      <button class="icon-btn" title="Configurações"><i class="fa-solid fa-gear"></i></button>
+    </div>
+  </div>
+  <div class="resp-table-wrap">
+    <table class="resp-table">
+      <thead>
+        <tr>
+          <th>Código</th>
+          <th>Responsável</th>
+          <th>E-mail</th>
+          <th>Segunda-feira</th>
+          <th>Terça-feira</th>
+          <th>Quarta-feira</th>
+          <th>Quinta-feira</th>
+          <th>Sexta-feira</th>
+          <th>Sábado</th>
+        </tr>
+      </thead>
+      <tbody id="respTableBody">
+        <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);"><span class="kb-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>Carregando responsáveis...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- OS DETAIL DRAWER -->
+<div class="os-detail-overlay hidden" id="osDetailOverlay"></div>
+<div class="os-detail-drawer hidden" id="osDetailDrawer">
+  <div class="osd-header">
+    <div class="osd-num" id="osdNum">—</div>
+    <div class="osd-actions">
+      <button class="icon-btn" id="osdStatusBtn"><i class="fa-solid fa-arrow-right-arrow-left"></i></button>
+      <button class="icon-btn" id="osdCloseBtn"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+  </div>
+  <div class="osd-body" id="osdBody"></div>
+</div>
+
+<!-- STATUS POPOVER -->
+<div class="status-popover hidden" id="statusPopover">
+  <div class="status-popover-title">Mover para</div>
+  <button class="sp-btn" data-status="pendente"><span class="sp-dot" style="background:#f59e0b;"></span>Tarefas pendentes</button>
+  <button class="sp-btn" data-status="em_processo"><span class="sp-dot" style="background:#3b82f6;"></span>OSs em Processo</button>
+  <button class="sp-btn" data-status="em_verificacao"><span class="sp-dot" style="background:#a855f7;"></span>OSs em Verificação</button>
+  <button class="sp-btn" data-status="concluida"><span class="sp-dot" style="background:#2aff7b;"></span>OSs Concluídas</button>
+</div>
+
+<div class="os-toast hidden" id="osToast"></div>
+</body>
+</html>
