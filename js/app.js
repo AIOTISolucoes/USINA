@@ -42,6 +42,23 @@ function apiFetch(path, options = {}) {
   });
 }
 
+function normalizeApiPayload(data) {
+  if (data && Object.prototype.hasOwnProperty.call(data, "body")) {
+    return typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+  }
+  return data;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
 // =============================================================================
 // CONFIGURAÇÃO GLOBAL E ESTADO
 // =============================================================================
@@ -542,11 +559,8 @@ async function fetchPlantDeviceOptions(plantId) {
   if (!res.ok) throw new Error("Erro ao buscar equipamentos da usina");
 
   const data = await res.json();
-  if (data && data.body) {
-    const parsed = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
-    return Array.isArray(parsed?.items) ? parsed.items : (Array.isArray(parsed) ? parsed : []);
-  }
-  return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+  const parsed = normalizeApiPayload(data);
+  return Array.isArray(parsed?.items) ? parsed.items : (Array.isArray(parsed) ? parsed : []);
 }
 
 
@@ -1743,7 +1757,7 @@ async function loadEvents(page = 1, { silent = false } = {}) {
 // SUMMARY + PORTFOLIO
 // =============================================================================
 function updateSummaryUI(plants) {
-  const validPlants = Array.isArray(plants) ? plants : [];
+  const validPlants = sortPortfolioPlants(plants);
 
   let totalActivePower = 0;
   let totalRatedPower = 0;
@@ -1770,13 +1784,67 @@ function updateSummaryUI(plants) {
   if (elPsfActive) elPsfActive.textContent = totalActivePower.toFixed(1) + " kW";
   if (elPsfRated) elPsfRated.textContent = totalRatedPower.toFixed(1) + " kWp";
   if (elPsfPercent) elPsfPercent.textContent = loadPct.toFixed(1) + "%";
+
+  // Update SVG progress ring
+  const ringFill = document.getElementById("psfRingFill");
+  if (ringFill) {
+    const circumference = 2 * Math.PI * 30;
+    const pct = Math.min(100, Math.max(0, loadPct));
+    const filled = (pct / 100) * circumference;
+    ringFill.setAttribute("stroke-dasharray", filled.toFixed(1) + " " + circumference.toFixed(1));
+  }
+}
+
+function getPortfolioPlantVisualState(plant) {
+  const activePower = Number(plant?.active_power_kw ?? 0);
+  const energyToday = Number(plant?.energy_today_kwh ?? plant?.daily_energy_kwh ?? 0);
+  const irradiance = Number(plant?.irradiance_wm2 ?? 0);
+  const statusNum = Number(plant?.plant_status);
+  const hasAnyData = activePower > 0 || energyToday > 0 || irradiance > 0;
+
+  if (activePower > 0) {
+    return { priority: 0, kind: "generating", activePower, energyToday, irradiance, isOffline: false };
+  }
+
+  if (statusNum === 28 || !hasAnyData) {
+    return { priority: 2, kind: "offline", activePower, energyToday, irradiance, isOffline: true };
+  }
+
+  return { priority: 1, kind: "standby", activePower, energyToday, irradiance, isOffline: false };
+}
+
+function sortPortfolioPlants(plants) {
+  const validPlants = Array.isArray(plants) ? [...plants] : [];
+
+  validPlants.sort((a, b) => {
+    const stateA = getPortfolioPlantVisualState(a);
+    const stateB = getPortfolioPlantVisualState(b);
+
+    if (stateA.priority !== stateB.priority) {
+      return stateA.priority - stateB.priority;
+    }
+
+    if (stateA.kind === "generating" && stateB.kind === "generating" && stateA.activePower !== stateB.activePower) {
+      return stateB.activePower - stateA.activePower;
+    }
+
+    if (stateA.kind === "standby" && stateB.kind === "standby" && stateA.energyToday !== stateB.energyToday) {
+      return stateB.energyToday - stateA.energyToday;
+    }
+
+    const nameA = String(a?.power_plant_name ?? a?.plant_name ?? a?.name ?? "");
+    const nameB = String(b?.power_plant_name ?? b?.plant_name ?? b?.name ?? "");
+    return nameA.localeCompare(nameB, "pt-BR", { sensitivity: "base" });
+  });
+
+  return validPlants;
 }
 
 function renderPortfolioTable(plants) {
   const tbody = document.getElementById("portfolioTbody");
   if (!tbody) return;
 
-  const validPlants = Array.isArray(plants) ? plants : [];
+  const validPlants = sortPortfolioPlants(plants);
   if (validPlants.length === 0) return;
 
   tbody.innerHTML = "";
@@ -1794,13 +1862,17 @@ function renderPortfolioTable(plants) {
     tr.setAttribute("role", "link");
     tr.setAttribute("tabindex", "0");
 
+    // Linha cinza se planta sem dados ou status 28
+    const plantState = getPortfolioPlantVisualState(plant);
+    if (plantState.isOffline) tr.classList.add("portfolio-row--offline");
+
     const alarmSeverity =
       normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId)) ||
       normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantName)) ||
       null;
     const plantIconClass = alarmSeverity
       ? `plant-icon plant-icon--${alarmSeverity}`
-      : "plant-icon plant-icon--ok";
+      : (plantState.kind === "standby" ? "plant-icon plant-icon--standby" : "plant-icon plant-icon--ok");
 
     tr.innerHTML = `
       <td>
@@ -1814,19 +1886,31 @@ function renderPortfolioTable(plants) {
         </button>
       </td>
       <td class="metric-neutral">${Number(plant.rated_power_kw ?? 0).toFixed(1)} kWp</td>
-      <td class="metric-active">${Number(plant.active_power_kw ?? 0).toFixed(1)} kW</td>
+      <td class="metric-active${Number(plant.active_power_kw ?? 0) === 0 ? ' metric-zero' : ''}">${Number(plant.active_power_kw ?? 0).toFixed(1)} kW</td>
       <td class="metric-active">${Number(plant.energy_today_kwh ?? 0).toFixed(1)} kWh</td>
       <td>${plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m²" : "—"}</td>
       <td>${plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "—"}</td>
       <td>${plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "—"}</td>
       <td>${plant.pr_daily_pct != null ? Number(plant.pr_daily_pct).toFixed(1) + "%" : "—"}</td>
       <td>${plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "—"}</td>
-      <td style="text-align:center;">
+      <td style="text-align:center; white-space:nowrap;">
+        <button class="plant-action-btn" title="Ações da usina" aria-label="Ações da usina" aria-haspopup="menu" aria-expanded="false" data-plant-id="${plantId}" style="margin-right:6px;">
+          <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M10.5 3.5 L2.5 11.5 L2 15.5 L6 15 L14 7 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.12"/>
+            <path d="M8.5 5.5 L12 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <path d="M13 2.5 L15 4.5 L14 7 L10.5 3.5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="0.3"/>
+          </svg>
+        </button>
         <button class="plant-link-btn" title="Abrir usina" data-plant-id="${plantId}">
           <i class="fa-solid fa-arrow-up-right-from-square"></i>
         </button>
       </td>
     `;
+
+    tr.querySelector(".plant-action-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPortfolioPlantActionMenu(e, plantId, plantName);
+    });
 
     tr.querySelector(".plant-link-btn").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1981,9 +2065,18 @@ function renderSelectedTagsList() {
     const chip = document.createElement("div");
     chip.className = "ds-selected-tag-chip";
 
+    const CHIP_COLORS = [
+      '#1d9e75','#378add','#d4537e','#ef9f27',
+      '#7f77dd','#5dcaa5','#e24b4a','#639922',
+      '#ba7517','#185fa5','#993556','#0f6e56'
+    ];
+    const colorIdx = DATASTUDIO_STATE.selectedTags.indexOf(tag) % CHIP_COLORS.length;
+    const chipColor = CHIP_COLORS[Math.max(0, colorIdx)];
+    chip.style.setProperty('--ds-chip-color', chipColor);
     const label = `${valueOrDash(tag?.context)} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
     chip.innerHTML = `
-      <span class="ds-selected-tag-chip__text">${label}</span>
+      <span class="ds-selected-tag-chip__dot"></span>
+      <span class="ds-selected-tag-chip__text" title="${label}">${label}</span>
       <button type="button" class="ds-selected-tag-chip__remove" aria-label="Remover medida">×</button>
     `;
 
@@ -2061,10 +2154,6 @@ function isTagSelected(tagOrPath) {
 function addSelectedTag(tag) {
   if (!tag || !dsSafeTrim(tag.pathname)) return false;
   if (isTagSelected(tag)) return true;
-  if (DATASTUDIO_STATE.selectedTags.length >= 50) {
-    window.alert("Você pode selecionar no máximo 50 medidas.");
-    return false;
-  }
   DATASTUDIO_STATE.selectedTags.push(tag);
   DATASTUDIO_STATE.forceHeroState = false;
   updateDataStudioStageUI();
@@ -2110,15 +2199,45 @@ function renderDataStudioTagsTable(tags) {
     tr.classList.add("ds-table-row-clickable");
     const checked = isTagSelected(tag) ? "checked" : "";
 
+    const isAlarm = (tag?.data_kind === 'discrete') || (tag?.description || '').startsWith('⚠');
+    const isPlant = (tag?.context || '').toUpperCase().startsWith('PLANT') ||
+                    (tag?.pathname || '').startsWith('PLANT.');
+    const isWeather = (tag?.device_type || '').toLowerCase().includes('weather') ||
+                      (tag?.pathname || '').toLowerCase().includes('weather');
+    const isMeter   = (tag?.device_type || '').toLowerCase().includes('meter') ||
+                      (tag?.context || '').toLowerCase().includes('medidor') ||
+                      (tag?.context || '').toLowerCase().includes('meter');
+
+    const svgInverter = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="3" width="10" height="7" rx="1.5" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><path d="M4 3V2a2 2 0 014 0v1" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><line x1="4" y1="6.5" x2="8" y2="6.5" stroke="rgba(57,229,140,.6)" stroke-width="1"/></svg>`;
+    const svgPlant   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10V5M3 7l3-3 3 3" stroke="rgba(55,138,221,.9)" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/><rect x="7" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/></svg>`;
+    const svgWeather = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="5" r="2.5" stroke="rgba(239,159,39,.8)" stroke-width="1.2"/><line x1="6" y1="1" x2="6" y2="2" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="6" y1="8" x2="6" y2="9" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="3" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="9" y1="5" x2="10" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/></svg>`;
+    const svgMeter   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="8" rx="1.5" stroke="rgba(212,83,126,.8)" stroke-width="1.2"/><path d="M3.5 7.5 C3.5 5.5 8.5 5.5 8.5 7.5" stroke="rgba(212,83,126,.7)" stroke-width="1" fill="none"/><line x1="6" y1="7.5" x2="5" y2="5.5" stroke="rgba(212,83,126,.9)" stroke-width="1" stroke-linecap="round"/></svg>`;
+    const svgAlarm   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5L1.5 9.5h9L6 1.5z" stroke="rgba(239,159,39,.9)" stroke-width="1.2" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="rgba(239,159,39,.9)" stroke-width="1" stroke-linecap="round"/><circle cx="6" cy="9" r=".6" fill="rgba(239,159,39,.9)"/></svg>`;
+
+    let iconSvg = svgInverter;
+    let iconClass = 'analog';
+    if (isAlarm)        { iconSvg = svgAlarm;   iconClass = 'discrete'; }
+    else if (isPlant)   { iconSvg = svgPlant;   iconClass = 'plant'; }
+    else if (isWeather) { iconSvg = svgWeather; iconClass = 'analog'; }
+    else if (isMeter)   { iconSvg = svgMeter;   iconClass = 'analog'; }
+
+    const unitHtml = tag?.unit ? `<span class="ds-unit-badge">${tag.unit}</span>` : '<span style="opacity:.35">—</span>';
+    const descHtml = valueOrDash(tag?.description);
+
     tr.innerHTML = `
-      <td><input type="checkbox" data-ds-pathname="${pathname.replaceAll('"', '&quot;')}" ${checked}></td>
-      <td>${valueOrDash(tag?.context)}</td>
-      <td>${valueOrDash(tag?.description)}</td>
-      <td>${valueOrDash(tag?.source)}</td>
-      <td>${valueOrDash(tag?.data_kind)}</td>
-      <td>${valueOrDash(tag?.unit)}</td>
-      <td>${valueOrDash(tag?.power_plant_id)}</td>
-      <td class="ds-pathname-cell" title="${pathname.replaceAll('"', '&quot;')}">${valueOrDash(pathname)}</td>
+      <td><input type="checkbox" data-ds-pathname="${pathname.replaceAll('"','&quot;')}" ${checked}></td>
+      <td>
+        <div class="ds-tag-context-cell">
+          <span class="ds-tag-icon ds-tag-icon--${iconClass}">${iconSvg}</span>
+          ${valueOrDash(tag?.context)}
+        </div>
+      </td>
+      <td style="white-space:normal;line-height:1.35;font-size:11px;">${descHtml}</td>
+      <td style="display:none;">${valueOrDash(tag?.source)}</td>
+      <td style="display:none;">${valueOrDash(tag?.data_kind)}</td>
+      <td>${unitHtml}</td>
+      <td style="display:none;">${valueOrDash(tag?.power_plant_id)}</td>
+      <td class="ds-pathname-cell" title="${pathname.replaceAll('"','&quot;')}" style="display:none;">${valueOrDash(pathname)}</td>
     `;
 
     const checkbox = tr.querySelector("input[type='checkbox']");
@@ -2229,9 +2348,6 @@ function buildDataStudioSelectionPayload() {
   if (!Array.isArray(DATASTUDIO_STATE.selectedTags) || !DATASTUDIO_STATE.selectedTags.length) {
     throw new Error("Selecione ao menos uma medida.");
   }
-  if (DATASTUDIO_STATE.selectedTags.length > 50) {
-    throw new Error("Limite de 50 medidas excedido.");
-  }
 
   const allowedAgg = new Set(["none", "avg", "integral", "median", "max", "sum"]);
   const allowedPeriod = new Set(["5min", "daily", "weekly", "monthly", "yearly", "hdaily", "hweekly", "hmonthly", "hyearly"]);
@@ -2251,7 +2367,7 @@ function buildDataStudioSelectionPayload() {
     throw new Error("Há medidas selecionadas de outra usina. Limpe a seleção e selecione novamente.");
   }
 
-  const items = DATASTUDIO_STATE.selectedTags.slice(0, 50).map((t, idx) => ({
+  const items = DATASTUDIO_STATE.selectedTags.map((t, idx) => ({
     tag_id: t?.id ?? t?.tag_id ?? null,
     pathname: dsSafeTrim(t.pathname),
     display_type: "line",
@@ -2487,7 +2603,7 @@ async function fetchDataStudioTags() {
   if (dataKind && dataKind !== "all") params.set("data_kind", dataKind);
   if (source && source !== "all") params.set("source", source);
   if (q) params.set("q", q);
-  params.set("limit", "1000");
+  params.set("limit", "3000");
 
   const normalizeTagsResponse = (parsed) => {
     if (Array.isArray(parsed)) return parsed;
@@ -2751,6 +2867,7 @@ function renderDataStudioChart(seriesPayload) {
       scales
     }
   });
+  window.dsChartInstance = DATASTUDIO_CHART;
 }
 
 
@@ -3014,6 +3131,41 @@ function wireDataStudioOnce() {
   ui.zoomInBtn?.addEventListener("click", () => zoomDataStudioChart(1.2));
   ui.zoomOutBtn?.addEventListener("click", () => zoomDataStudioChart(0.8));
   ui.zoomResetBtn?.addEventListener("click", resetDataStudioChartZoom);
+
+  const dsFullscreenBtn = document.getElementById("dsFullscreenBtn");
+  const dsChartWrap = document.getElementById("dsChartWrap");
+  if (dsFullscreenBtn && dsChartWrap) {
+
+    // Botão de fechar fixo dentro do chart wrap
+    const closeBtn = document.createElement("button");
+    closeBtn.id = "dsFullscreenClose";
+    closeBtn.className = "ds-fullscreen-close";
+    closeBtn.title = "Sair da tela cheia";
+    closeBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
+    dsChartWrap.appendChild(closeBtn);
+
+    const exitFullscreen = () => {
+      dsChartWrap.classList.remove("ds-chart-fullscreen");
+      const icon = dsFullscreenBtn.querySelector("i");
+      if (icon) icon.className = "fa-solid fa-expand";
+      if (window.dsChartInstance) setTimeout(() => window.dsChartInstance.resize(), 100);
+    };
+
+    dsFullscreenBtn.addEventListener("click", () => {
+      const isFullscreen = dsChartWrap.classList.toggle("ds-chart-fullscreen");
+      const icon = dsFullscreenBtn.querySelector("i");
+      if (icon) icon.className = isFullscreen ? "fa-solid fa-compress" : "fa-solid fa-expand";
+      if (window.dsChartInstance) setTimeout(() => window.dsChartInstance.resize(), 100);
+    });
+
+    closeBtn.addEventListener("click", exitFullscreen);
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && dsChartWrap.classList.contains("ds-chart-fullscreen")) {
+        exitFullscreen();
+      }
+    });
+  }
   ui.backToHeroBtn?.addEventListener("click", () => {
     DATASTUDIO_STATE.forceHeroState = true;
     DATASTUDIO_STATE.catalogConfirmed = false;
@@ -3056,6 +3208,25 @@ const views = {
   datastudio: document.getElementById("dataStudioView")
 };
 
+function syncTopSummaryLayout() {
+  const rootStyle = document.documentElement.style;
+  const topbar = document.querySelector(".topbar");
+  const topSummary = document.getElementById("topSummary");
+  const topbarHeight = topbar ? Math.ceil(topbar.getBoundingClientRect().height) : 54;
+
+  rootStyle.setProperty("--topbar-height", `${topbarHeight}px`);
+  if (!topSummary) return;
+
+  const isOverviewVisible = !!views.overview && !views.overview.classList.contains("hidden");
+  topSummary.classList.toggle("hidden", !isOverviewVisible);
+
+  requestAnimationFrame(() => {
+    const summaryHeight = isOverviewVisible ? Math.ceil(topSummary.getBoundingClientRect().height) : 0;
+    rootStyle.setProperty("--top-summary-height", `${summaryHeight}px`);
+    rootStyle.setProperty("--top-summary-stack-height", `${topbarHeight + summaryHeight}px`);
+  });
+}
+
 function showView(viewName) {
   localStorage.setItem("currentView", viewName);
   Object.values(views).forEach(v => { if (v) v.classList.add("hidden"); });
@@ -3074,11 +3245,7 @@ function showView(viewName) {
   const activeBtn = document.getElementById(btnMap[viewName]);
   if (activeBtn) activeBtn.classList.add("active");
 
-  const topSummary = document.getElementById("topSummary");
-  if (topSummary) {
-    if (viewName === "overview") topSummary.classList.remove("hidden");
-    else topSummary.classList.add("hidden");
-  }
+  syncTopSummaryLayout();
 
   if (viewName === "events") {
     EVENTS_STATE.page = 1;
@@ -3108,6 +3275,10 @@ document.getElementById("btnAlarms")?.addEventListener("click", async () => {
 
 document.getElementById("btnEvents")?.addEventListener("click", () => showView("events"));
 document.getElementById("btnDataStudio")?.addEventListener("click", () => showView("datastudio"));
+// Botão OS desabilitado temporariamente — não disponível para clientes ainda
+// document.getElementById("btnOS")?.addEventListener("click", () => {
+//   window.location.href = "os.html";
+// });
 
 document.querySelectorAll(".tab-btn").forEach(btn => {
   btn.addEventListener("click", async () => {
@@ -3176,6 +3347,20 @@ async function refreshDashboard() {
 
   lastAlarmSeverityByPlant = buildPlantAlarmSeverityMap(alarms);
 
+  // Ícone de alarme na sidebar pisca vermelho se houver qualquer alarme ativo
+  const alarmBtn = document.getElementById("btnAlarms");
+  if (alarmBtn) {
+    if (lastAlarmSeverityByPlant.size > 0) {
+      alarmBtn.classList.add("sidebar-btn--alarm-active");
+    } else {
+      alarmBtn.classList.remove("sidebar-btn--alarm-active");
+    }
+  }
+
+  if (typeof _portfolioCurrentView !== "undefined" && _portfolioCurrentView === "card") {
+    updatePortfolioCardAlarms();
+  }
+
   try {
     const summary = await fetchPlantsSummary();
     refreshTopChipsGlobalFromSummary(summary);
@@ -3187,15 +3372,41 @@ async function refreshDashboard() {
   updateSummaryUI(lastValidPlants);
 
   renderPortfolioTable(lastValidPlants);
+
+  if (typeof _portfolioCurrentView !== "undefined" && _portfolioCurrentView === "card") {
+    const _cardGrid = document.getElementById("portfolioCardView");
+    if (!_cardGrid || _cardGrid.children.length === 0) {
+      renderPortfolioCards(typeof portfolioFilterPlants === "function"
+        ? portfolioFilterPlants(lastValidPlants) : lastValidPlants);
+    } else {
+      updatePortfolioCardAlarms();
+    }
+  }
+
   await refreshVisibleViewData();
+  syncTopSummaryLayout();
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   wireDataStudioOnce();
+  wirePlantEditModalOnce();
+
+  // Preenche nome do usuário logado
+  try {
+    const _u = JSON.parse(localStorage.getItem("user") || "{}");
+    const _name = _u.username || _u.name || _u.email || "Operador";
+    const _initials = _name.split(/[\s._@]+/).slice(0,2).map(p => p[0]?.toUpperCase() || "").join("") || "?";
+    const _nameEl = document.getElementById("userDisplayName");
+    const _avatarEl = document.getElementById("userAvatar");
+    if (_nameEl) _nameEl.textContent = _name;
+    if (_avatarEl) _avatarEl.textContent = _initials;
+  } catch(_e) {}
 
   const savedView = localStorage.getItem("currentView") || "overview";
   showView(savedView);
+  syncTopSummaryLayout();
 
+  wirePortfolioControls();
   await refreshDashboard();
   setInterval(refreshDashboard, DASHBOARD_REFRESH_INTERVAL_MS);
 
@@ -3209,6 +3420,1130 @@ document.addEventListener("DOMContentLoaded", async () => {
     await refreshDashboard();
   });
 
+  window.addEventListener("resize", () => {
+    syncTopSummaryLayout();
+  });
+
   document.querySelector(".logout-icon")?.addEventListener("click", logout);
   document.querySelector(".sidebar-logout")?.addEventListener("click", logout);
 });
+
+// =============================================================================
+// PORTFOLIO VIEW TOGGLE + SEARCH + CARD VIEW
+// =============================================================================
+
+let _portfolioCurrentView = localStorage.getItem("portfolioView") || "card";
+let _portfolioMiniCharts = new Map();
+let _portfolioRenderGen = 0;
+const _miniChartDataCache = new Map(); // plantId → { ts, body }
+const _MINI_CHART_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let currentEditPlantId = null;
+let currentEditPlantName = "";
+let _plantEditModalWired = false;
+let _plantEditLastFocus = null;
+let _portfolioActionMenuWired = false;
+let _portfolioActionMenuButton = null;
+let _portfolioActionMenuContext = null;
+
+function getOrCreatePlantEditModal() {
+  let modal = document.getElementById("plantEditModal");
+  if (modal) return modal;
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="plantEditModal" class="plant-edit-modal hidden" aria-hidden="true">
+      <div class="plant-edit-modal__backdrop"></div>
+      <div class="plant-edit-modal__box" role="dialog" aria-modal="true" aria-labelledby="plantEditModalTitle">
+        <div class="plant-edit-modal__header">
+          <h3 id="plantEditModalTitle">Editar usina</h3>
+          <button class="plant-edit-modal__close" type="button" onclick="closePlantEditModal()" aria-label="Fechar">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="plant-edit-section">
+          <label for="plantEditNameInput">Nome da usina</label>
+          <div class="plant-edit-inline">
+            <input type="text" id="plantEditNameInput" placeholder="Nome da usina" />
+            <button type="button" onclick="savePlantName()" title="Salvar nome da usina" aria-label="Salvar nome da usina">
+              <i class="fa-solid fa-check"></i>
+            </button>
+          </div>
+          <div id="plantEditNameFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+        </div>
+        <div class="plant-edit-section" id="plantEditRatedSection">
+          <label for="plantEditRatedInput">Rated Power (kWp)</label>
+          <div class="plant-edit-inline">
+            <input type="number" id="plantEditRatedInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
+            <button type="button" onclick="savePlantRatedPower()" title="Salvar rated power" aria-label="Salvar rated power">
+              <i class="fa-solid fa-check"></i>
+            </button>
+          </div>
+          <div id="plantEditRatedFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+        </div>
+        <hr class="plant-edit-divider" />
+        <div class="plant-edit-section">
+          <label>Dispositivos</label>
+          <div id="plantEditDevicesList" class="plant-edit-devices-list" tabindex="-1" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  return document.getElementById("plantEditModal");
+}
+
+function wirePlantEditModalOnce() {
+  if (_plantEditModalWired) return;
+
+  const modal = getOrCreatePlantEditModal();
+  if (!modal) return;
+
+  modal.querySelector(".plant-edit-modal__backdrop")?.addEventListener("click", closePlantEditModal);
+  document.getElementById("plantEditNameInput")?.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      savePlantName();
+    }
+  });
+
+  document.getElementById("plantEditRatedInput")?.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      savePlantRatedPower();
+    }
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !modal.classList.contains("hidden")) {
+      closePlantEditModal();
+    }
+  });
+
+  _plantEditModalWired = true;
+}
+
+function plantEditSetFeedback(el, message = "", type = "") {
+  if (!el) return;
+  el.textContent = message;
+  el.classList.remove("ok", "err");
+  if (type) el.classList.add(type);
+}
+
+function formatPlantEditDeviceMeta(device) {
+  const parts = [];
+  const deviceId = device?.device_id ?? device?.id;
+  const original = device?.original_name || device?.device_default_name || device?.name;
+  const cabin = device?.cabin || device?.cabin_name || device?.electrocenter || device?.electrocenter_name;
+
+  if (deviceId != null) parts.push(`ID ${deviceId}`);
+  if (original) parts.push(`Original: ${original}`);
+  if (device?.is_active != null) parts.push(device.is_active ? "Ativo" : "Inativo");
+  if (cabin) parts.push(`Cabine: ${cabin}`);
+
+  return parts.join(" • ");
+}
+
+function renderPlantEditDeviceRows(devices) {
+  const list = document.getElementById("plantEditDevicesList");
+  if (!list) return;
+
+  list.innerHTML = "";
+  const items = Array.isArray(devices) ? devices : [];
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "plant-edit-empty";
+    empty.textContent = "Nenhum dispositivo encontrado.";
+    list.appendChild(empty);
+    return;
+  }
+
+  items.forEach(device => {
+    const deviceId = device?.device_id;
+    const row = document.createElement("div");
+    row.className = "plant-edit-device-row";
+    row.dataset.deviceId = String(deviceId ?? "");
+
+    const info = document.createElement("div");
+    info.className = "plant-edit-device-info";
+
+    const type = document.createElement("span");
+    type.className = "plant-edit-device-type";
+    type.textContent = device?.device_type || "Device";
+    type.title = type.textContent;
+
+    const meta = document.createElement("span");
+    meta.className = "plant-edit-device-meta";
+    meta.textContent = formatPlantEditDeviceMeta(device);
+    meta.title = meta.textContent;
+
+    info.append(type, meta);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "plant-edit-device-name";
+    input.placeholder = "Nome do dispositivo";
+    input.value = device?.display_name || device?.device_name || device?.name || "";
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        saveDeviceName(deviceId);
+      }
+    });
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "plant-edit-device-save";
+    button.title = "Salvar nome do dispositivo";
+    button.setAttribute("aria-label", "Salvar nome do dispositivo");
+    button.innerHTML = '<i class="fa-solid fa-check"></i>';
+    button.addEventListener("click", () => saveDeviceName(deviceId));
+
+    const feedback = document.createElement("span");
+    feedback.className = "plant-edit-device-feedback";
+    feedback.setAttribute("aria-live", "polite");
+
+    row.append(info, input, button, feedback);
+    list.appendChild(row);
+  });
+}
+
+async function loadPlantDevices(plantId) {
+  const list = document.getElementById("plantEditDevicesList");
+  if (!list) return;
+
+  list.innerHTML = '<div class="plant-edit-empty">Carregando dispositivos...</div>';
+
+  try {
+    const devices = await fetchPlantDeviceOptions(plantId);
+    if (String(currentEditPlantId) !== String(plantId)) return;
+    renderPlantEditDeviceRows(devices);
+  } catch (err) {
+    console.error("[PlantEdit] erro ao carregar dispositivos:", err);
+    list.innerHTML = '<div class="plant-edit-empty plant-edit-empty--error">Erro ao carregar dispositivos.</div>';
+  }
+}
+
+function openPlantEditModal(event, plantId, plantName, options = {}) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const modal = getOrCreatePlantEditModal();
+  if (!modal) return;
+
+  wirePlantEditModalOnce();
+
+  currentEditPlantId = plantId;
+  currentEditPlantName = String(plantName ?? "");
+  _plantEditLastFocus = document.activeElement;
+
+  const nameInput = document.getElementById("plantEditNameInput");
+  const nameFeedback = document.getElementById("plantEditNameFeedback");
+  const devicesList = document.getElementById("plantEditDevicesList");
+  const title = document.getElementById("plantEditModalTitle");
+  const mode = options.mode || "plant";
+  const plantSection = nameInput?.closest(".plant-edit-section");
+  const devicesSection = devicesList?.closest(".plant-edit-section");
+  const divider = modal.querySelector(".plant-edit-divider");
+
+  if (nameInput) nameInput.value = currentEditPlantName;
+
+  const ratedInput = document.getElementById("plantEditRatedInput");
+  const ratedFeedback = document.getElementById("plantEditRatedFeedback");
+  const ratedSection = document.getElementById("plantEditRatedSection");
+
+  // Buscar rated power atual da planta no array lastValidPlants
+  const currentPlant = lastValidPlants.find(p =>
+    String(p.power_plant_id ?? p.plant_id ?? p.id) === String(plantId)
+  );
+  const currentRated = currentPlant?.capacity_dc ?? currentPlant?.rated_power_kwp ?? currentPlant?.rated_power_kw ?? "";
+  if (ratedInput) ratedInput.value = currentRated !== "" && currentRated != null ? Number(currentRated) : "";
+  plantEditSetFeedback(ratedFeedback);
+
+  // Esconder rated section no modo "devices"
+  if (ratedSection) ratedSection.style.display = mode === "devices" ? "none" : "";
+
+  if (title) title.textContent = mode === "devices" ? "Gerenciar dispositivos" : "Editar usina";
+  if (plantSection) plantSection.style.display = mode === "devices" ? "none" : "";
+  if (devicesSection) devicesSection.style.display = mode === "plant" ? "none" : "";
+  if (divider) divider.style.display = "none";
+  plantEditSetFeedback(nameFeedback);
+  if (devicesList) devicesList.innerHTML = "";
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("plant-edit-modal-open");
+
+  window.setTimeout(() => {
+    if (mode === "devices") {
+      devicesList?.focus?.();
+      return;
+    }
+    nameInput?.focus();
+    nameInput?.select();
+  }, 0);
+
+  if (mode !== "plant") loadPlantDevices(plantId);
+}
+
+function closePlantEditModal() {
+  const modal = document.getElementById("plantEditModal");
+  if (!modal) return;
+
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("plant-edit-modal-open");
+
+  if (_plantEditLastFocus && document.contains(_plantEditLastFocus)) {
+    _plantEditLastFocus.focus?.();
+  }
+}
+
+function getPlantEditDeviceRow(deviceId) {
+  return Array.from(document.querySelectorAll("#plantEditDevicesList .plant-edit-device-row"))
+    .find(row => row.dataset.deviceId === String(deviceId));
+}
+
+function updatePortfolioPlantName(plantId, plantName) {
+  const idText = String(plantId);
+  document.querySelectorAll(".plant-card[data-plant-id]").forEach(card => {
+    if (String(card.dataset.plantId) !== idText) return;
+    card.dataset.plantName = plantName;
+    const nameEl = card.querySelector(".plant-card__name");
+    if (nameEl) nameEl.textContent = plantName;
+  });
+
+  lastValidPlants.forEach(plant => {
+    const pid = plant?.power_plant_id ?? plant?.plant_id ?? plant?.id;
+    if (String(pid) !== idText) return;
+    plant.power_plant_name = plantName;
+    if (Object.prototype.hasOwnProperty.call(plant, "plant_name")) plant.plant_name = plantName;
+    if (Object.prototype.hasOwnProperty.call(plant, "name")) plant.name = plantName;
+  });
+
+  const listView = document.getElementById("portfolioListView");
+  if (listView && !listView.classList.contains("hidden")) {
+    const plants = typeof portfolioFilterPlants === "function"
+      ? portfolioFilterPlants(lastValidPlants)
+      : lastValidPlants;
+    renderPortfolioTable(plants);
+  }
+}
+
+async function savePlantName() {
+  const nameInput = document.getElementById("plantEditNameInput");
+  const feedback = document.getElementById("plantEditNameFeedback");
+  const button = document.querySelector(".plant-edit-inline button");
+  const newName = (nameInput?.value || "").trim();
+
+  if (!currentEditPlantId) {
+    plantEditSetFeedback(feedback, "Usina invalida.", "err");
+    return;
+  }
+  if (!newName) {
+    plantEditSetFeedback(feedback, "Informe um nome.", "err");
+    nameInput?.focus();
+    return;
+  }
+
+  if (button) button.disabled = true;
+  plantEditSetFeedback(feedback, "Salvando...");
+
+  try {
+    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plant_name: newName })
+    });
+    const data = await res.json().catch(() => ({}));
+    const parsed = normalizeApiPayload(data) || {};
+
+    if (!res.ok || parsed.ok === false) {
+      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
+    }
+
+    const savedName = parsed.power_plant_name || parsed.plant_name || newName;
+    currentEditPlantName = savedName;
+    if (nameInput) nameInput.value = savedName;
+    updatePortfolioPlantName(currentEditPlantId, savedName);
+    plantEditSetFeedback(feedback, "Salvo.", "ok");
+  } catch (err) {
+    console.error("[PlantEdit] erro ao salvar nome da usina:", err);
+    plantEditSetFeedback(feedback, err?.message || "Erro ao salvar.", "err");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function savePlantRatedPower() {
+  const ratedInput = document.getElementById("plantEditRatedInput");
+  const feedback = document.getElementById("plantEditRatedFeedback");
+  const button = ratedInput?.closest(".plant-edit-inline")?.querySelector("button");
+  const rawValue = (ratedInput?.value ?? "").trim();
+
+  if (!currentEditPlantId) {
+    plantEditSetFeedback(feedback, "Usina inválida.", "err");
+    return;
+  }
+  if (rawValue === "" || isNaN(Number(rawValue)) || Number(rawValue) < 0) {
+    plantEditSetFeedback(feedback, "Informe um valor válido (>= 0).", "err");
+    ratedInput?.focus();
+    return;
+  }
+
+  if (button) button.disabled = true;
+  plantEditSetFeedback(feedback, "Salvando...");
+
+  try {
+    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capacity_dc: Number(rawValue) })
+    });
+    const data = await res.json().catch(() => ({}));
+    const parsed = normalizeApiPayload(data) || {};
+
+    if (!res.ok || parsed.ok === false) {
+      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
+    }
+
+    const savedValue = parsed.capacity_dc;
+    if (ratedInput && savedValue != null) ratedInput.value = savedValue;
+
+    // Atualizar o card no portfólio sem reload
+    const idText = String(currentEditPlantId);
+    lastValidPlants.forEach(plant => {
+      const pid = plant?.power_plant_id ?? plant?.plant_id ?? plant?.id;
+      if (String(pid) !== idText) return;
+      plant.capacity_dc = savedValue;
+      plant.rated_power_kwp = savedValue;
+      plant.rated_power_kw = savedValue;
+    });
+    // Re-render dos cards para refletir o novo rated
+    if (typeof _portfolioCurrentView !== "undefined" && _portfolioCurrentView === "card") {
+      renderPortfolioCards(typeof portfolioFilterPlants === "function"
+        ? portfolioFilterPlants(lastValidPlants) : lastValidPlants);
+    }
+
+    plantEditSetFeedback(feedback, "Salvo.", "ok");
+  } catch (err) {
+    console.error("[PlantEdit] erro ao salvar rated power:", err);
+    plantEditSetFeedback(feedback, err?.message || "Erro ao salvar.", "err");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function saveDeviceName(deviceId) {
+  const row = getPlantEditDeviceRow(deviceId);
+  const input = row?.querySelector(".plant-edit-device-name");
+  const feedback = row?.querySelector(".plant-edit-device-feedback");
+  const button = row?.querySelector(".plant-edit-device-save");
+  const newName = (input?.value || "").trim();
+
+  if (!currentEditPlantId || !row) return;
+  if (!newName) {
+    plantEditSetFeedback(feedback, "Informe um nome.", "err");
+    input?.focus();
+    return;
+  }
+
+  if (button) button.disabled = true;
+  plantEditSetFeedback(feedback, "Salvando...");
+
+  try {
+    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/devices/${encodeURIComponent(deviceId)}/name`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: newName })
+    });
+    const data = await res.json().catch(() => ({}));
+    const parsed = normalizeApiPayload(data) || {};
+
+    if (!res.ok || parsed.ok === false) {
+      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
+    }
+
+    const savedName = parsed.display_name || newName;
+    if (input) input.value = savedName;
+    plantEditSetFeedback(feedback, "Salvo.", "ok");
+  } catch (err) {
+    console.error("[PlantEdit] erro ao salvar nome do dispositivo:", err);
+    plantEditSetFeedback(feedback, err?.message || "Erro.", "err");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function getPlantPageUrl(plantId, { hash = "", action = "" } = {}) {
+  const params = new URLSearchParams({ plant_id: String(plantId) });
+  if (action) params.set("action", action);
+  return `plant.html?${params.toString()}${hash || ""}`;
+}
+
+function navigateToPlantPage(plantId, options = {}) {
+  if (plantId == null) return;
+  window.location.href = getPlantPageUrl(plantId, options);
+}
+
+function ensurePortfolioPlantActionMenu() {
+  let menu = document.getElementById("portfolioPlantActionMenu");
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.id = "portfolioPlantActionMenu";
+    menu.className = "portfolio-plant-action-menu hidden";
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+  }
+
+  if (!_portfolioActionMenuWired) {
+    menu.addEventListener("click", event => event.stopPropagation());
+    document.addEventListener("click", event => {
+      if (menu.classList.contains("hidden")) return;
+      if (menu.contains(event.target) || _portfolioActionMenuButton?.contains?.(event.target)) return;
+      closePortfolioPlantActionMenu();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closePortfolioPlantActionMenu();
+    });
+    window.addEventListener("resize", closePortfolioPlantActionMenu);
+    window.addEventListener("scroll", closePortfolioPlantActionMenu, true);
+    _portfolioActionMenuWired = true;
+  }
+
+  return menu;
+}
+
+function positionPortfolioPlantActionMenu(menu, button) {
+  if (!menu || !button) return;
+
+  const rect = button.getBoundingClientRect();
+  menu.classList.remove("hidden");
+
+  const width = menu.offsetWidth || 260;
+  const height = menu.offsetHeight || 320;
+  const margin = 12;
+
+  let left = rect.left;
+  let top = rect.bottom + 8;
+
+  if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+  if (top + height > window.innerHeight - margin) top = rect.top - height - 8;
+
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+}
+
+function buildPortfolioPlantActionItems() {
+  return [
+    { action: "open", icon: "fa-up-right-from-square", label: "Abrir usina / Ver supervisório" },
+    { action: "edit", icon: "fa-pen-to-square", label: "Editar dados da usina" },
+    { action: "devices", icon: "fa-microchip", label: "Gerenciar dispositivos" },
+    { type: "separator" },
+    { action: "inverters", icon: "fa-bolt", label: "Gerenciar inversores / strings" },
+    { action: "relay", icon: "fa-tower-broadcast", label: "Gerenciar relé" },
+    { action: "multimeter", icon: "fa-gauge-high", label: "Gerenciar multimedidor" },
+    { action: "trackers", icon: "fa-satellite-dish", label: "Gerenciar trackers" },
+    { type: "separator" },
+    { action: "events", icon: "fa-triangle-exclamation", label: "Ver eventos/alarmes" },
+    { action: "datastudio", icon: "fa-flask-vial", label: "Abrir Data Studio da usina" },
+    { action: "command", icon: "fa-terminal", label: "Console de comandos" }
+  ];
+}
+
+function renderPortfolioPlantActionMenu(menu, plantId, plantName) {
+  menu.innerHTML = "";
+  const header = document.createElement("div");
+  header.className = "portfolio-plant-action-menu__header";
+  header.textContent = plantName || `Usina ${plantId}`;
+  menu.appendChild(header);
+
+  buildPortfolioPlantActionItems().forEach(item => {
+    if (item.type === "separator") {
+      const sep = document.createElement("div");
+      sep.className = "portfolio-plant-action-menu__separator";
+      sep.setAttribute("role", "separator");
+      menu.appendChild(sep);
+      return;
+    }
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "portfolio-plant-action-menu__item";
+    btn.setAttribute("role", "menuitem");
+    btn.dataset.action = item.action;
+    btn.innerHTML = `<i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${escapeHtml(item.label)}</span>`;
+    btn.addEventListener("click", () => runPortfolioPlantAction(item.action, plantId, plantName));
+    menu.appendChild(btn);
+  });
+}
+
+function openPortfolioPlantActionMenu(event, plantId, plantName) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
+  const button = event?.currentTarget;
+  const menu = ensurePortfolioPlantActionMenu();
+  const sameButtonOpen =
+    _portfolioActionMenuButton === button &&
+    !menu.classList.contains("hidden");
+
+  closePortfolioPlantActionMenu();
+  if (sameButtonOpen) return;
+
+  _portfolioActionMenuButton = button;
+  _portfolioActionMenuContext = { plantId, plantName };
+  renderPortfolioPlantActionMenu(menu, plantId, plantName);
+  button?.setAttribute("aria-expanded", "true");
+  positionPortfolioPlantActionMenu(menu, button);
+}
+
+function closePortfolioPlantActionMenu() {
+  const menu = document.getElementById("portfolioPlantActionMenu");
+  if (menu) {
+    menu.classList.add("hidden");
+    menu.innerHTML = "";
+  }
+  _portfolioActionMenuButton?.setAttribute("aria-expanded", "false");
+  _portfolioActionMenuButton = null;
+  _portfolioActionMenuContext = null;
+}
+
+function openPortfolioEventsForPlant(plantId) {
+  wireEventsFiltersOnce();
+  populateEventsPlantSelect(lastValidPlants);
+
+  const ui = getEventsUIElements();
+  if (ui.plantSelect) ui.plantSelect.value = String(plantId);
+  if (ui.equipmentSelect) ui.equipmentSelect.value = "all";
+  if (ui.desc) ui.desc.value = "";
+  if (ui.typeSelect) ui.typeSelect.value = "all";
+  if (ui.statusSelect) ui.statusSelect.value = "all";
+  if (ui.severitySelect) ui.severitySelect.value = "all";
+  ensureDefaultEventsDateTimes();
+
+  EVENTS_STATE.page = 1;
+  showView("events");
+  void refreshEventsEquipmentOptionsForPlant(plantId);
+}
+
+function openPortfolioDataStudioForPlant(plantId) {
+  showView("datastudio");
+  wireDataStudioOnce();
+  populateDataStudioPlantSelect(lastValidPlants);
+
+  const ui = getDataStudioUIElements();
+  if (ui.plantSelect) ui.plantSelect.value = String(plantId);
+  if (ui.dataKindSelect) ui.dataKindSelect.value = "all";
+  if (ui.sourceSelect) ui.sourceSelect.value = "all";
+  if (ui.searchInput) ui.searchInput.value = "";
+
+  DATASTUDIO_STATE.selectedPlantId = String(plantId);
+  DATASTUDIO_STATE.selectedTags = [];
+  DATASTUDIO_STATE.availableTags = [];
+  DATASTUDIO_STATE.selectionId = null;
+  DATASTUDIO_STATE.chartData = null;
+  DATASTUDIO_STATE.selectedDataKind = "all";
+  DATASTUDIO_STATE.selectedSource = "all";
+  DATASTUDIO_STATE.selectedContext = "all";
+  DATASTUDIO_STATE.searchText = "";
+  DATASTUDIO_STATE.catalogOpen = true;
+  DATASTUDIO_STATE.catalogConfirmed = false;
+  DATASTUDIO_STATE.forceHeroState = false;
+
+  if (ui.contextSelect) {
+    ui.contextSelect.innerHTML = "";
+    const opt = document.createElement("option");
+    opt.value = "all";
+    opt.textContent = "Todos contextos";
+    ui.contextSelect.appendChild(opt);
+    ui.contextSelect.value = "all";
+  }
+
+  renderDataStudioTagsTable([]);
+  renderDataStudioChart(null);
+  updateSelectedTagsCounter();
+  updateDataStudioExportButton();
+  updateDataStudioStageUI();
+  fetchDataStudioTags();
+}
+
+function runPortfolioPlantAction(action, plantId, plantName) {
+  closePortfolioPlantActionMenu();
+
+  switch (action) {
+    case "open":
+      navigateToPlantPage(plantId);
+      break;
+    case "edit":
+      openPlantEditModal(null, plantId, plantName, { mode: "plant" });
+      break;
+    case "devices":
+      openPlantEditModal(null, plantId, plantName, { mode: "devices" });
+      break;
+    case "inverters":
+      navigateToPlantPage(plantId, { hash: "#sec-inverters" });
+      break;
+    case "relay":
+      navigateToPlantPage(plantId, { hash: "#sec-relay" });
+      break;
+    case "multimeter":
+      navigateToPlantPage(plantId, { hash: "#sec-multimeter" });
+      break;
+    case "trackers":
+      navigateToPlantPage(plantId, { hash: "#sec-trackers" });
+      break;
+    case "events":
+      openPortfolioEventsForPlant(plantId);
+      break;
+    case "datastudio":
+      openPortfolioDataStudioForPlant(plantId);
+      break;
+    case "command":
+      navigateToPlantPage(plantId, { action: "command" });
+      break;
+  }
+}
+
+function portfolioSetView(view) {
+  _portfolioCurrentView = view;
+  localStorage.setItem("portfolioView", view);
+  const listView = document.getElementById("portfolioListView");
+  const cardView = document.getElementById("portfolioCardView");
+  const btnList = document.getElementById("btnViewList");
+  const btnCard = document.getElementById("btnViewCard");
+  if (listView) listView.classList.toggle("hidden", view !== "list");
+  if (cardView) cardView.classList.toggle("hidden", view !== "card");
+  if (btnList) btnList.classList.toggle("active", view === "list");
+  if (btnCard) btnCard.classList.toggle("active", view === "card");
+  if (view === "card" && lastValidPlants.length > 0) {
+    const _grid = document.getElementById("portfolioCardView");
+    if (!_grid || _grid.children.length === 0) {
+      renderPortfolioCards(lastValidPlants);
+    }
+  }
+}
+
+function portfolioGetSearchFilter() {
+  const input = document.getElementById("portfolioSearchInput");
+  return (input?.value || "").trim().toLowerCase();
+}
+
+function portfolioFilterPlants(plants) {
+  const q = portfolioGetSearchFilter();
+  if (!q) return plants;
+  return plants.filter(p => {
+    const name = (p.power_plant_name || p.plant_name || p.name || "").toLowerCase();
+    return name.includes(q);
+  });
+}
+
+function wirePortfolioControls() {
+  const btnList = document.getElementById("btnViewList");
+  const btnCard = document.getElementById("btnViewCard");
+  const searchInput = document.getElementById("portfolioSearchInput");
+
+  btnList?.addEventListener("click", () => portfolioSetView("list"));
+  btnCard?.addEventListener("click", () => portfolioSetView("card"));
+
+  searchInput?.addEventListener("input", () => {
+    const filtered = portfolioFilterPlants(lastValidPlants);
+    if (_portfolioCurrentView === "list") {
+      renderPortfolioTable(filtered);
+    } else {
+      renderPortfolioCards(filtered);
+    }
+  });
+
+  portfolioSetView(_portfolioCurrentView);
+}
+
+function updatePortfolioCardAlarms() {
+  const grid = document.getElementById("portfolioCardView");
+  if (!grid) return;
+  grid.querySelectorAll(".plant-card[data-plant-id]").forEach(card => {
+    const pid = card.dataset.plantId;
+    const pname = card.dataset.plantName || "";
+    const sev = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pid))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
+      || null;
+    const isOff = card.classList.contains("plant-card--offline");
+    const kind = card.dataset.plantKind || "";
+    const isStandby = !sev && kind === "standby";
+    card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}${isStandby ? " standby-card" : ""}`;
+    const icon = card.querySelector(".plant-card__icon");
+    if (icon) icon.className = sev ? `plant-card__icon alarm-${sev}` : `plant-card__icon${isStandby ? " standby-icon" : ""}`;
+  });
+}
+
+function renderPortfolioCards(plants) {
+  const grid = document.getElementById("portfolioCardView");
+  if (!grid) return;
+
+  const renderGen = ++_portfolioRenderGen;
+  const validPlants = sortPortfolioPlants(plants);
+  grid.innerHTML = "";
+
+  _portfolioMiniCharts.forEach(chart => { try { chart.destroy(); } catch(e) {} });
+  _portfolioMiniCharts.clear();
+
+  // Coleta (canvasId, plantId) para render de charts depois
+  const chartTargets = [];
+
+  validPlants.forEach(plant => {
+    const plantId = plant.power_plant_id ?? plant.plant_id ?? plant.id;
+    const plantName = String(plant.power_plant_name ?? plant.plant_name ?? plant.name ?? "\u2014");
+
+    const alarmSeverity = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantName)) || null;
+
+    const plantState = getPortfolioPlantVisualState(plant);
+    const activePower = plantState.activePower;
+    const ratedPower = Number(plant.rated_power_kw ?? plant.rated_power_kwp ?? 0);
+    const energyToday = plantState.energyToday;
+    const pr = plant.pr_daily_pct != null ? Number(plant.pr_daily_pct).toFixed(1) + "%" : "\u2014";
+    const irr = plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m\u00B2" : "\u2014";
+    const invAvail = plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "\u2014";
+
+    const isOffline = plantState.isOffline;
+    const isGenerating = plantState.kind === "generating";
+    let statusDotClass = "plant-card__status-dot";
+    let statusText;
+    if (plantState.kind === "offline") {
+      statusDotClass += " offline";
+      statusText = "Sem dados";
+    }
+    else if (isGenerating){ statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
+    else                  { statusDotClass += " standby";   statusText = "Aguardando"; }
+
+    const offlineClass = isOffline ? " plant-card--offline" : "";
+    const alarmSuffix  = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
+    const standbyIcon  = (!alarmSeverity && plantState.kind === "standby") ? " standby-icon" : "";
+    const iconClass    = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : `plant-card__icon${standbyIcon}`;
+    const standbyCard  = (!alarmSeverity && plantState.kind === "standby") ? " standby-card" : "";
+    const cardClass    = `plant-card${offlineClass}${alarmSuffix}${standbyCard}`;
+    const canvasId = "mini-chart-" + plantId;
+
+    const card = document.createElement("div");
+    card.className = cardClass;
+    card.setAttribute("role", "link");
+    card.setAttribute("tabindex", "0");
+    card.dataset.plantId = plantId;
+    card.dataset.plantName = plantName;
+    card.dataset.plantKind = plantState.kind;
+
+    card.innerHTML = `
+      <div class="plant-card__top">
+        <div class="${iconClass}"><i class="fa-solid fa-seedling"></i></div>
+        <div class="plant-card__name">${escapeHtml(plantName)}</div>
+      </div>
+      <div class="plant-card__stats">
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-bolt"></i> Active Power</div>
+          <div class="plant-card__stat-value active">${activePower.toFixed(1)} kW</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-layer-group"></i> Rated</div>
+          <div class="plant-card__stat-value muted">${ratedPower.toFixed(1)} kWp</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-calendar-day"></i> Hoje</div>
+          <div class="plant-card__stat-value">${energyToday.toFixed(1)} kWh</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-gauge-high"></i> PR Di\u00E1rio</div>
+          <div class="plant-card__stat-value">${pr}</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-sun"></i> Irradi\u00E2ncia</div>
+          <div class="plant-card__stat-value">${irr}</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-microchip"></i> Inv. Disp.</div>
+          <div class="plant-card__stat-value">${invAvail}</div>
+        </div>
+      </div>
+      <div class="plant-card__chart-area">
+        <div class="plant-card__chart-wrap">
+          <canvas id="${canvasId}"></canvas>
+        </div>
+        <div class="plant-card__chart-legend">
+          <span class="pcc-leg pcc-leg--power">Active Power</span>
+          <span class="pcc-leg pcc-leg--irr">Irrad. POA</span>
+          <span class="pcc-leg pcc-leg--pr">PR</span>
+        </div>
+      </div>
+      <div class="plant-card__status">
+        <button class="plant-card__edit-btn" type="button" data-plant-id="${escapeHtml(plantId)}" title="Ações da usina" aria-label="Ações da usina" aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M10.5 3.5 L2.5 11.5 L2 15.5 L6 15 L14 7 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.12"/>
+            <path d="M8.5 5.5 L12 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <path d="M13 2.5 L15 4.5 L14 7 L10.5 3.5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="0.3"/>
+          </svg>
+        </button>
+        <div class="${statusDotClass}"></div>
+        <span class="plant-card__status-text">${statusText}</span>
+      </div>
+    `;
+
+    card.querySelector(".plant-card__edit-btn")?.addEventListener("click", event => {
+      openPortfolioPlantActionMenu(event, plantId, card.dataset.plantName || plantName);
+    });
+    card.querySelector(".plant-card__edit-btn")?.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        openPortfolioPlantActionMenu(event, plantId, card.dataset.plantName || plantName);
+      }
+    });
+
+    const openPlant = () => {
+      if (plantId != null) window.location.href = `plant.html?plant_id=${encodeURIComponent(plantId)}`;
+    };
+    card.addEventListener("click", openPlant);
+    card.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPlant(); }
+    });
+
+    grid.appendChild(card);
+    chartTargets.push({ canvasId, plantId });
+  });
+
+  // Inicia fetch de todos os mini-charts APOS todo o DOM estar montado,
+  // com concorrencia controlada (3 por vez) e retry automatico.
+  if (chartTargets.length > 0) {
+    _startMiniChartBatch(chartTargets, renderGen);
+  }
+}
+
+/**
+ * Busca dados e renderiza mini-charts em lotes de CONCURRENCY,
+ * com 1 retry automatico por falha. Usa cache (TTL 5 min).
+ * Verifica renderGen antes de cada chart para abortar se houve re-render.
+ */
+async function _startMiniChartBatch(targets, renderGen) {
+  const CONCURRENCY = 3;
+  const queue = [...targets];
+  const failed = [];
+
+  async function processOne(target) {
+    if (renderGen !== _portfolioRenderGen) return;
+    try {
+      await _fetchAndRenderOneMiniChart(target.canvasId, target.plantId, renderGen);
+    } catch (e) {
+      console.warn("[mini-chart] falhou, sera retentado:", target.plantId, e?.message || e);
+      failed.push(target);
+    }
+  }
+
+  // Pool de concorrencia: no maximo CONCURRENCY simultaneos
+  async function drainQueue() {
+    while (queue.length > 0) {
+      if (renderGen !== _portfolioRenderGen) return;
+      const batch = queue.splice(0, CONCURRENCY);
+      await Promise.allSettled(batch.map(t => processOne(t)));
+    }
+  }
+
+  // Aguarda 2 frames de layout do browser antes de criar os Chart.js
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (renderGen !== _portfolioRenderGen) return;
+
+  await drainQueue();
+
+  // Retry das que falharam (1 tentativa extra, sequencial)
+  if (failed.length > 0 && renderGen === _portfolioRenderGen) {
+    console.log("[mini-chart] retentando", failed.length, "charts que falharam");
+    await new Promise(r => setTimeout(r, 1500));
+    for (const target of failed) {
+      if (renderGen !== _portfolioRenderGen) return;
+      try {
+        await _fetchAndRenderOneMiniChart(target.canvasId, target.plantId, renderGen);
+      } catch (e) {
+        console.warn("[mini-chart] retry falhou:", target.plantId, e?.message || e);
+      }
+    }
+  }
+}
+
+async function _fetchAndRenderOneMiniChart(canvasId, plantId, renderGen) {
+  // 1) Busca dados (cache ou fetch)
+  let body;
+  const cached = _miniChartDataCache.get(plantId);
+  if (cached && (Date.now() - cached.ts) < _MINI_CHART_CACHE_TTL_MS) {
+    body = cached.body;
+  } else {
+    const res = await apiFetch(`/plants/${plantId}/energy/daily`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} para plant ${plantId}`);
+    }
+    const raw = await res.json();
+    body = (raw && raw.body)
+      ? (typeof raw.body === "string" ? JSON.parse(raw.body) : raw.body)
+      : raw;
+    _miniChartDataCache.set(plantId, { ts: Date.now(), body });
+  }
+
+  // 2) Verifica se ainda estamos no mesmo render
+  if (renderGen !== _portfolioRenderGen) return;
+
+  // 3) Re-busca canvas no DOM (pode ter mudado)
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  // 4) Monta chart
+  _renderMiniChartOnCanvas(canvas, plantId, body);
+}
+
+function _renderMiniChartOnCanvas(canvas, plantId, body) {
+  const labels   = body?.labels || [];
+  const powerRaw = body?.activePower || body?.active_power_kw || body?.power_kw || [];
+  const irrRaw   = body?.irradiance  || body?.irradiance_wm2  || [];
+  const prRaw    = body?.pr          || body?.pr_pct          || body?.performance_ratio || [];
+
+  if (!labels.length || (!powerRaw.length && !irrRaw.length)) return;
+
+  const toNums = arr => arr.map(v => (v == null ? null : Number(v)));
+  const seriesMax = arr => Math.max(...arr.filter(v => v != null && isFinite(v)), 0.001);
+  const fmtTick = (v, unit) => {
+    if (v === 0) return "0";
+    if (unit === "kW"  && v >= 1000) return (v/1000).toFixed(0) + "M";
+    if (unit === "W/m\u00B2"&& v >= 1000) return (v/1000).toFixed(1) + "k";
+    return v % 1 === 0 ? v.toFixed(0) : v.toFixed(1);
+  };
+
+  const pNums  = toNums(powerRaw);
+  const iNums  = toNums(irrRaw);
+  const prNums = toNums(prRaw);
+  const maxP   = powerRaw.length ? seriesMax(pNums)  : 0;
+  const maxI   = irrRaw.length   ? seriesMax(iNums)  : 0;
+
+  const datasets = [];
+
+  if (powerRaw.length) {
+    datasets.push({
+      label: "Active Power", _raw: powerRaw, _unit: "kW",
+      data: pNums, yAxisID: "y",
+      borderColor: "rgba(127,208,85,0.9)",
+      backgroundColor: "rgba(127,208,85,0.07)",
+      borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
+      pointHoverBackgroundColor: "#7fd055",
+      tension: 0.4, fill: true,
+    });
+  }
+
+  if (irrRaw.length) {
+    datasets.push({
+      label: "Irrad. POA", _raw: irrRaw, _unit: "W/m\u00B2",
+      data: iNums, yAxisID: "y1",
+      borderColor: "rgba(255,200,50,0.85)",
+      backgroundColor: "transparent",
+      borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
+      pointHoverBackgroundColor: "#ffc832",
+      tension: 0.4, fill: false,
+    });
+  }
+
+  if (prRaw.length) {
+    datasets.push({
+      label: "PR", _raw: prRaw, _unit: "%",
+      data: prNums, yAxisID: "y2",
+      borderColor: "rgba(80,200,255,0.75)",
+      backgroundColor: "transparent",
+      borderWidth: 1.5, borderDash: [4, 3],
+      pointRadius: 0, pointHoverRadius: 4,
+      pointHoverBackgroundColor: "#50c8ff",
+      tension: 0.4, fill: false,
+    });
+  }
+
+  if (!datasets.length) return;
+
+  const tickStyle = (color) => ({
+    display: true,
+    maxTicksLimit: 3,
+    color,
+    font: { family: "'JetBrains Mono', monospace", size: 8 },
+    padding: 2,
+  });
+
+  try {
+    const existing = Chart.getChart(canvas);
+    if (existing) existing.destroy();
+  } catch (_) {}
+
+  const ctx = canvas.getContext("2d");
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          backgroundColor: "rgba(4,12,8,0.94)",
+          borderColor: "rgba(57,229,140,0.20)",
+          borderWidth: 1,
+          padding: { top: 7, bottom: 7, left: 10, right: 10 },
+          titleColor: "rgba(154,219,184,0.55)",
+          titleFont: { family: "'JetBrains Mono', monospace", size: 10 },
+          bodyColor: "#ddeee4",
+          bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+          callbacks: {
+            title: items => items[0]?.label || "",
+            label: item => {
+              const raw = item.dataset._raw?.[item.dataIndex];
+              if (raw == null) return null;
+              return ` ${item.dataset.label}: ${Number(raw).toFixed(1)} ${item.dataset._unit}`;
+            },
+            labelColor: item => ({
+              borderColor: item.dataset.borderColor,
+              backgroundColor: item.dataset.borderColor,
+              borderRadius: 2,
+            }),
+          },
+        },
+      },
+      scales: {
+        x: {
+          display: true,
+          grid: { display: false },
+          ticks: { display: false },
+          border: { display: false },
+        },
+        y: {
+          type: "linear", position: "left",
+          display: powerRaw.length > 0,
+          min: 0, max: maxP * 1.12,
+          grid: { display: false },
+          ticks: { ...tickStyle("rgba(57,229,140,0.55)"), callback: v => fmtTick(v, "kW") },
+          border: { display: false },
+        },
+        y1: {
+          type: "linear", position: "right",
+          display: irrRaw.length > 0,
+          min: 0, max: maxI * 1.12,
+          grid: { drawOnChartArea: false, drawTicks: false },
+          ticks: { ...tickStyle("rgba(255,200,50,0.55)"), callback: v => fmtTick(v, "W/m\u00B2") },
+          border: { display: false },
+        },
+        y2: {
+          type: "linear", position: "right",
+          display: false,
+          min: 0, max: 100,
+          grid: { drawOnChartArea: false },
+        },
+      },
+      layout: { padding: { top: 4, bottom: 2, left: 0, right: 0 } },
+    },
+  });
+
+  _portfolioMiniCharts.set(plantId, chart);
+}
+
+// wirePortfolioControls is now called synchronously inside the main DOMContentLoaded listener (above).
