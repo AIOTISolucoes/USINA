@@ -2,11 +2,15 @@
 // CONTROLE DE ACESSO POR ROLE
 // ======================================================
 function _getUserRole() {
-  try { return JSON.parse(localStorage.getItem("user") || "{}").role || "viewer"; } catch { return "viewer"; }
+  try {
+    const u = JSON.parse(localStorage.getItem("user") || "{}");
+    return u.role_key || "viewer";
+  } catch { return "viewer"; }
 }
 function _canSendCommand() {
+  if (typeof canSendCommand === "function") return canSendCommand();
   const r = _getUserRole();
-  return r === "superuser" || r === "operator";
+  return ["superuser", "operator", "admin_customer"].includes(r);
 }
 
 // ======================================================
@@ -336,7 +340,7 @@ window.INVERTERS_REALTIME = INVERTERS_REALTIME;
 window.RELAY_REALTIME = RELAY_REALTIME;
 window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
 let OPEN_INVERTER_REAL_ID = null;
-let STRINGS_REFRESH_SEQ = 0;
+const STRINGS_REFRESH_SEQ_MAP = new Map();
 let IS_REFRESHING_PLANT = false;
 let INVERTER_EXTRAS_BY_ID = new Map(); // inverter_id (string) -> objeto inv completo
 
@@ -1220,11 +1224,15 @@ async function safeFetchMultimeterIfSupported(plantId) {
 function setRelaySectionVisible(visible) {
   const relaySection = document.getElementById("relaySection");
   if (relaySection) relaySection.style.display = visible ? "" : "none";
+  const btn = document.getElementById("navBtnRelay");
+  if (btn) btn.style.display = visible ? "" : "none";
 }
 
 function setMultimeterSectionVisible(visible) {
   const section = document.getElementById("multimeterSection");
   if (section) section.style.display = visible ? "" : "none";
+  const btn = document.getElementById("navBtnMultimeter");
+  if (btn) btn.style.display = visible ? "" : "none";
 }
 
 function setTrackersSectionVisible(visible) {
@@ -1235,6 +1243,7 @@ function setTrackersSectionVisible(visible) {
   if (btn) {
     btn.classList.toggle("on", visible);
     btn.setAttribute("aria-expanded", visible ? "true" : "false");
+    btn.style.display = visible ? "" : "none";
   }
 }
 
@@ -1678,21 +1687,19 @@ function ensureInverterRowsFromRealtime(inverters) {
 }
 
 // ======================================================
-// MAPA DE CABINES
+// MODO UNIFILAR — SINGLE LINE DIAGRAM
 // ======================================================
-let _cabineMapScale = 1;
-let _cabineMapDragState = null;
-let _cabineMapTouchStart = null;
-let _cabineMapOffset = { x: 0, y: 0 };
-let _cabineMapDragZoomReady = false;
 let _plantChartsPlaceholder = null;
 
-function applyCabineMapTransform() {
-  const stage = document.getElementById("cabineMapStage");
-  if (!stage) return;
-  stage.style.transform = `translate(${_cabineMapOffset.x}px, ${_cabineMapOffset.y}px) scale(${_cabineMapScale})`;
-  stage.style.transformOrigin = "0 0";
-}
+// Estado do modo unifilar
+let UNIF_MODE = "overview"; // "overview" | "cabin"
+let UNIF_CABIN_IDX = 0;
+let UNIF_GROUPS = [];
+let UNIF_SIDE_COLLAPSED = false;
+let UNIF_ACTIVE_CABIN_FILTER = null;
+let UNIF_SEARCH_TEXT = "";
+let UNIF_TRANSITION_RUNNING = false;
+let UNIF_MODAL_SEQ = 0;
 
 function cabinMapEscape(value) {
   return String(value ?? "")
@@ -1721,6 +1728,7 @@ function isCabineMapVisible() {
   const mapView = document.getElementById("cabineMapView");
   return !!mapView && getComputedStyle(mapView).display !== "none";
 }
+function isUnifilarVisible() { return isCabineMapVisible(); }
 
 function resizePlantChartsSoon() {
   const resize = () => {
@@ -1754,23 +1762,7 @@ function movePlantChartsIntoCabineMap() {
   resizePlantChartsSoon();
 }
 
-function autoFitCabineMap() {
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      const wrap = document.getElementById("cabineMapStageWrap");
-      const stage = document.getElementById("cabineMapStage");
-      if (!wrap || !stage) return;
-      const wrapW = wrap.clientWidth;
-      const stageW = stage.scrollWidth;
-      if (!stageW) return;
-
-      const scaleX = wrapW / (stageW + 80);
-      _cabineMapScale = Math.min(Math.max(scaleX, 0.35), 1.0); // evita mapa minúsculo com muitas linhas
-      _cabineMapOffset = { x: 20, y: 20 };
-      applyCabineMapTransform();
-    }, 120);
-  });
-}
+function autoFitCabineMap() { /* substituído pelo modo unifilar */ }
 
 function movePlantChartsToList() {
   const chartsGrid = getPlantChartsGrid();
@@ -1780,98 +1772,7 @@ function movePlantChartsToList() {
   resizePlantChartsSoon();
 }
 
-function initCabineMapDragZoom() {
-  const wrap = document.getElementById("cabineMapStageWrap");
-  const stage = document.getElementById("cabineMapStage");
-  if (!wrap || !stage) return;
-
-  if (_cabineMapDragZoomReady) {
-    applyCabineMapTransform();
-    return;
-  }
-  _cabineMapDragZoomReady = true;
-
-  const isInteractiveTarget = (target) =>
-    !!target.closest("button, a, input, select, textarea, canvas, .cabine-map-chart-dock, .device-command-control, .device-command-menu");
-
-  wrap.addEventListener("mousedown", (e) => {
-    if (e.button !== 0 || isInteractiveTarget(e.target)) return;
-    _cabineMapDragState = {
-      startX: e.clientX - _cabineMapOffset.x,
-      startY: e.clientY - _cabineMapOffset.y
-    };
-    wrap.style.cursor = "grabbing";
-    e.preventDefault();
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!_cabineMapDragState) return;
-    _cabineMapOffset.x = e.clientX - _cabineMapDragState.startX;
-    _cabineMapOffset.y = e.clientY - _cabineMapDragState.startY;
-    applyCabineMapTransform();
-  });
-
-  window.addEventListener("mouseup", () => {
-    _cabineMapDragState = null;
-    wrap.style.cursor = "grab";
-  });
-
-  wrap.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1 || isInteractiveTarget(e.target)) return;
-    const t = e.touches[0];
-    _cabineMapTouchStart = {
-      x: t.clientX - _cabineMapOffset.x,
-      y: t.clientY - _cabineMapOffset.y
-    };
-  }, { passive: true });
-
-  wrap.addEventListener("touchmove", (e) => {
-    if (!_cabineMapTouchStart || e.touches.length !== 1) return;
-    const t = e.touches[0];
-    _cabineMapOffset.x = t.clientX - _cabineMapTouchStart.x;
-    _cabineMapOffset.y = t.clientY - _cabineMapTouchStart.y;
-    applyCabineMapTransform();
-  }, { passive: true });
-
-  wrap.addEventListener("touchend", () => {
-    _cabineMapTouchStart = null;
-  });
-
-  wrap.addEventListener("wheel", (e) => {
-    if (e.target.closest(".cabine-map-chart-dock")) return;
-    e.preventDefault();
-    const rect = wrap.getBoundingClientRect();
-    const pointerX = e.clientX - rect.left;
-    const pointerY = e.clientY - rect.top;
-    const beforeX = (pointerX - _cabineMapOffset.x) / _cabineMapScale;
-    const beforeY = (pointerY - _cabineMapOffset.y) / _cabineMapScale;
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-
-    _cabineMapScale = Math.min(3, Math.max(0.3, _cabineMapScale * delta));
-    _cabineMapOffset.x = pointerX - beforeX * _cabineMapScale;
-    _cabineMapOffset.y = pointerY - beforeY * _cabineMapScale;
-    applyCabineMapTransform();
-  }, { passive: false });
-
-  document.getElementById("cabineZoomIn")?.addEventListener("click", () => {
-    _cabineMapScale = Math.min(3, _cabineMapScale * 1.15);
-    applyCabineMapTransform();
-  });
-
-  document.getElementById("cabineZoomOut")?.addEventListener("click", () => {
-    _cabineMapScale = Math.max(0.3, _cabineMapScale * 0.87);
-    applyCabineMapTransform();
-  });
-
-  document.getElementById("cabineZoomReset")?.addEventListener("click", () => {
-    _cabineMapScale = 1;
-    _cabineMapOffset = { x: 0, y: 0 };
-    applyCabineMapTransform();
-  });
-
-  wrap.style.cursor = "grab";
-  applyCabineMapTransform();
-}
+function initCabineMapDragZoom() { /* substituído pelo modo unifilar */ }
 
 const CABINE_STRINGS_CACHE_TTL_MS = 60 * 1000;
 const CABINE_STRINGS_CACHE = new Map();
@@ -2259,301 +2160,827 @@ function buildCabineCard(inv, idx = 0) {
 }
 
 function initCabineMapCardClicks() {
-  const grid = document.getElementById("cabineGrid");
-  if (!grid || grid.dataset.cardClickReady === "true") return;
-  grid.dataset.cardClickReady = "true";
-
-  grid.addEventListener("click", (e) => {
-    if (e.target.closest("button, a, .device-command-control, .device-command-menu")) return;
-
-    const card = e.target.closest(".cabine-inv-card[data-inverter-real-id]");
-    if (!card) return;
-
-    const id = card.dataset.inverterRealId;
-    const inv =
-      INVERTER_EXTRAS_BY_ID.get(String(id)) ||
-      dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
-
-    if (!inv) return;
-
-    openCabineStringsBalloon(card, inv, getInverterDisplayName(inv, 0));
-  });
+  /* Clicks em cards de inversores são tratados pelo Unifilar modal — sem ação aqui */
 }
 
-function appendCabineBlock(grid, group, globalIdxRef, isSingle) {
-  const cabineEl = document.createElement("div");
-  cabineEl.className = `cabine-block${isSingle ? " cabine-block--single" : ""}`;
-  cabineEl.dataset.cabineId = String(group.id);
+// ======================================================
+// MODO UNIFILAR — FUNÇÕES PRINCIPAIS
+// ======================================================
 
-  const cabHeader = document.createElement("div");
-  cabHeader.className = "cabine-block__header";
-  cabHeader.innerHTML = `
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1" y="4" width="14" height="10" rx="1.5" stroke="rgba(57,229,140,.7)" stroke-width="1.2"/>
-      <path d="M5 4V3a3 3 0 016 0v1" stroke="rgba(57,229,140,.6)" stroke-width="1.2"/>
-    </svg>
-    <span>${cabinMapEscape(group.name)}</span>
-    <span class="cabine-block__count">${group.inverters.length} inv.</span>
-  `;
-
-  const cabBody = document.createElement("div");
-  cabBody.className = "cabine-block__body";
-
-  group.inverters.forEach((inv) => {
-    cabBody.appendChild(buildCabineCard(inv, globalIdxRef.value++));
-  });
-
-  cabineEl.appendChild(cabHeader);
-  cabineEl.appendChild(cabBody);
-  grid.appendChild(cabineEl);
-}
-
-function buildCabineMapView(invertersRaw, relayData = RELAY_REALTIME, multimeterData = MULTIMETER_REALTIME) {
-  const grid = document.getElementById("cabineGrid");
-  if (!grid) return;
-  grid.innerHTML = "";
-
+function buildUnifGroups(invertersRaw) {
   const uniq = dedupInvertersById(Array.isArray(invertersRaw) ? invertersRaw : []);
-  const sortByName = (a, b) => {
+  uniq.sort((a, b) => {
     const an = String(getInverterDisplayName(a, 0) || "");
     const bn = String(getInverterDisplayName(b, 0) || "");
-    if (an && bn) return an.localeCompare(bn, "pt-BR", { numeric: true, sensitivity: "base" });
-    return Number(getInverterRealId(a) || 0) - Number(getInverterRealId(b) || 0);
+    return an.localeCompare(bn, "pt-BR", { numeric: true, sensitivity: "base" });
+  });
+  const hasCabins = uniq.some(inv => inv.cabin_id != null);
+  if (!hasCabins) return [{ id: "all", name: "Inversores", displayOrder: 0, inverters: uniq }];
+  const groupMap = new Map();
+  const noCabin = [];
+  uniq.forEach(inv => {
+    const cabinId = inv.cabin_id;
+    if (cabinId == null) { noCabin.push(inv); return; }
+    if (!groupMap.has(cabinId)) {
+      groupMap.set(cabinId, {
+        id: cabinId,
+        name: inv.section_name ?? inv.cabin_name ?? inv.cabin_code ?? `Cabine ${cabinId}`,
+        displayOrder: asNumber(inv.cabin_display_order, 999),
+        inverters: []
+      });
+    }
+    groupMap.get(cabinId).inverters.push(inv);
+  });
+  const groups = [...Array.from(groupMap.values()).sort((a, b) => a.displayOrder - b.displayOrder)];
+  if (noCabin.length) groups.push({ id: "none", name: "Sem cabine", displayOrder: 9999, inverters: noCabin });
+  return groups;
+}
+
+/* ── SVGs dos equipamentos ── */
+function unifSVGTransformer() {
+  return `<svg viewBox="0 0 72 40" fill="none" class="unif-equip-svg unif-equip-svg--trafo">
+    <defs>
+      <filter id="trafoGlwA" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="2.5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="trafoGlwB" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="2" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <!-- Núcleo magnético -->
+    <rect x="30" y="6" width="12" height="28" rx="2"
+          fill="rgba(200,180,60,.08)" stroke="rgba(200,180,60,.25)" stroke-width=".8"/>
+    <!-- Bobina BT (esquerda - verde) -->
+    <g filter="url(#trafoGlwA)">
+      <path d="M16 12 C16 8 22 8 22 12 C22 16 16 16 16 20 C16 24 22 24 22 28"
+            stroke="rgba(127,208,85,.9)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <path d="M10 12 C10 8 16 8 16 12 C16 16 10 16 10 20 C10 24 16 24 16 28"
+            stroke="rgba(127,208,85,.7)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <!-- Terminal BT -->
+      <line x1="4"  y1="20" x2="10" y2="20" stroke="rgba(127,208,85,.85)" stroke-width="1.8" stroke-linecap="round"/>
+      <circle cx="4" cy="20" r="2" fill="rgba(127,208,85,.9)"/>
+    </g>
+    <!-- Bobina AT (direita - amarelo) -->
+    <g filter="url(#trafoGlwB)">
+      <path d="M50 12 C50 8 56 8 56 12 C56 16 50 16 50 20 C50 24 56 24 56 28"
+            stroke="rgba(245,200,66,.9)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+      <path d="M56 12 C56 8 62 8 62 12 C62 16 56 16 56 20 C56 24 62 24 62 28"
+            stroke="rgba(245,200,66,.7)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <!-- Terminal AT -->
+      <line x1="62" y1="20" x2="68" y2="20" stroke="rgba(245,200,66,.85)" stroke-width="1.8" stroke-linecap="round"/>
+      <circle cx="68" cy="20" r="2" fill="rgba(245,200,66,.9)"/>
+    </g>
+    <!-- Ligação ao núcleo -->
+    <line x1="22" y1="20" x2="30" y2="20" stroke="rgba(127,208,85,.5)" stroke-width="1.2" stroke-linecap="round"/>
+    <line x1="42" y1="20" x2="50" y2="20" stroke="rgba(245,200,66,.5)" stroke-width="1.2" stroke-linecap="round"/>
+  </svg>`;
+}
+
+function unifSVGCC() {
+  return `<svg viewBox="0 0 40 40" fill="none" class="unif-equip-svg" width="36" height="36">
+    <defs>
+      <filter id="ccGlw" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="1.8" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <g filter="url(#ccGlw)">
+      <!-- Caixa exterior -->
+      <rect x="2" y="2" width="36" height="36" rx="4"
+            stroke="rgba(127,208,85,.7)" stroke-width="1.5" fill="rgba(127,208,85,.04)"/>
+      <!-- Barras condutoras verticais -->
+      <line x1="10" y1="8"  x2="10" y2="32" stroke="rgba(127,208,85,.75)" stroke-width="1.6" stroke-linecap="round"/>
+      <line x1="16" y1="8"  x2="16" y2="32" stroke="rgba(127,208,85,.6)"  stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="22" y1="8"  x2="22" y2="32" stroke="rgba(127,208,85,.45)" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="28" y1="8"  x2="28" y2="32" stroke="rgba(127,208,85,.32)" stroke-width="1.1" stroke-linecap="round"/>
+      <!-- Barra de barramento horizontal -->
+      <line x1="8" y1="14" x2="32" y2="14" stroke="rgba(127,208,85,.5)" stroke-width=".9" stroke-linecap="round" stroke-dasharray="2 2"/>
+      <line x1="8" y1="26" x2="32" y2="26" stroke="rgba(127,208,85,.5)" stroke-width=".9" stroke-linecap="round" stroke-dasharray="2 2"/>
+      <!-- Ponto de entrada -->
+      <circle cx="36" cy="20" r="2.5" fill="rgba(127,208,85,.85)"/>
+    </g>
+  </svg>`;
+}
+
+function unifSVGQGBT(isOnline) {
+  const cMain = isOnline === true  ? "rgba(127,208,85,.88)"
+              : isOnline === false ? "rgba(255,80,80,.72)"
+              :                     "rgba(127,208,85,.45)";
+  const cDot  = isOnline === true  ? "#7fd055"
+              : isOnline === false ? "#ff4444"
+              :                     "#334433";
+  const glow  = isOnline === true  ? "filter:drop-shadow(0 0 5px rgba(127,208,85,.95));"
+              : isOnline === false ? "filter:drop-shadow(0 0 5px rgba(255,80,80,.8));"
+              :                     "";
+  return `<svg viewBox="0 0 40 40" fill="none" class="unif-equip-svg" width="36" height="36">
+    <defs>
+      <filter id="qgbtGlw" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="1.6" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <g filter="url(#qgbtGlw)">
+      <rect x="2" y="2" width="36" height="36" rx="4"
+            stroke="${cMain}" stroke-width="1.5" fill="rgba(127,208,85,.03)"/>
+      <!-- Chave seccionadora (linha de força) -->
+      <line x1="12" y1="30" x2="26" y2="30" stroke="${cMain}" stroke-width="2" stroke-linecap="round"/>
+      <!-- Contato móvel inclinado -->
+      <line x1="12" y1="30" x2="18" y2="18" stroke="${cMain}" stroke-width="2" stroke-linecap="round"/>
+      <!-- Contato fixo superior -->
+      <line x1="18" y1="16" x2="26" y2="16" stroke="${cMain}" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 2" opacity=".5"/>
+      <!-- Ponto de articulação -->
+      <circle cx="12" cy="30" r="2" fill="${cMain}"/>
+      <!-- Ponto de entrada saída -->
+      <circle cx="26" cy="30" r="2" fill="${cMain}"/>
+      <!-- LED de status (canto superior direito) -->
+      <circle cx="32" cy="8" r="3.5" fill="${cDot}" style="${glow}"/>
+    </g>
+  </svg>`;
+}
+
+function unifSVGSA() {
+  return `<svg viewBox="0 0 34 34" fill="none" class="unif-equip-svg" width="30" height="30">
+    <defs>
+      <filter id="saGlw" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="1.4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <g filter="url(#saGlw)">
+      <circle cx="17" cy="17" r="14"
+              stroke="rgba(127,208,85,.6)" stroke-width="1.4"
+              fill="rgba(127,208,85,.04)" stroke-dasharray="4 3"/>
+      <!-- Raio (serviços auxiliares) -->
+      <path d="M17 7 L14 16 H18 L13 27 L23 16 H19 L22 7 Z"
+            fill="rgba(127,208,85,.72)"/>
+    </g>
+  </svg>`;
+}
+
+/* ── Overview: constrói HTML do diagrama completo ── */
+function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
+  const relayItem  = Array.isArray(relayData)      ? relayData[0]      : relayData;
+  const meterItem  = Array.isArray(multimeterData)  ? multimeterData[0] : multimeterData;
+  const relayOnline  = relayItem  ? relayOnlineFromPayload(relayItem)        : null;
+  const meterOnline  = meterItem  ? multimeterOnlineFromPayload(meterItem)   : null;
+
+  const relayPowerRaw  = relayItem  ? pickDeviceMetricValue(relayItem,  relayItem?.analog  ?? {}, ["active_power_kw","power_kw","active_power","power"]) : null;
+  const meterPowerRaw  = meterItem  ? pickDeviceMetricValue(meterItem,  meterItem?.analog  ?? meterItem?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
+  const relayPowerStr  = relayPowerRaw  != null ? `${cabinMapFormat(relayPowerRaw, 1)} kW`  : "—";
+  const meterPowerStr  = meterPowerRaw  != null ? `${cabinMapFormat(meterPowerRaw, 1)} kW`  : "—";
+  const redePowerStr   = relayPowerRaw  != null ? relayPowerStr : asNumber(PLANT_STATE.active_power_kw, 0) > 0 ? `${asNumber(PLANT_STATE.active_power_kw, 0).toFixed(1)} kW` : "—";
+  const redeCapStr     = asNumber(PLANT_STATE.capacity_percent, 0) > 0 ? `${asNumber(PLANT_STATE.capacity_percent, 0).toFixed(1)}%` : "—";
+
+  /* Chips de inversores em cada cabine */
+  const cabinesHTML = groups.map((g, idx) => {
+    const online = g.inverters.filter(inv => isOnlineByFreshness(inv) && !isZeroSnapshot(inv)).length;
+    const alarm  = g.inverters.filter(inv => !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active)).length;
+    const total  = g.inverters.reduce((s, inv) => s + asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0), 0);
+    const sc     = alarm > 0 ? "has-alarm" : online === g.inverters.length && online > 0 ? "all-online" : online > 0 ? "partial-online" : "all-offline";
+
+    const chips = g.inverters.map(inv => {
+      const id = getInverterRealId(inv);
+      const isOn = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+      const isAl = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
+      const pKw  = asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0);
+      const rat  = asNumber(inv.rated_power_kw ?? 100, 100);
+      const pct  = Math.min(100, (pKw / Math.max(1, rat)) * 100);
+      const cls  = isAl ? "chip-alarm" : isOn ? "chip-online" : "chip-offline";
+      const nm   = cabinMapEscape(getInverterDisplayName(inv, 0));
+      return `<div class="unif-inv-chip ${cls}" title="${nm}: ${pKw.toFixed(0)} kW">
+        <span class="unif-chip-dot"></span>
+        <span class="unif-chip-name">${nm}</span>
+        <div class="unif-chip-bar"><div class="unif-chip-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <span class="unif-chip-val">${pKw > 0 ? pKw.toFixed(0) + " kW" : "—"}</span>
+      </div>`;
+    }).join("");
+
+    return `<div class="unif-cabin-box ${sc}" data-cabin-id="${cabinMapEscape(String(g.id))}" data-cabin-idx="${idx}" title="Duplo clique para detalhar">
+      <div class="unif-cabin-hdr">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x=".5" y="2.5" width="11" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.1"/><path d="M3.5 2.5V2a2.5 2.5 0 015 0v.5" stroke="currentColor" stroke-width="1.1"/></svg>
+        <span class="unif-cabin-name">${cabinMapEscape(g.name)}</span>
+        <span class="unif-cabin-stats">${online}/${g.inverters.length} · ${total.toFixed(0)} kW</span>
+      </div>
+      <div class="unif-cabin-body">${chips}</div>
+    </div>`;
+  }).join("");
+
+  const meterName  = meterItem?.device_name || meterItem?.name || "Medidor";
+  const relayName  = relayItem?.device_name  || relayItem?.name  || "Relé";
+  const cabinMinPx = groups.length >= 18 ? 136 : groups.length >= 10 ? 148 : 160;
+
+  const meterBadge = meterOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
+                   : meterOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
+                   :                        `<span class="unif-badge">—</span>`;
+  const relayBadge = relayOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
+                   : relayOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
+                   :                        `<span class="unif-badge">—</span>`;
+
+  const meterNode = meterItem ? `
+      <div class="unif-hwire unif-hwire--main"></div>
+      <div class="unif-node-wrap">
+        <div class="unif-node unif-node--cc ${meterOnline === true ? "is-online" : meterOnline === false ? "is-offline" : ""}"
+             id="unifNodeMeter" data-unif-device="multimeter">
+          ${unifSVGCC()}
+          <span class="unif-node-name">${cabinMapEscape(meterName)}</span>
+          <span class="unif-node-val" id="unifMeterPower">${meterPowerStr}</span>
+          ${meterBadge}
+        </div>
+      </div>` : "";
+
+  const relayNode = relayItem ? `
+      <div class="unif-hwire unif-hwire--main"></div>
+      <div class="unif-node-wrap">
+        <div class="unif-node unif-node--qgbt ${relayOnline === true ? "is-online" : relayOnline === false ? "is-offline" : ""}"
+             id="unifNodeRelay" data-unif-device="relay">
+          ${unifSVGQGBT(relayOnline)}
+          <span class="unif-node-name">${cabinMapEscape(relayName)}</span>
+          <span class="unif-node-val" id="unifRelayPower">${relayPowerStr}</span>
+          ${relayBadge}
+        </div>
+      </div>` : "";
+
+  const meterLbl = meterItem ? `<div class="unif-sec-lbl unif-sec-lbl--cc">${cabinMapEscape(meterName)}</div>` : "";
+  const relayLbl = relayItem ? `<div class="unif-sec-lbl unif-sec-lbl--qgbt">${cabinMapEscape(relayName)}</div>` : "";
+
+  return `<div class="unif-diagram">
+    <div class="unif-sec-strip">
+      <div class="unif-sec-lbl unif-sec-lbl--gen">GERAÇÃO FV</div>
+      ${meterLbl}
+      ${relayLbl}
+    </div>
+
+    <div class="unif-flow">
+      <!-- Geração: cabines em linhas horizontais + bus coletor -->
+      <div class="unif-gen-section">
+        <div class="unif-cabins" style="--unif-cabin-min:${cabinMinPx}px">${cabinesHTML}</div>
+        <div class="unif-vbus"></div>
+      </div>
+      ${meterNode}
+      ${relayNode}
+    </div>
+  </div>`;
+}
+
+/* ── Inicialização: toggle Lista / Unifilar ── */
+function initInvViewToggle() {
+  const btnList    = document.getElementById("invBtnList");
+  const btnMap     = document.getElementById("invBtnMap");
+  const listSection = document.getElementById("invertersListSection");
+  const unifView   = document.getElementById("cabineMapView");
+  if (!btnList || !btnMap || !listSection || !unifView) return;
+  if (btnList.dataset.unifReady === "true") return;
+  btnList.dataset.unifReady = "true";
+
+  const switchView = (toMap) => {
+    document.body.classList.toggle("plant-map-mode", toMap);
+    btnList.classList.toggle("is-active", !toMap);
+    btnMap.classList.toggle("is-active", toMap);
+    listSection.style.display = toMap ? "none" : "";
+    unifView.style.display    = toMap ? "flex" : "none";
+
+    if (!toMap) { movePlantChartsToList(); return; }
+
+    movePlantChartsToList();
+    initUnifilarControls();
+    buildUnifilarOverview();
+    renderUnifilarSidePanel();
+    renderUnifilarStatsBar();
   };
 
-  uniq.sort(sortByName);
+  btnList.addEventListener("click", () => switchView(false));
+  btnMap.addEventListener("click",  () => switchView(true));
+  switchView(false);
+}
 
-  if (!uniq.length) {
-    grid.className = "cabine-grid cabine-grid--empty";
-    grid.innerHTML = `<div class="cabine-map-empty">Nenhum inversor disponivel para montar o mapa.</div>`;
-    CABINE_MAP_STRUCTURE_SIGNATURE = getCabineMapStructureSignature(invertersRaw);
-    updateCabineRelayNode(relayData);
-    updateCabineMeterNode(multimeterData);
-    return;
-  }
+function initUnifilarControls() {
+  const btn = document.getElementById("unifilarBtnOverview");
+  if (!btn || btn.dataset.unifCtrl) return;
+  btn.dataset.unifCtrl = "1";
 
-  const hasCabins = uniq.some(inv => inv.cabin_id != null);
-  const groups = [];
+  document.getElementById("unifilarBtnOverview")?.addEventListener("click", () => setUnifMode("overview"));
+  document.getElementById("unifilarBtnCabin")?.addEventListener("click",   () => setUnifMode("cabin"));
+  document.getElementById("unifilarPrev")?.addEventListener("click",        () => navigateUnifCabin(-1));
+  document.getElementById("unifilarNext")?.addEventListener("click",        () => navigateUnifCabin(1));
+  document.getElementById("unifilarCollapseBtn")?.addEventListener("click", toggleUnifSidePanel);
 
-  if (!hasCabins) {
-    groups.push({
-      id: "synthetic",
-      name: "Inversores",
-      displayOrder: 0,
-      inverters: uniq
+  const searchEl = document.getElementById("unifilarSearch");
+  if (searchEl) {
+    searchEl.addEventListener("input", () => {
+      UNIF_SEARCH_TEXT = searchEl.value.toLowerCase().trim();
+      renderUnifilarSidePanel();
     });
+  }
+}
+
+function setUnifMode(mode, cabinIdx) {
+  if (UNIF_TRANSITION_RUNNING) return;
+  UNIF_MODE = mode;
+
+  const btnOv    = document.getElementById("unifilarBtnOverview");
+  const btnCab   = document.getElementById("unifilarBtnCabin");
+  const cabNav   = document.getElementById("unifilarCabinNav");
+  const overview = document.getElementById("unifilarOverview");
+  const detail   = document.getElementById("unifilarCabinDetail");
+
+  btnOv?.classList.toggle("is-active", mode === "overview");
+  btnCab?.classList.toggle("is-active", mode === "cabin");
+
+  if (mode === "overview") {
+    if (cabNav) cabNav.style.display = "none";
+    if (detail) detail.style.display = "none";
+    if (overview) overview.style.display = "";
+    buildUnifilarOverview();
+    UNIF_ACTIVE_CABIN_FILTER = null;
+    renderUnifilarSidePanel();
   } else {
-    const groupMap = new Map();
-    const noCabin = [];
+    if (cabinIdx != null) UNIF_CABIN_IDX = cabinIdx;
+    if (cabNav) cabNav.style.display = "flex";
+    if (overview) overview.style.display = "none";
+    if (detail) detail.style.display = "";
+    renderUnifCabinDetail(UNIF_CABIN_IDX, null);
+  }
+}
 
-    uniq.forEach(inv => {
-      const cabinId = inv.cabin_id;
-      if (cabinId == null) {
-        noCabin.push(inv);
-        return;
-      }
+function navigateUnifCabin(dir) {
+  if (UNIF_TRANSITION_RUNNING || !UNIF_GROUPS.length) return;
+  UNIF_CABIN_IDX = ((UNIF_CABIN_IDX + dir) + UNIF_GROUPS.length) % UNIF_GROUPS.length;
+  renderUnifCabinDetail(UNIF_CABIN_IDX, dir > 0 ? "left" : "right");
+  UNIF_ACTIVE_CABIN_FILTER = String(UNIF_GROUPS[UNIF_CABIN_IDX]?.id ?? "");
+  renderUnifilarSidePanel();
+}
 
-      if (!groupMap.has(cabinId)) {
-        groupMap.set(cabinId, {
-          id: cabinId,
-          name: inv.section_name ?? inv.cabin_name ?? inv.cabin_code ?? `Cabine ${cabinId}`,
-          displayOrder: asNumber(inv.cabin_display_order, 999),
-          inverters: []
-        });
-      }
-      groupMap.get(cabinId).inverters.push(inv);
+function renderUnifCabinDetail(idx, direction) {
+  const detail = document.getElementById("unifilarCabinDetail");
+  const label  = document.getElementById("unifilarCabinLabel");
+  if (!detail || !UNIF_GROUPS.length) return;
+
+  const group = UNIF_GROUPS[idx] || UNIF_GROUPS[0];
+  if (!group) return;
+
+  if (label) label.textContent = `${group.name} (${group.inverters.length} inv.)`;
+
+  const container = document.createElement("div");
+  container.className = "unif-cabin-cards";
+  const idxRef = { value: 0 };
+  group.inverters.forEach(inv => container.appendChild(buildCabineCard(inv, idxRef.value++)));
+
+  /* Wires click -> modal */
+  container.querySelectorAll(".cabine-inv-card[data-inverter-real-id]").forEach(card => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button,a,.device-command-control")) return;
+      const id  = card.dataset.inverterRealId;
+      const inv = INVERTER_EXTRAS_BY_ID.get(String(id)) ||
+        dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
+      if (inv) openUnifDeviceModal(inv, "inverter");
     });
+  });
 
-    groups.push(
-      ...Array.from(groupMap.values())
-        .sort((a, b) => a.displayOrder - b.displayOrder)
-    );
-
-    if (noCabin.length > 0) {
-      groups.push({ id: "none", name: "Sem cabine", displayOrder: 9999, inverters: noCabin });
-    }
+  if (direction && detail.firstElementChild) {
+    UNIF_TRANSITION_RUNNING = true;
+    const outClass = direction === "left" ? "unif-slide-out-left" : "unif-slide-out-right";
+    const inClass  = direction === "left" ? "unif-slide-in-right" : "unif-slide-in-left";
+    detail.firstElementChild.classList.add(outClass);
+    container.classList.add(inClass);
+    detail.appendChild(container);
+    setTimeout(() => {
+      detail.querySelector("." + outClass)?.remove();
+      container.classList.remove(inClass);
+      UNIF_TRANSITION_RUNNING = false;
+    }, 380);
+  } else {
+    detail.innerHTML = "";
+    detail.appendChild(container);
   }
-
-  const isSingle = groups.length === 1;
-  const cols = Math.min(5, Math.max(1, groups.length));
-  grid.className = `cabine-grid${isSingle ? " cabine-grid--single" : ""}`;
-  grid.style.setProperty("--cabine-grid-cols", String(cols));
-
-  const globalIdxRef = { value: 0 };
-  groups.forEach(group => appendCabineBlock(grid, group, globalIdxRef, isSingle));
-
-  CABINE_MAP_STRUCTURE_SIGNATURE = getCabineMapStructureSignature(invertersRaw);
-  initCabineMapCardClicks();
-  updateCabineRelayNode(relayData);
-  updateCabineMeterNode(multimeterData);
 }
 
-function updateCabineRelayNode(relayData) {
-  const node = document.getElementById("cabineRelayNode");
-  const powerEl = document.getElementById("cabRelayPower");
-  const statusEl = document.getElementById("cabRelayStatus");
-  if (!node || !powerEl || !statusEl) return;
+function buildUnifilarOverview() {
+  const el = document.getElementById("unifilarOverview");
+  if (!el) return;
+  UNIF_GROUPS = buildUnifGroups(INVERTERS_REALTIME);
+  el.innerHTML = buildUnifilarOverviewHTML(UNIF_GROUPS, RELAY_REALTIME, MULTIMETER_REALTIME);
 
-  const item = Array.isArray(relayData) ? relayData[0] : relayData;
-  if (!item) {
-    powerEl.textContent = "— kW";
-    statusEl.textContent = "—";
-    statusEl.className = "cabine-badge";
-    node.classList.remove("cabine-node--online", "cabine-node--offline");
-    return;
-  }
+  /* Click na cabine -> filtrar painel lateral */
+  el.querySelectorAll(".unif-cabin-box").forEach(box => {
+    box.addEventListener("click", () => {
+      el.querySelectorAll(".unif-cabin-box").forEach(b => b.classList.remove("is-focused"));
+      box.classList.add("is-focused");
+      UNIF_ACTIVE_CABIN_FILTER = box.dataset.cabinId || null;
+      renderUnifilarSidePanel();
+    });
+    box.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      setUnifMode("cabin", Number(box.dataset.cabinIdx) || 0);
+    });
+  });
 
-  const analog = item?.analog ?? {};
-  const pKw = pickDeviceMetricValue(item, analog, ["active_power_kw", "power_kw", "active_power", "power"]);
-  const online = relayOnlineFromPayload(item);
-  powerEl.textContent = pKw != null ? cabinMapFormat(pKw, 1, "kW") : "— kW";
-  statusEl.textContent = online ? "Online" : "Offline";
-  statusEl.className = `cabine-badge ${online ? "cabine-badge--online" : "cabine-badge--offline"}`;
-  node.classList.toggle("cabine-node--online", online);
-  node.classList.toggle("cabine-node--offline", !online);
-}
-
-function updateCabineMeterNode(multimeterData) {
-  const item = Array.isArray(multimeterData) ? multimeterData[0] : multimeterData;
-  const node = document.getElementById("cabineMeterNode");
-  const powerEl = document.getElementById("cabMeterPower");
-  const apparentEl = document.getElementById("cabMeterApparent");
-  const pfEl = document.getElementById("cabMeterPF");
-  const statusEl = document.getElementById("cabMeterStatus");
-  if (!node || !powerEl || !apparentEl || !pfEl || !statusEl) return;
-
-  if (!item) {
-    powerEl.textContent = "—";
-    apparentEl.textContent = "—";
-    pfEl.textContent = "—";
-    statusEl.textContent = "—";
-    statusEl.className = "cabine-badge";
-    node.classList.remove("cabine-node--online", "cabine-node--offline");
-    return;
-  }
-
-  const analog = item?.analog ?? item?.data ?? {};
-  const activePower = pickDeviceMetricValue(item, analog, ["active_power_kw", "p_kw", "power_kw", "active_power", "power"]);
-  const apparentPower = pickDeviceMetricValue(item, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
-  const pf = pickDeviceMetricValue(item, analog, ["power_factor", "power_factor_pct", "pf"]);
-  const online = multimeterOnlineFromPayload(item);
-
-  powerEl.textContent = activePower != null ? cabinMapFormat(activePower, 1, "kW") : "—";
-  apparentEl.textContent = apparentPower != null ? cabinMapFormat(apparentPower, 1, "kVA") : "—";
-  pfEl.textContent = pf != null ? cabinMapFormat(pf, 2) : "—";
-  statusEl.textContent = online ? "Online" : "Offline";
-  statusEl.className = `cabine-badge ${online ? "cabine-badge--online" : "cabine-badge--offline"}`;
-  node.classList.toggle("cabine-node--online", online);
-  node.classList.toggle("cabine-node--offline", !online);
-}
-
-function getCabineMapStructureSignature(invertersRaw) {
-  return dedupInvertersById(Array.isArray(invertersRaw) ? invertersRaw : [])
-    .map(inv => `${getInverterRealId(inv)}:${inv.cabin_id ?? ""}:${inv.cabin_display_order ?? ""}`)
-    .sort()
-    .join("|");
+  /* Click em nós de equipamento -> modal */
+  el.querySelectorAll("[data-unif-device]").forEach(node => {
+    node.addEventListener("click", () => openUnifDeviceModalById(node.dataset.unifDevice, null));
+  });
 }
 
 function refreshCabineMapCards(invertersRaw) {
-  if (!isCabineMapVisible()) return;
-
-  const sig = getCabineMapStructureSignature(invertersRaw);
-  const grid = document.getElementById("cabineGrid");
-
-  if (!grid || !grid.children.length || sig !== CABINE_MAP_STRUCTURE_SIGNATURE) {
-    CABINE_MAP_STRUCTURE_SIGNATURE = sig;
-    buildCabineMapView(invertersRaw, RELAY_REALTIME, MULTIMETER_REALTIME);
-    return;
+  if (!isUnifilarVisible()) return;
+  UNIF_GROUPS = buildUnifGroups(invertersRaw);
+  if (UNIF_MODE === "overview") {
+    buildUnifilarOverview();
+  } else {
+    UNIF_CABIN_IDX = Math.min(UNIF_CABIN_IDX, Math.max(0, UNIF_GROUPS.length - 1));
+    renderUnifCabinDetail(UNIF_CABIN_IDX, null);
   }
-
-  const dedup = dedupInvertersById(Array.isArray(invertersRaw) ? invertersRaw : []);
-  dedup.forEach(inv => {
-    const id = getInverterRealId(inv);
-    if (id == null) return;
-
-    const card = grid.querySelector(`.cabine-inv-card[data-inverter-real-id="${id}"]`);
-    if (!card) return;
-
-    const isOnline = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-    const hasAlarm = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-    card.classList.toggle("is-online", isOnline);
-    card.classList.toggle("is-offline", !isOnline);
-    card.classList.toggle("has-alarm", hasAlarm);
-
-    const powerKw = inv.active_power_kw ?? inv.power_kw ?? inv.power ?? inv.active_power;
-    const ratedKw = inv.rated_power_kw ?? inv.capacity_kw ?? inv.rated_kw ?? 100;
-    const barPct = powerKw != null
-      ? Math.min(100, Math.max(0, (asNumber(powerKw, 0) / Math.max(1, asNumber(ratedKw, 100))) * 100))
-      : 0;
-
-    card.style.setProperty("--cabine-power-pct", `${barPct.toFixed(1)}%`);
-
-    const powerLabel = card.querySelector(".cabine-inv-card__power-label");
-    if (powerLabel) powerLabel.textContent = powerKw != null ? cabinMapFormat(powerKw, 0, "kW") : "—";
-
-    const loadLabel = card.querySelector(".cabine-inv-card__load-label");
-    if (loadLabel) loadLabel.textContent = powerKw != null ? `${cabinMapFormat(barPct, 0)}%` : "";
-
-    const bar = card.querySelector(".cabine-inv-card__power-bar");
-    if (bar) bar.style.width = `${barPct.toFixed(1)}%`;
-
-    const state = card.querySelector(".cabine-inv-card__state");
-    if (state) state.textContent = isOnline ? (hasAlarm ? "Alarme" : "Online") : "Offline";
-
-    const dot = card.querySelector(".cabine-inv-card__status");
-    if (dot) {
-      dot.classList.toggle("dot-online", isOnline);
-      dot.classList.toggle("dot-offline", !isOnline);
-    }
-  });
-
-  updateCabineRelayNode(RELAY_REALTIME);
-  updateCabineMeterNode(MULTIMETER_REALTIME);
+  renderUnifilarSidePanel();
+  renderUnifilarStatsBar();
 }
 
-function initInvViewToggle() {
-  const btnList = document.getElementById("invBtnList");
-  const btnMap = document.getElementById("invBtnMap");
-  const listSection = document.getElementById("invertersListSection");
-  const mapView = document.getElementById("cabineMapView");
-  if (!btnList || !btnMap || !listSection || !mapView) return;
-  if (btnList.dataset.invViewToggleReady === "true") return;
-  btnList.dataset.invViewToggleReady = "true";
+function updateCabineRelayNode(relayData) {
+  if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
+  const item  = Array.isArray(relayData) ? relayData[0] : relayData;
+  const qgbt  = document.getElementById("unifNodeQGBT");
+  const val   = document.getElementById("unifQGBTVal");
+  const badge = document.getElementById("unifQGBTBadge");
+  if (!qgbt) return;
+  const online = item ? relayOnlineFromPayload(item) : false;
+  const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? {}, ["active_power_kw","power_kw","active_power","power"]) : null;
+  qgbt.classList.toggle("is-online",  online);
+  qgbt.classList.toggle("is-offline", !online && item != null);
+  if (val)   val.textContent   = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
+  if (badge) badge.textContent = online ? "Online" : "Offline";
+}
 
-  let mapInitialized = false;
+function updateCabineMeterNode(multimeterData) {
+  if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
+  const item = Array.isArray(multimeterData) ? multimeterData[0] : multimeterData;
+  const cc   = document.getElementById("unifNodeCC");
+  const val  = document.getElementById("unifCCPower");
+  if (!cc) return;
+  const online = item ? multimeterOnlineFromPayload(item) : false;
+  const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? item?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
+  cc.classList.toggle("is-online",  online);
+  cc.classList.toggle("is-offline", !online && item != null);
+  if (val) val.textContent = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
+}
 
-  const setActiveView = (view) => {
-    const isMap = view === "map";
-    document.body.classList.toggle("plant-map-mode", isMap);
-    btnList.classList.toggle("is-active", !isMap);
-    btnMap.classList.toggle("is-active", isMap);
-    btnList.setAttribute("aria-pressed", String(!isMap));
-    btnMap.setAttribute("aria-pressed", String(isMap));
-    listSection.style.display = isMap ? "none" : "";
-    mapView.style.display = isMap ? "flex" : "none";
+/* ── Painel lateral de dispositivos ── */
+function renderUnifilarSidePanel() {
+  const listEl   = document.getElementById("unifilarSideList");
+  const footerEl = document.getElementById("unifilarSideFooter");
+  if (!listEl) return;
 
-    if (!isMap) {
-      movePlantChartsToList();
-      return;
+  const devices = buildUnifDeviceList(UNIF_ACTIVE_CABIN_FILTER, UNIF_SEARCH_TEXT);
+  listEl.innerHTML = devices.map(d => buildUnifSideRow(d)).join("") ||
+    `<div class="unif-side-empty">Nenhum dispositivo encontrado</div>`;
+
+  listEl.querySelectorAll("[data-unif-side-type]").forEach(row => {
+    row.addEventListener("click", () => openUnifDeviceModalById(row.dataset.unifSideType, row.dataset.unifSideId));
+  });
+
+  if (footerEl) {
+    const all     = buildUnifDeviceList(null, "");
+    const online  = all.filter(d => d.status === "online").length;
+    const alarm   = all.filter(d => d.status === "alarm").length;
+    const offline = all.filter(d => d.status === "offline").length;
+    footerEl.innerHTML = `
+      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--online"></span>Online ${online}</span>
+      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--alarm"></span>Alerta ${alarm}</span>
+      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--offline"></span>Offline ${offline}</span>`;
+  }
+}
+
+function buildUnifDeviceList(cabinFilter, search) {
+  const devices = [];
+  const q = (search || "").toLowerCase();
+
+  UNIF_GROUPS.forEach(group => {
+    if (cabinFilter && String(group.id) !== String(cabinFilter)) return;
+    group.inverters.forEach(inv => {
+      const id     = String(getInverterRealId(inv) ?? "");
+      const name   = getInverterDisplayName(inv, 0);
+      const online = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+      const alarm  = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
+      const rated  = asNumber(inv.rated_power_kw ?? 0, 0);
+      if (q && !name.toLowerCase().includes(q)) return;
+      devices.push({ id, type: "inverter", name, sub: "Inversor", power: rated > 0 ? `${rated.toFixed(0)} kW` : "—",
+        status: alarm ? "alarm" : online ? "online" : "offline", data: inv });
+    });
+  });
+
+  if (!cabinFilter) {
+    const meterItem = Array.isArray(MULTIMETER_REALTIME) ? MULTIMETER_REALTIME[0] : MULTIMETER_REALTIME;
+    if (meterItem) {
+      const mName = meterItem.device_name || meterItem.name || "Medidor";
+      const mPow  = pickDeviceMetricValue(meterItem, meterItem?.analog ?? meterItem?.data ?? {}, ["active_power_kw","p_kw","power_kw"]);
+      if (!q || mName.toLowerCase().includes(q) || "medidor meter multímetro".includes(q))
+        devices.push({ id: String(meterItem.device_id ?? meterItem.multimeter_id ?? "meter"), type: "multimeter",
+          name: mName, sub: "Medidor", power: mPow != null ? `${mPow.toFixed(1)} kW` : "—",
+          status: multimeterOnlineFromPayload(meterItem) ? "online" : "offline", data: meterItem });
     }
 
-    movePlantChartsIntoCabineMap();
-    if (!mapInitialized) {
-      initCabineMapDragZoom();
-      mapInitialized = true;
+    const relayItem = Array.isArray(RELAY_REALTIME) ? RELAY_REALTIME[0] : RELAY_REALTIME;
+    if (relayItem) {
+      const rName = relayItem.device_name || relayItem.name || "Relé";
+      const rPow  = pickDeviceMetricValue(relayItem, relayItem?.analog ?? {}, ["active_power_kw","power_kw","active_power","power"]);
+      if (!q || rName.toLowerCase().includes(q) || "relé relay proteção".includes(q))
+        devices.push({ id: String(relayItem.device_id ?? relayItem.relay_id ?? "relay"), type: "relay",
+          name: rName, sub: "Relé", power: rPow != null ? `${rPow.toFixed(1)} kW` : "—",
+          status: relayOnlineFromPayload(relayItem) ? "online" : "offline", data: relayItem });
     }
-    buildCabineMapView(
-      INVERTERS_REALTIME || window.INVERTERS_REALTIME || [],
-      RELAY_REALTIME ?? window.RELAY_REALTIME ?? null,
-      MULTIMETER_REALTIME ?? window.MULTIMETER_REALTIME ?? null
-    );
-    initCabineMapCardClicks();
-    autoFitCabineMap();
+  }
+  return devices;
+}
+
+function buildUnifSideRow(d) {
+  const sc = d.status === "online" ? "online" : d.status === "alarm" ? "alarm" : "offline";
+  const sl = d.status === "online" ? "Online" : d.status === "alarm" ? "Alerta" : "Offline";
+  const iconMap = {
+    inverter:    `<svg viewBox="0 0 20 20" fill="none"><rect x="1" y="3" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M10 5L8 10h3L7 15l9-7h-4l2-3z" fill="currentColor" opacity=".7"/></svg>`,
+    multimeter:  `<svg viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="9" y1="6" x2="9" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="12" y1="6" x2="12" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".5"/></svg>`,
+    transformer: `<svg viewBox="0 0 24 20" fill="none"><circle cx="7" cy="10" r="6" stroke="currentColor" stroke-width="1.3"/><circle cx="17" cy="10" r="6" stroke="currentColor" stroke-width="1.3" opacity=".6"/></svg>`,
+    relay:       `<svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="14" x2="14" y2="14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="14" x2="9" y2="9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="9" x2="14" y2="9" stroke="currentColor" stroke-width=".8" stroke-dasharray="2 1.5" opacity=".4" stroke-linecap="round"/></svg>`,
+    sa:          `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.2"/><path d="M10 3L8.5 8.5H11.5L8 17L14.5 10H11.5L13 3Z" fill="currentColor" opacity=".7"/></svg>`,
+    rede:        `<svg viewBox="0 0 20 20" fill="none"><line x1="10" y1="1" x2="10" y2="19" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="4" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="6" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><line x1="18" y1="5" x2="14" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><circle cx="2" cy="5" r="1.4" fill="currentColor"/><circle cx="18" cy="5" r="1.4" fill="currentColor"/></svg>`
   };
+  return `<div class="unif-side-row" data-unif-side-type="${d.type}" data-unif-side-id="${d.id}">
+    <div class="unif-side-row-icon" style="color:rgba(127,208,85,.65)">${iconMap[d.type] || iconMap.inverter}</div>
+    <div class="unif-side-row-info">
+      <span class="unif-side-row-name">${cabinMapEscape(d.name)}</span>
+      <span class="unif-side-row-sub">${d.sub}</span>
+    </div>
+    <div class="unif-side-row-right">
+      <span class="unif-side-row-power">${d.power}</span>
+      <span class="unif-side-status unif-side-status--${sc}">${sl}</span>
+    </div>
+    <button class="unif-side-row-action" type="button" title="Ver detalhes">⋮</button>
+  </div>`;
+}
 
-  btnList.addEventListener("click", () => setActiveView("list"));
-  btnMap.addEventListener("click", () => setActiveView("map"));
-  setActiveView("list");
+/* ── Barra de estatísticas ── */
+function renderUnifilarStatsBar() {
+  const el = document.getElementById("unifilarStatsBar");
+  if (!el) return;
+  const total = UNIF_GROUPS.reduce((s, g) => s + g.inverters.length, 0);
+  const dcKwp = UNIF_GROUPS.reduce((s, g) => s + g.inverters.reduce((gs, inv) => gs + asNumber(inv.rated_power_kw ?? 0, 0), 0), 0);
+  const acKw  = asNumber(PLANT_STATE.active_power_kw, 0);
+  const rated = asNumber(PLANT_STATE.rated_power_kwp, 0);
+  el.innerHTML = `
+    <div class="unif-stat">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="3" width="16" height="12" rx="2" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/></svg>
+      <span class="unif-stat-lbl">TOTAL INVERSORES</span><strong class="unif-stat-val">${total}</strong>
+    </div>
+    <div class="unif-stat">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="8" rx="1.5" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/><line x1="5" y1="4" x2="4" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/><line x1="9" y1="4" x2="9" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/><line x1="13" y1="4" x2="14" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/></svg>
+      <span class="unif-stat-lbl">POTÊNCIA DC TOTAL</span><strong class="unif-stat-val">${dcKwp.toFixed(0)} kWp</strong>
+    </div>
+    <div class="unif-stat">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2L7 9h4L5 16l11-7h-4l2-7z" fill="rgba(127,208,85,.7)"/></svg>
+      <span class="unif-stat-lbl">POTÊNCIA AC TOTAL</span><strong class="unif-stat-val">${acKw.toFixed(1)} kW</strong>
+    </div>
+    <div class="unif-stat">
+      <svg width="20" height="18" viewBox="0 0 20 18" fill="none"><circle cx="7" cy="9" r="6" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/><circle cx="13" cy="9" r="6" stroke="#f5c842" stroke-width="1.2" opacity=".75"/></svg>
+      <span class="unif-stat-lbl">TRANSFORMADOR</span><strong class="unif-stat-val">${rated > 0 ? rated.toFixed(0) + " kVA" : "—"}</strong>
+    </div>
+    <div class="unif-stat">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2L4 16h3l2-5 2 5h3L9 2z" stroke="rgba(127,208,85,.6)" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="13" r="1" fill="rgba(127,208,85,.6)"/><circle cx="11.5" cy="13" r="1" fill="rgba(127,208,85,.6)"/></svg>
+      <span class="unif-stat-lbl">TENSÃO MT</span><strong class="unif-stat-val" id="unifStatMT">—</strong>
+    </div>`;
+}
+
+/* ── Colapsar painel lateral ── */
+function toggleUnifSidePanel() {
+  UNIF_SIDE_COLLAPSED = !UNIF_SIDE_COLLAPSED;
+  const side = document.getElementById("unifilarSide");
+  const svg  = document.getElementById("unifCollapseSVG");
+  if (side) side.classList.toggle("is-collapsed", UNIF_SIDE_COLLAPSED);
+  if (svg) {
+    svg.innerHTML = UNIF_SIDE_COLLAPSED
+      ? `<path d="M4 1L7 6L4 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+         <line x1="11" y1="6" x2="1" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>`
+      : `<path d="M8 1L11 6L8 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+         <line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>`;
+  }
+}
+
+/* ── Modal de dispositivo ── */
+function openUnifDeviceModalById(type, id) {
+  if (type === "inverter") {
+    const inv = INVERTER_EXTRAS_BY_ID.get(String(id)) ||
+      dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
+    if (inv) { openUnifDeviceModal(inv, "inverter"); return; }
+  }
+  if (type === "relay")      { openUnifDeviceModal(Array.isArray(RELAY_REALTIME)      ? RELAY_REALTIME[0]      : RELAY_REALTIME,      "relay");      return; }
+  if (type === "multimeter") { openUnifDeviceModal(Array.isArray(MULTIMETER_REALTIME) ? MULTIMETER_REALTIME[0] : MULTIMETER_REALTIME, "multimeter"); return; }
+  openUnifDeviceModal(null, type);
+}
+
+function openUnifDeviceModal(data, type) {
+  closeUnifDeviceModal(true);
+  const seq = ++UNIF_MODAL_SEQ;
+
+  const modal = document.createElement("div");
+  modal.id = "unifDeviceModal";
+  modal.className = "unif-modal-backdrop";
+
+  const typeLabels = { inverter:"Inversor", relay:"Relé / Proteção", multimeter:"Multimedidor",
+    transformer:"Transformador", sa:"Serviços Auxiliares", rede:"Rede", cc:"Caixa Combinadora",
+    qgbt:"QGBT MT", weather:"Estação Meteorológica" };
+  const typeLabel = typeLabels[type] || type;
+
+  let title = "Dispositivo";
+  if (type === "inverter" && data) title = cabinMapEscape(getInverterDisplayName(data, 0));
+  else if (type === "relay")       title = "QGBT MT / Relé";
+  else if (type === "multimeter")  title = "CC 01 / Multimedidor";
+  else if (type === "transformer") title = "T01 — Transformador";
+  else if (type === "sa")          title = "SA 01";
+  else if (type === "rede")        title = "REDE";
+
+  const bodyHTML = buildUnifModalBody(data, type);
+
+  modal.innerHTML = `<div class="unif-modal-card">
+    <div class="unif-modal-hdr">
+      <div class="unif-modal-title-group">
+        <span class="unif-modal-type-badge">${typeLabel}</span>
+        <h3 class="unif-modal-title">${title}</h3>
+      </div>
+      <button class="unif-modal-close" type="button" aria-label="Fechar">×</button>
+    </div>
+    <div class="unif-modal-body" id="unifModalBody">${bodyHTML}</div>
+  </div>`;
+
+  modal.querySelector(".unif-modal-close").addEventListener("click", closeUnifDeviceModal);
+  modal.addEventListener("pointerdown", e => { if (!e.target.closest(".unif-modal-card")) closeUnifDeviceModal(); });
+  const escFn = e => { if (e.key === "Escape") closeUnifDeviceModal(); };
+  document.addEventListener("keydown", escFn);
+  modal._escFn = escFn;
+
+  document.body.appendChild(modal);
+  requestAnimationFrame(() => modal.classList.add("unif-modal-visible"));
+
+  /* Carrega strings do inversor de forma assíncrona */
+  if (type === "inverter" && data) {
+    const realId = getInverterRealId(data);
+    if (realId != null) {
+      loadCabineStringsPayload(realId).then(payload => {
+        if (seq !== UNIF_MODAL_SEQ) return;
+        const grid  = document.getElementById("unifModalStrGrid");
+        const count = document.getElementById("unifModalStrCount");
+        if (!grid) return;
+        const rendered = renderCabineStringsBalloonRows(payload, realId);
+        grid.innerHTML = rendered.html;
+        if (count) count.textContent = `${rendered.count} string${rendered.count !== 1 ? "s" : ""}`;
+      });
+    }
+  }
+
+  /* Wires command buttons inside modal */
+  setTimeout(() => wireDeviceCommandButtons(modal), 50);
+}
+
+function closeUnifDeviceModal(immediate = false) {
+  UNIF_MODAL_SEQ++;
+  const modal = document.getElementById("unifDeviceModal");
+  if (!modal) return;
+  if (modal._escFn) document.removeEventListener("keydown", modal._escFn);
+  if (immediate) { modal.remove(); return; }
+  modal.classList.remove("unif-modal-visible");
+  setTimeout(() => modal.parentNode?.removeChild(modal), 230);
+}
+
+function buildUnifModalBody(data, type) {
+  if (type === "inverter"    && data) return buildUnifInverterBody(data);
+  if (type === "relay"       && data) return buildUnifRelayBody(data);
+  if (type === "multimeter"  && data) return buildUnifMeterBody(data);
+  if (type === "transformer")         return buildUnifTrafoBody();
+  return `<div class="unif-modal-empty">Sem dados disponíveis para este dispositivo.</div>`;
+}
+
+function buildUnifInverterBody(inv) {
+  const realId = getInverterRealId(inv);
+  const online  = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+  const alarm   = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
+  const pKw     = cabinMapReadInvMetric(inv, ["active_power_kw","power_kw","power","active_power"]);
+  const eff     = cabinMapReadInvMetric(inv, ["efficiency_pct","efficiency","eff_pct"]);
+  const temp    = cabinMapReadInvMetric(inv, ["temperature_internal_c","temperature_c","temp_c","temperature"]);
+  const freq    = cabinMapReadInvMetric(inv, ["frequency_hz","freq_hz","frequency"]);
+  const prRaw   = cabinMapReadInvMetric(inv, ["performance_ratio","pr","pr_ratio"]);
+  const rated   = cabinMapReadInvMetric(inv, ["rated_power_kw","capacity_kw","rated_kw"]);
+  const lastTs  = cabinMapReadInvMetric(inv, ["last_reading_at","last_reading_ts","last_ts","timestamp","event_ts"]);
+  const prPct   = prRaw != null ? normalizePercentMaybe(prRaw) : null;
+  const sc      = alarm ? "alarm" : online ? "online" : "offline";
+  const sl      = alarm ? "Alerta" : online ? "Online" : "Offline";
+
+  const f0 = (v, u) => { const n = Number(typeof v === "string" ? v.replace(",", ".") : v); return Number.isFinite(n) ? `${n.toFixed(0)} ${u}` : "—"; };
+  const f2 = (v, u) => { const n = Number(typeof v === "string" ? v.replace(",", ".") : v); return Number.isFinite(n) ? `${n.toFixed(2)} ${u}` : "—"; };
+
+  const vab = inv?.line_voltage_ab_v ?? inv?.line_voltage_ab;
+  const vbc = inv?.line_voltage_bc_v ?? inv?.line_voltage_bc;
+  const vca = inv?.line_voltage_ca_v ?? inv?.line_voltage_ca;
+  const ia  = inv?.current_phase_a_a ?? inv?.current_phase_a;
+  const ib  = inv?.current_phase_b_a ?? inv?.current_phase_b;
+  const ic  = inv?.current_phase_c_a ?? inv?.current_phase_c;
+  const fp  = inv?.power_factor;
+  const kvar = inv?.power_reactive_kvar;
+  const kva  = inv?.apparent_power_kva;
+  const dcKw = inv?.power_dc_kw;
+  const strV = inv?.string_voltage_v;
+  const iso  = inv?.resistance_insulation_mohm;
+
+  return `<div class="unif-modal-status-bar">
+    <span class="unif-modal-state unif-modal-state--${sc}">${sl}</span>
+    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
+  </div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência</span><strong class="unif-modal-kpi-val">${pKw != null ? cabinMapFormat(pKw, 1, "kW") : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Eficiência</span><strong class="unif-modal-kpi-val">${eff != null ? cabinMapFormat(eff, 1, "%") : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Temperatura</span><strong class="unif-modal-kpi-val ${temp != null && asNumber(temp, 0) > 70 ? "val-warn" : ""}">${temp != null ? `${cabinMapFormat(temp, 1)}°C` : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Frequência</span><strong class="unif-modal-kpi-val">${freq != null ? cabinMapFormat(freq, 2, "Hz") : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">PR</span><strong class="unif-modal-kpi-val">${prPct != null ? cabinMapFormat(prPct, 1, "%") : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Cap. Nominal</span><strong class="unif-modal-kpi-val">${rated != null ? cabinMapFormat(rated, 0, "kW") : "—"}</strong></div>
+  </div>
+  <div class="unif-modal-section">
+    <div class="unif-modal-section-hdr"><span>Strings</span><span class="unif-modal-count" id="unifModalStrCount">Carregando...</span></div>
+    <div class="unif-modal-str-grid" id="unifModalStrGrid"><div class="unif-modal-loading">Carregando strings...</div></div>
+  </div>
+  <div class="unif-modal-section">
+    <div class="unif-modal-section-hdr"><span>AC</span></div>
+    <div class="unif-modal-chips">
+      <div class="unif-chip"><span class="unif-chip-lbl">V AB</span><span class="unif-chip-val">${f0(vab,"V")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">V BC</span><span class="unif-chip-val">${f0(vbc,"V")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">V CA</span><span class="unif-chip-val">${f0(vca,"V")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">Ia</span><span class="unif-chip-val">${f2(ia,"A")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">Ib</span><span class="unif-chip-val">${f2(ib,"A")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">Ic</span><span class="unif-chip-val">${f2(ic,"A")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">FP</span><span class="unif-chip-val">${(()=>{const n=Number(typeof fp==="string"?fp.replace(",","."):fp);return Number.isFinite(n)?n.toFixed(3):"—"})()}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">Q reativa</span><span class="unif-chip-val">${f2(kvar,"kvar")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">S aparente</span><span class="unif-chip-val">${f2(kva,"kVA")}</span></div>
+    </div>
+  </div>
+  <div class="unif-modal-section">
+    <div class="unif-modal-section-hdr"><span>DC</span></div>
+    <div class="unif-modal-chips">
+      <div class="unif-chip"><span class="unif-chip-lbl">P DC</span><span class="unif-chip-val">${f2(dcKw,"kW")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">V string</span><span class="unif-chip-val">${f0(strV,"V")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">R isol.</span><span class="unif-chip-val">${(()=>{const n=Number(typeof iso==="string"?iso.replace(",","."):iso);return Number.isFinite(n)?`${n.toFixed(2)} MΩ`:"—"})()}</span></div>
+    </div>
+  </div>
+  ${_canSendCommand() && realId != null ? `
+  <div class="unif-modal-section">
+    <div class="unif-modal-section-hdr"><span>Comandos</span></div>
+    <div class="unif-modal-cmds">${renderDeviceCommandControl("inverter", realId, online ? "on" : "off")}</div>
+  </div>` : ""}`;
+}
+
+function buildUnifRelayBody(item) {
+  if (!item) return `<div class="unif-modal-empty">Sem dados do relé</div>`;
+  const analog  = item?.analog ?? {};
+  const online  = relayOnlineFromPayload(item);
+  const pKw     = pickDeviceMetricValue(item, analog, ["active_power_kw","power_kw","active_power","power"]);
+  const pApKva  = pickDeviceMetricValue(item, analog, ["apparent_power_kva","power_apparent_kva","apparent_power"]);
+  const pRkvar  = pickDeviceMetricValue(item, analog, ["reactive_power_kvar","power_reactive_kvar","reactive_power"]);
+  const lastTs  = item?.last_reading_at ?? item?.timestamp ?? item?.event_ts;
+  const sc = online ? "online" : "offline";
+  return `<div class="unif-modal-status-bar">
+    <span class="unif-modal-state unif-modal-state--${sc}">${online ? "Online" : "Offline"}</span>
+    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
+  </div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Ativa</span><strong class="unif-modal-kpi-val">${pKw != null ? cabinMapFormat(pKw, 1) + " kW" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Aparente</span><strong class="unif-modal-kpi-val">${pApKva != null ? cabinMapFormat(pApKva, 1) + " kVA" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Reativa</span><strong class="unif-modal-kpi-val">${pRkvar != null ? cabinMapFormat(pRkvar, 2) + " kvar" : "—"}</strong></div>
+  </div>
+  ${_canSendCommand() ? `<div class="unif-modal-section"><div class="unif-modal-section-hdr"><span>Comandos</span></div><div class="unif-modal-cmds">${renderDeviceCommandControl("relay","main",online?"on":"off")}</div></div>` : ""}`;
+}
+
+function buildUnifMeterBody(item) {
+  if (!item) return `<div class="unif-modal-empty">Sem dados do multimedidor</div>`;
+  const analog   = item?.analog ?? item?.data ?? {};
+  const online   = multimeterOnlineFromPayload(item);
+  const act      = pickDeviceMetricValue(item, analog, ["active_power_kw","p_kw","power_kw","active_power"]);
+  const app      = pickDeviceMetricValue(item, analog, ["apparent_power_kva","power_apparent_kva","apparent_power"]);
+  const react    = pickDeviceMetricValue(item, analog, ["reactive_power_kvar","power_reactive_kvar","reactive_power"]);
+  const pf       = pickDeviceMetricValue(item, analog, ["power_factor","power_factor_pct","pf"]);
+  const lastTs   = item?.last_reading_at ?? item?.timestamp;
+  const sc = online ? "online" : "offline";
+  return `<div class="unif-modal-status-bar">
+    <span class="unif-modal-state unif-modal-state--${sc}">${online ? "Online" : "Offline"}</span>
+    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
+  </div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Ativa</span><strong class="unif-modal-kpi-val">${act != null ? cabinMapFormat(act, 1) + " kW" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Aparente</span><strong class="unif-modal-kpi-val">${app != null ? cabinMapFormat(app, 1) + " kVA" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Reativa</span><strong class="unif-modal-kpi-val">${react != null ? cabinMapFormat(react, 2) + " kvar" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Fator de Potência</span><strong class="unif-modal-kpi-val">${pf != null ? cabinMapFormat(pf, 3) : "—"}</strong></div>
+  </div>`;
+}
+
+function buildUnifTrafoBody() {
+  const rated = asNumber(PLANT_STATE.rated_power_kwp, 0);
+  return `<div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Capacidade</span><strong class="unif-modal-kpi-val">${rated > 0 ? rated.toFixed(0) + " kVA" : "—"}</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Status</span><strong class="unif-modal-kpi-val">Online</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Temperatura</span><strong class="unif-modal-kpi-val" id="unifModalTrafoTemp">—</strong></div>
+  </div>`;
 }
 
 function countOnlineInverters(invertersRaw) {
@@ -3370,6 +3797,7 @@ function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
       effective_enabled,
       has_data,
       current_a: rt?.current_a ?? null,
+      is_online: rt?.is_online ?? false,
       last_ts: rt?.last_ts ?? null,
       monitorable,
       alarm_active: rt?.alarm_active ?? cfg?.alarm_active ?? null,
@@ -3395,7 +3823,7 @@ function isStringMonitorable(str) {
 
 function getInverterOnlineStateById(inverterRealId) {
   const inv = INVERTER_EXTRAS_BY_ID.get(String(inverterRealId));
-  if (!inv) return false;
+  if (!inv) return null;
   return isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
 }
 
@@ -3488,7 +3916,7 @@ function renderStringsGrid(gridEl, payload) {
       el.classList.add("active");
     }
 
-    const ampText = str.has_data ? fmtAmp(str.current_a) : "—";
+    const ampText = (str.has_data && inverterOnline !== false) ? fmtAmp(str.current_a) : "—";
 
     el.innerHTML = `
       S${str.string_index}
@@ -3894,6 +4322,8 @@ function normalizeMonthlyPayload(payload) {
   const converted = maybeConvertWhToKwh(daily, mtd);
   daily = converted.daily;
   mtd = converted.mtd;
+  const dailyForTotals = daily.slice();
+  const mtdForTotals = mtd.slice();
 
   const capped = capMonthlyOutliers(daily);
   daily = capped.daily;
@@ -3924,11 +4354,40 @@ function normalizeMonthlyPayload(payload) {
     labels: finalLabels,
     daily_kwh: daily,
     mtd_kwh: mtd,
+    daily_kwh_for_totals: dailyForTotals,
+    mtd_kwh_for_totals: mtdForTotals,
     expected_daily_kwh: expectedDaily,
     expected_mtd_kwh: expectedMtd,
     irradiation_daily_kwh_m2: irradiationDaily,
     energy_kwh: daily
   };
+}
+
+function getMonthlyCurrentIndex(labels, daily) {
+  const list = Array.isArray(labels) ? labels : [];
+  if (!list.length) return -1;
+
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, "0");
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(today.getFullYear());
+  const todayKeys = new Set([
+    String(today.getDate()),
+    dd,
+    `${dd}/${mm}`,
+    `${dd}-${mm}`,
+    `${yyyy}-${mm}-${dd}`
+  ]);
+
+  const indexFromToday = list.findIndex(label => todayKeys.has(String(label ?? "").trim()));
+  if (indexFromToday >= 0) return indexFromToday;
+
+  const real = Array.isArray(daily) ? daily : [];
+  for (let i = Math.min(real.length, list.length) - 1; i >= 0; i--) {
+    if (Number(real[i]) > 0) return i;
+  }
+
+  return list.length - 1;
 }
 
 // ======================================================
@@ -3942,8 +4401,17 @@ function renderMonthlyChart() {
   const daily = Array.isArray(MONTHLY?.daily_kwh)
     ? MONTHLY.daily_kwh.map(v => Number(v) || 0)
     : (Array.isArray(MONTHLY?.energy_kwh) ? MONTHLY.energy_kwh.map(v => Number(v) || 0) : []);
+  const dailyForTotals = Array.isArray(MONTHLY?.daily_kwh_for_totals)
+    ? MONTHLY.daily_kwh_for_totals.map(v => Number(v) || 0)
+    : daily;
+  const realMtd = Array.isArray(MONTHLY?.mtd_kwh_for_totals)
+    ? MONTHLY.mtd_kwh_for_totals.map(v => Number(v) || 0)
+    : [];
   const expectedDaily = Array.isArray(MONTHLY?.expected_daily_kwh)
     ? MONTHLY.expected_daily_kwh.map(v => Number(v) || 0)
+    : [];
+  const expectedMtd = Array.isArray(MONTHLY?.expected_mtd_kwh)
+    ? MONTHLY.expected_mtd_kwh.map(v => Number(v) || 0)
     : [];
 
   if (!labels.length || !daily.length) return;
@@ -3951,12 +4419,21 @@ function renderMonthlyChart() {
   const expectedPadded = expectedDaily.slice(0, daily.length);
   while (expectedPadded.length < daily.length) expectedPadded.push(0);
 
-  const totalReal = daily.reduce((a, b) => a + (Number(b) || 0), 0);
-  const totalExpected = expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0);
-  const deviation = totalExpected > 0 ? ((totalReal - totalExpected) / totalExpected) * 100 : 0;
-  const daysWithGeneration = daily.filter(v => Number(v) > 0).length;
+  const currentIndex = Math.max(0, Math.min(getMonthlyCurrentIndex(labels, dailyForTotals), daily.length - 1));
+  const currentLabel = String(labels[currentIndex] ?? "").trim() || "hoje";
+  const dailyToDate = dailyForTotals.slice(0, currentIndex + 1);
+  const expectedToDate = expectedPadded.slice(0, currentIndex + 1);
+
+  const totalReal = Number(realMtd[currentIndex]) ||
+    dailyToDate.reduce((a, b) => a + (Number(b) || 0), 0);
+  const totalExpectedToDate = Number(expectedMtd[currentIndex]) ||
+    expectedToDate.reduce((a, b) => a + (Number(b) || 0), 0);
+  const totalExpectedMonth = expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0);
+  const deviation = totalExpectedToDate > 0 ? ((totalReal - totalExpectedToDate) / totalExpectedToDate) * 100 : 0;
+  const elapsedDays = currentIndex + 1;
 
   const kpiRealEl = document.getElementById("monthlyKpiReal");
+  const kpiExpectedMtdEl = document.getElementById("monthlyKpiExpectedMtd");
   const kpiExpEl = document.getElementById("monthlyKpiExp");
   const kpiDevEl = document.getElementById("monthlyKpiDev");
   const progressEl = document.getElementById("monthlyProgressFill");
@@ -3964,14 +4441,15 @@ function renderMonthlyChart() {
   const bottomRightEl = document.getElementById("monthlyBottomRight");
 
   if (kpiRealEl) kpiRealEl.textContent = formatKwhPtBR(totalReal);
-  if (kpiExpEl) kpiExpEl.textContent = formatKwhPtBR(totalExpected);
+  if (kpiExpectedMtdEl) kpiExpectedMtdEl.textContent = formatKwhPtBR(totalExpectedToDate);
+  if (kpiExpEl) kpiExpEl.textContent = formatKwhPtBR(totalExpectedMonth);
   if (kpiDevEl) {
     kpiDevEl.textContent = `${deviation >= 0 ? "+" : ""}${deviation.toFixed(1)}%`;
     kpiDevEl.style.color = deviation >= 0 ? "#7FD055" : "#ff6b6b";
   }
-  if (progressEl) progressEl.style.width = `${((daysWithGeneration / daily.length) * 100).toFixed(1)}%`;
-  if (bottomLeftEl) bottomLeftEl.textContent = `${daysWithGeneration} dias com geração de ${daily.length}`;
-  if (bottomRightEl) bottomRightEl.textContent = "Mês atual";
+  if (progressEl) progressEl.style.width = `${((elapsedDays / daily.length) * 100).toFixed(1)}%`;
+  if (bottomLeftEl) bottomLeftEl.textContent = `Ate ${currentLabel}: real produzido x esperado acumulado`;
+  if (bottomRightEl) bottomRightEl.textContent = `Expectativa mensal: ${formatKwhPtBR(totalExpectedMonth)}`;
 
   const ctx = canvas.getContext("2d");
 
@@ -4069,7 +4547,13 @@ function renderMonthlyChart() {
               const expected = Number(expectedPadded[idx] ?? 0);
               const deviation = expected > 0 ? ((real - expected) / expected) * 100 : 0;
               const sign = deviation > 0 ? "+" : "";
-              return `Desvio: ${sign}${deviation.toFixed(1)}%`;
+              const expectedAccum = expectedPadded
+                .slice(0, idx + 1)
+                .reduce((a, b) => a + (Number(b) || 0), 0);
+              return [
+                `Desvio diario: ${sign}${deviation.toFixed(1)}%`,
+                `Esperado acumulado: ${formatKwhPtBR(expectedAccum)}`
+              ];
             }
           }
         }
@@ -4174,14 +4658,16 @@ async function refreshStringsForRealInverter(inverterRealId) {
   const grid = document.querySelector(`.strings-grid[data-inverter-real-id="${inverterRealId}"]`);
   if (!grid) return;
 
-  const reqSeq = ++STRINGS_REFRESH_SEQ;
+  const prev = STRINGS_REFRESH_SEQ_MAP.get(String(inverterRealId)) ?? 0;
+  const reqSeq = prev + 1;
+  STRINGS_REFRESH_SEQ_MAP.set(String(inverterRealId), reqSeq);
 
   const [cfg, rt] = await Promise.all([
     fetchInverterStrings(PLANT_ID, inverterRealId),
     fetchInverterStringsRealtime(PLANT_ID, inverterRealId)
   ]);
 
-  if (reqSeq !== STRINGS_REFRESH_SEQ) return;
+  if (reqSeq !== STRINGS_REFRESH_SEQ_MAP.get(String(inverterRealId))) return;
 
   const merged = mergeStringsPayload(cfg, rt, inverterRealId);
   renderStringsGrid(grid, merged);
@@ -4196,6 +4682,15 @@ async function refreshOpenStringsPanels() {
   const trackedId = OPEN_INVERTER_REAL_ID;
   if (trackedId != null) {
     await refreshStringsForRealInverter(trackedId);
+    // Garante que o painel continue visualmente aberto após eventual DOM rebuild
+    const panel = document.getElementById(`strings-${trackedId}`);
+    const row = document.querySelector(`.inverter-toggle[data-inverter-real-id="${trackedId}"]`);
+    if (panel && row && !panel.classList.contains("open")) {
+      row.classList.add("open");
+      panel.classList.add("open");
+      panel.style.opacity = "1";
+      panel.style.maxHeight = panel.scrollHeight + "px";
+    }
     return;
   }
 
@@ -4897,6 +5392,8 @@ window.PlantActions = {
 // ======================================================
 document.addEventListener("DOMContentLoaded", async () => {
   document.body.classList.add("plant-enter");
+  const expectedMtdPlaceholder = document.getElementById("monthlyKpiExpectedMtd");
+  if (expectedMtdPlaceholder) expectedMtdPlaceholder.textContent = "-";
   setTimeout(() => document.body.classList.remove("plant-enter"), 500);
   setupInverterToggles();
   setupWeatherExpand();
