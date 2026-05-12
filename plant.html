@@ -87,7 +87,7 @@
         <div class="plant-weather-compact weather-station">
           <div class="weather-title-row">
             <h3 class="weather-title">Weather Station</h3>
-            <button id="weatherExpandBtn" class="weather-expand-btn" aria-label="Expandir dados meteorológicos">▾</button>
+            <button id="weatherExpandBtn" class="weather-expand-btn" aria-label="Expandir dados meteorológicos"><i class="fa-solid fa-chevron-down"></i></button>
           </div>
           <div class="weather-items-row">
             <div class="weather-item">
@@ -174,12 +174,12 @@
         <span>Inversores</span>
       </button>
 
-      <button class="device-nav-btn" type="button" data-target="#sec-relay">
+      <button class="device-nav-btn" id="navBtnRelay" type="button" data-target="#sec-relay">
         <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
         <span>Relé</span>
       </button>
 
-      <button class="device-nav-btn" type="button" data-target="#sec-multimeter">
+      <button class="device-nav-btn" id="navBtnMultimeter" type="button" data-target="#sec-multimeter">
         <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
         <span>Multimedidor</span>
       </button>
@@ -236,17 +236,40 @@
     <section class="card plant-chart-card plant-chart-card--monthly">
       <div class="card-header">
         <div class="monthly-head-wrap">
-          <div>
+          <div class="monthly-title-copy">
+            <span class="monthly-subtitle-note">Real = produzido at&eacute; hoje; esperado = expectativa cadastrada no banco.</span>
             <h2>Geração mensal</h2>
             <span class="subtitle">Últimos 30 dias · kWh / dia</span>
           </div>
           <div class="monthly-kpis">
             <div class="monthly-kpi-pill">
-              <span>Total real</span>
+              <span class="monthly-kpi-label">
+                Real at&eacute; hoje
+                <button class="monthly-help" type="button" aria-label="O que significa real ate hoje?">
+                  <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                  <span class="monthly-help-tip" role="tooltip">Energia realmente produzida do in&iacute;cio do m&ecirc;s at&eacute; o dia atual.</span>
+                </button>
+              </span>
               <strong id="monthlyKpiReal">—</strong>
             </div>
             <div class="monthly-kpi-pill">
-              <span>Esperado</span>
+              <span class="monthly-kpi-label">
+                Esperado at&eacute; hoje
+                <button class="monthly-help" type="button" aria-label="O que significa esperado ate hoje?">
+                  <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                  <span class="monthly-help-tip" role="tooltip">Somat&oacute;rio da expectativa di&aacute;ria do banco do in&iacute;cio do m&ecirc;s at&eacute; o dia atual.</span>
+                </button>
+              </span>
+              <strong id="monthlyKpiExpectedMtd">â€”</strong>
+            </div>
+            <div class="monthly-kpi-pill">
+              <span class="monthly-kpi-label">
+                Expectativa do m&ecirc;s
+                <button class="monthly-help" type="button" aria-label="O que significa expectativa do mes?">
+                  <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                  <span class="monthly-help-tip" role="tooltip">Soma de todas as expectativas di&aacute;rias exibidas para o m&ecirc;s.</span>
+                </button>
+              </span>
               <strong id="monthlyKpiExp">—</strong>
             </div>
           </div>
@@ -293,14 +316,20 @@
           </svg>
           Lista
         </button>
-        <button class="inv-view-btn" id="invBtnMap" type="button" title="Mapa de cabines">
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-            <rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".9"/>
-            <rect x="8" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".9"/>
-            <rect x="1" y="8" width="6" height="6" rx="1" fill="currentColor" opacity=".9"/>
-            <rect x="8" y="8" width="6" height="6" rx="1" fill="currentColor" opacity=".9"/>
+        <button class="inv-view-btn" id="invBtnMap" type="button" title="Modo Unifilar">
+          <svg width="17" height="15" viewBox="0 0 17 15" fill="none" aria-hidden="true">
+            <line x1="1" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="3.5" y1="5" x2="3.5" y2="9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="7"   y1="5" x2="7"   y2="9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="10.5" y1="5" x2="10.5" y2="9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <circle cx="3.5"  cy="3.6" r="1.4" stroke="currentColor" stroke-width="1" fill="none"/>
+            <circle cx="7"    cy="3.6" r="1.4" stroke="currentColor" stroke-width="1" fill="none"/>
+            <circle cx="10.5" cy="3.6" r="1.4" stroke="currentColor" stroke-width="1" fill="none"/>
+            <circle cx="14"   cy="12.2" r="1.9" stroke="currentColor" stroke-width="1.1" fill="none"/>
+            <circle cx="16"   cy="12.2" r="1.9" stroke="currentColor" stroke-width="1.1" fill="none" opacity=".5"/>
+            <line x1="14.5" y1="9" x2="14.5" y2="10.3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
           </svg>
-          Mapa
+          Unifilar
         </button>
       </div>
     </div>
@@ -323,63 +352,91 @@
 
     </div>
 
-    <!-- Mapa de cabines -->
-    <div id="cabineMapView" class="cabine-map-view" style="display:none;">
-      <div class="cabine-map-controls">
-        <button class="cabine-map-ctrl-btn" id="cabineZoomIn"    title="Zoom +">+</button>
-        <button class="cabine-map-ctrl-btn" id="cabineZoomOut"   title="Zoom −">−</button>
-        <button class="cabine-map-ctrl-btn" id="cabineZoomReset" title="Resetar">⟳</button>
-        <span class="cabine-map-hint">Arraste para navegar · scroll para zoom</span>
-      </div>
-      <div class="cabine-map-stage-wrap" id="cabineMapStageWrap">
-        <div class="cabine-map-stage" id="cabineMapStage">
+    <!-- MODO UNIFILAR -->
+    <div id="cabineMapView" class="unifilar-view" style="display:none;">
 
-          <!-- Nós externos: relay + multimedidor -->
-          <div class="cabine-external-nodes">
-            <div class="cabine-relay-node" id="cabineRelayNode">
-              <div class="cabine-relay-node__icon">
-                <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
-                  <rect x="2" y="8" width="28" height="16" rx="3" stroke="rgba(57,229,140,.8)" stroke-width="1.5"/>
-                  <line x1="8"  y1="12" x2="8"  y2="20" stroke="rgba(57,229,140,.6)" stroke-width="1.2" stroke-linecap="round"/>
-                  <line x1="11" y1="12" x2="11" y2="20" stroke="rgba(57,229,140,.6)" stroke-width="1.2" stroke-linecap="round"/>
-                  <line x1="14" y1="12" x2="14" y2="20" stroke="rgba(57,229,140,.6)" stroke-width="1.2" stroke-linecap="round"/>
-                  <line x1="20" y1="20" x2="28" y2="20" stroke="rgba(57,229,140,.75)"  stroke-width="1.5" stroke-linecap="round"/>
-                  <line x1="20" y1="13" x2="28" y2="13" stroke="rgba(57,229,140,.3)"   stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 2"/>
-                  <line x1="20" y1="20" x2="23" y2="13" stroke="rgba(57,229,140,.85)"  stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-              </div>
-              <span class="cabine-relay-node__label">Relé</span>
-              <div class="cabine-relay-node__data">
-                <span id="cabRelayPower">— kW</span>
-                <span id="cabRelayStatus" class="cabine-badge">—</span>
-              </div>
-            </div>
+      <!-- Barra de ferramentas -->
+      <div class="unif-topbar">
+        <div class="unif-mode-btns">
+          <button class="unif-mode-btn is-active" id="unifilarBtnOverview" title="Vista geral da planta">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <rect x=".8" y=".8" width="12.4" height="12.4" rx="2" stroke="currentColor" stroke-width="1.2" fill="none"/>
+              <line x1=".8" y1="5" x2="13.2" y2="5" stroke="currentColor" stroke-width=".9"/>
+              <line x1="5" y1="5" x2="5" y2="13.2" stroke="currentColor" stroke-width=".9"/>
+            </svg>
+            Vista Geral
+          </button>
+          <button class="unif-mode-btn" id="unifilarBtnCabin" title="Zoom em cabines">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <rect x=".8" y="2.5" width="12.4" height="9.5" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+              <line x1="5" y1="2.5" x2="5" y2="12" stroke="currentColor" stroke-width=".9"/>
+              <line x1="9" y1="2.5" x2="9" y2="12" stroke="currentColor" stroke-width=".9"/>
+            </svg>
+            Cabines
+          </button>
+        </div>
 
-            <div class="cabine-meter-node" id="cabineMeterNode">
-              <div class="cabine-meter-node__icon">
-                <svg viewBox="0 0 32 32" width="24" height="24" fill="none">
-                  <rect x="2" y="4" width="28" height="24" rx="3" stroke="rgba(212,83,126,.8)" stroke-width="1.5"/>
-                  <path d="M8 22 C8 14 24 14 24 22" stroke="rgba(212,83,126,.7)" stroke-width="1.2" fill="none"/>
-                  <line x1="16" y1="22" x2="13" y2="15" stroke="rgba(212,83,126,.95)" stroke-width="1.5" stroke-linecap="round"/>
-                </svg>
-              </div>
-              <span class="cabine-meter-node__label">Multimedidor</span>
-              <div class="cabine-meter-node__data">
-                <div><span class="cabine-data-lbl">P. Ativa</span><span id="cabMeterPower">—</span></div>
-                <div><span class="cabine-data-lbl">P. Aparente</span><span id="cabMeterApparent">—</span></div>
-                <div><span class="cabine-data-lbl">FP</span><span id="cabMeterPF">—</span></div>
-                <span id="cabMeterStatus" class="cabine-badge">—</span>
-              </div>
-            </div>
-          </div>
+        <!-- Navegação de cabines (visível só no modo cabine) -->
+        <div class="unif-cabin-nav" id="unifilarCabinNav" style="display:none;">
+          <button class="unif-nav-arr" id="unifilarPrev" aria-label="Cabine anterior">
+            <svg width="8" height="14" viewBox="0 0 8 14" fill="none"><path d="M7 1L1 7L7 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="unif-cabin-nav-label" id="unifilarCabinLabel">—</span>
+          <button class="unif-nav-arr" id="unifilarNext" aria-label="Próxima cabine">
+            <svg width="8" height="14" viewBox="0 0 8 14" fill="none"><path d="M1 1L7 7L1 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
 
-          <!-- Cabines geradas pelo JS -->
-          <div id="cabineGrid" class="cabine-grid"></div>
-          <div id="cabineMapChartDock" class="cabine-map-chart-dock" aria-label="Gráficos compactos do mapa"></div>
+        <div style="flex:1"></div>
 
+        <!-- Legenda de status -->
+        <div class="unif-legend">
+          <span class="unif-leg-item"><span class="unif-leg-dot unif-leg-dot--online"></span>Online</span>
+          <span class="unif-leg-item"><span class="unif-leg-dot unif-leg-dot--alarm"></span>Alerta</span>
+          <span class="unif-leg-item"><span class="unif-leg-dot unif-leg-dot--offline"></span>Offline</span>
         </div>
       </div>
-    </div>
+
+      <!-- Conteúdo principal: diagrama + painel lateral -->
+      <div class="unif-content">
+
+        <!-- Área do diagrama -->
+        <div class="unif-stage-wrap" id="unifilarStageWrap">
+          <!-- Vista geral: planta inteira cabe na tela -->
+          <div class="unif-overview" id="unifilarOverview"></div>
+          <!-- Vista de cabine: inversores em detalhe, um por vez -->
+          <div class="unif-cabin-detail" id="unifilarCabinDetail" style="display:none;"></div>
+        </div>
+
+        <!-- Painel lateral de dispositivos -->
+        <div class="unif-side" id="unifilarSide">
+          <div class="unif-side-hdr">
+            <span class="unif-side-title">DISPOSITIVOS</span>
+            <div class="unif-side-actions">
+              <button class="unif-collapse-btn" id="unifilarCollapseBtn" title="Minimizar/Expandir painel" aria-label="Minimizar painel">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" id="unifCollapseSVG">
+                  <path d="M8 1L11 6L8 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="unif-side-search-wrap">
+            <input class="unif-side-search" id="unifilarSearch" type="search" placeholder="Buscar dispositivo...">
+          </div>
+          <div class="unif-side-list" id="unifilarSideList"></div>
+          <div class="unif-side-footer" id="unifilarSideFooter"></div>
+        </div>
+
+      </div><!-- .unif-content -->
+
+      <!-- Barra de estatísticas inferior -->
+      <div class="unif-stats-bar" id="unifilarStatsBar"></div>
+
+      <!-- Dock para gráficos quando em modo mapa -->
+      <div id="cabineMapChartDock" class="cabine-map-chart-dock" aria-label="Gráficos compactos"></div>
+
+    </div><!-- #cabineMapView -->
 
     <div id="sec-multimeter" class="scroll-anchor"></div>
     <section id="multimeterSection" style="margin-top:24px">
