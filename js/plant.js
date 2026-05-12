@@ -1,5460 +1,7497 @@
-// ======================================================
-// CONTROLE DE ACESSO POR ROLE
-// ======================================================
-function _getUserRole() {
-  try {
-    const u = JSON.parse(localStorage.getItem("user") || "{}");
-    return u.role_key || "viewer";
-  } catch { return "viewer"; }
-}
-function _canSendCommand() {
-  if (typeof canSendCommand === "function") return canSendCommand();
-  const r = _getUserRole();
-  return ["superuser", "operator", "admin_customer"].includes(r);
-}
+/* =========================================================
+   THEME — AIOTI INDUSTRIAL PREMIUM
+========================================================= */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
-// ======================================================
-// ESTADO ÚNICO DA USINA (FONTE DA VERDADE NO FRONT)
-// ======================================================
-let PLANT_STATE = {
-  name: "—",
-  rated_power_kwp: 0,
-  active_power_kw: 0,
-  capacity_percent: 0,
-  inverter_total: 0,
-  inverter_online: 0,
-  pr_percent: 0
-};
+:root{
+  /* ✅ AIOTI Green — dominante */
+  --neon: #7FD055;
+  --neon-rgb: 127, 208, 85;
+  --neon-soft: rgba(127,208,85,.25);
+  --neon-strong: rgba(127,208,85,.55);
+  --neon-glow-1: rgba(127,208,85,.45);
+  --neon-glow-2: rgba(127,208,85,.22);
+  --neon-glow-3: rgba(127,208,85,.10);
 
-// ======================================================
-// CONFIG (ONLINE/OFFLINE)
-// ======================================================
-const MINUTE_MS = 60 * 1000;
+  --lime: #a8f060;
+  --lime-soft: rgba(168,240,96,.18);
 
-const INVERTER_OFFLINE_AFTER_MINUTES = 25;
-const STRING_STALE_AFTER_MINUTES = 25;
+  --warm-yellow: #f5c842;
+  --warm-yellow-glow: rgba(245,200,66,.22);
 
-const INVERTER_ONLINE_AFTER_MS = INVERTER_OFFLINE_AFTER_MINUTES * MINUTE_MS;
-const INVERTER_NO_COMM_AFTER_MS = INVERTER_OFFLINE_AFTER_MINUTES * MINUTE_MS;
-const STRING_STALE_AFTER_MS = STRING_STALE_AFTER_MINUTES * MINUTE_MS;
+  --bg-0: #02050a;
+  --bg-1: #040810;
+  --card-0: rgba(6,12,18,0.97);
+  --card-1: rgba(3,7,12,0.97);
 
-// ======================================================
-// FUNÇÕES AUXILIARES
-// ======================================================
-function asNumber(value, fallback = 0) {
-  if (value === null || value === undefined) return fallback;
-  const s = typeof value === "string" ? value.replace(",", ".").trim() : value;
-  const parsed = Number(s);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  /* 🔴 Alarm palette (premium) */
+  --alarm-red: #ff3b3b;
+  --alarm-red-2: #ff5c77;
+  --alarm-red-glow-1: rgba(255, 59, 59, 0.35);
+  --alarm-red-glow-2: rgba(255, 59, 59, 0.18);
+  --alarm-red-glow-3: rgba(255, 92, 119, 0.12);
+
+  --glass: rgba(10,18,28,0.62);
+  --glass-2: rgba(8,14,22,0.72);
+  --border-soft: rgba(255,255,255,0.07);
+  --border-neon: rgba(127,208,85,0.22);
+  --shadow-deep: 0 22px 44px rgba(0,0,0,0.68);
+
+  --font-display: 'Rajdhani', 'Segoe UI', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+  --font-body: 'Inter', 'Segoe UI', sans-serif;
 }
 
-function formatNumberPtBR(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return new Intl.NumberFormat("pt-BR").format(n);
+/* =========================================================
+   RESET
+========================================================= */
+*{
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-function formatKwhPtBR(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return `${formatNumberPtBR(n)} kWh`;
+/* ✅ scroll suave pros botões “pular para” */
+html{ scroll-behavior: smooth; }
+
+/* =========================================================
+   BODY / FUNDO — PREMIUM AURORA + NOISE (CSS-only)
+========================================================= */
+body{
+  margin: 0;
+  padding: 24px;
+  font-family: var(--font-body);
+  color: #dff0e8;
+
+  background:
+    radial-gradient(1400px 600px at 10% -8%, rgba(127,208,85,0.18), transparent 55%),
+    radial-gradient(800px 500px at 90% 5%, rgba(127,208,85,0.12), transparent 52%),
+    radial-gradient(600px 500px at 55% 108%, rgba(127,208,85,0.09), transparent 58%),
+    radial-gradient(1200px 700px at 50% 40%, rgba(0,0,0,0.18), transparent 55%),
+    linear-gradient(165deg, #02060e 0%, #010408 50%, #020810 100%);
+
+  position: relative;
+  overflow-x: hidden;
+  min-height: 100vh;
 }
 
-function formatKwPtBR(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return `${formatNumberPtBR(n)} kW`;
+/* noise fino (não pesa, não “pontilha” feio) */
+body::before{
+  content:"";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+  background-image:
+    repeating-linear-gradient(0deg, transparent 0px, transparent 2px, rgba(127,208,85,0.012) 2px, rgba(127,208,85,0.012) 3px);
 }
 
-function formatWm2PtBR(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "—";
-  return `${formatNumberPtBR(n)} W/m²`;
+body::after{
+  content:"";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: radial-gradient(circle, rgba(127,208,85,0.06) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.35;
 }
 
-function buildLastNDaysLabels(n) {
-  const labels = [];
-  const today = new Date();
-  for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const dd = String(d.getDate()).padStart(2, "0");
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    labels.push(`${dd}/${mm}`);
+/* =========================================================
+   GRID PRINCIPAL
+========================================================= */
+.plant-layout{
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "alarms"
+    "summary"
+    "charts"
+    "devices";
+  gap: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================================================
+   CARD BASE — GLASS + BORDA + GLOW
+========================================================= */
+.card{
+  position: relative;
+  background: linear-gradient(180deg, var(--card-0), var(--card-1));
+  border-radius: 16px;
+  padding: 20px 24px;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.10),
+    0 14px 34px rgba(0,0,0,0.58);
+  overflow: hidden;
+}
+
+/* brilho interno sutil */
+.card::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  pointer-events:none;
+  border-radius: 18px;
+  background:
+    radial-gradient(680px 140px at 18% 10%, rgba(57,229,140,0.10), transparent 60%),
+    radial-gradient(520px 140px at 84% 50%, rgba(57,229,140,0.07), transparent 62%),
+    radial-gradient(280px 140px at 45% 0%, rgba(255,255,255,0.035), transparent 55%);
+  opacity: .85;
+}
+
+/* =========================================================
+   ÁREAS
+========================================================= */
+.plant-header-card{ grid-area: header; }
+.plant-alarms-card{ grid-area: alarms; }
+.plant-summary-strip{ grid-area: summary; }
+.plant-charts-grid{ grid-area: charts; }
+.plant-devices-card{ grid-area: devices; }
+
+/* Header sticky com glow premium */
+.plant-header-card{
+  position: sticky;
+  top: 16px;
+  z-index: 5;
+
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.20),
+    0 18px 46px rgba(0,0,0,0.70),
+    0 0 28px rgba(57,229,140,0.10);
+}
+
+/* =========================================================
+   ✅ DEVICE JUMP — CENTRALIZADO
+========================================================= */
+.device-jump-card{
+  padding: 16px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(14,24,20,0.90), rgba(7,12,10,0.92));
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.10),
+    0 16px 34px rgba(0,0,0,0.55);
+  position: relative;
+  overflow: hidden;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.device-jump-card::before{
+  content:"";
+  position:absolute;
+  inset:-40px;
+  background:
+    radial-gradient(420px 160px at 18% 30%, rgba(57,229,140,.11), transparent 60%),
+    radial-gradient(420px 160px at 82% 55%, rgba(57,229,140,.08), transparent 62%);
+  filter: blur(2px);
+  opacity: .95;
+  pointer-events:none;
+}
+
+.device-jump{
+  position: relative;
+  z-index: 1;
+
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+
+  width: auto;
+}
+
+/* Botão retangular moderno */
+.jump-btn{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  height: 44px;
+  padding: 0 16px;
+
+  border-radius: 14px;
+  text-decoration: none;
+
+  color: rgba(233,255,243,0.92);
+  background: rgba(12,20,17,0.70);
+
+  border: 1px solid rgba(57,229,140,0.22);
+
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease, filter .18s ease;
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.jump-btn i{
+  color: var(--neon);
+  filter: drop-shadow(0 0 12px rgba(57,229,140,.26));
+  opacity: .95;
+}
+
+.jump-btn{
+  min-width: 160px;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  column-gap: 10px;
+
+  justify-content: center;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.jump-btn i{
+  width: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+
+.jump-btn:hover{
+  background: rgba(57,229,140,0.10);
+  border-color: rgba(57,229,140,0.38);
+  box-shadow:
+    0 18px 36px rgba(0,0,0,0.55),
+    0 0 26px rgba(57,229,140,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+
+.jump-btn:active{
+  transform: translateY(0px) scale(0.99);
+}
+
+/* ✅ Âncora com “offset” */
+.section-anchor{
+  position: relative;
+  top: -14px;
+  height: 1px;
+}
+
+/* =========================================================
+   GRÁFICOS — GRID HORIZONTAL
+========================================================= */
+.plant-charts-grid{
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 22px;
+}
+
+.plant-chart-card{
+  display: flex;
+  flex-direction: column;
+  height: 360px;
+}
+
+.plant-chart-card .chart-wrapper{
+  flex: 1;
+  position: relative;
+  padding-top: 12px;
+}
+
+.chart-toolbar{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chart-zoom-btn{
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--border-neon);
+  background: rgba(12,20,17,0.72);
+  color: rgba(233,255,243,0.92);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 22px rgba(0,0,0,0.30),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.chart-zoom-btn:hover{
+  background: color-mix(in srgb, var(--neon) 13%, transparent);
+  border-color: color-mix(in srgb, var(--neon) 55%, rgba(255,255,255,0.14));
+  box-shadow:
+    0 14px 26px rgba(0,0,0,0.38),
+    0 0 20px color-mix(in srgb, var(--neon) 28%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+
+.chart-zoom-btn:active{
+  transform: translateY(0) scale(.98);
+}
+
+.plant-chart-card--monthly .chart-wrapper{
+  padding-top: 16px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.monthly-head-wrap{
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.monthly-kpis{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.monthly-kpi-pill{
+  background: rgba(127,208,85,.08);
+  border: 1px solid rgba(127,208,85,.22);
+  border-radius: 999px;
+  padding: 6px 12px 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 118px;
+  position: relative;
+}
+
+.monthly-subtitle-note{
+  flex: 1 1 100%;
+  margin-top: -8px;
+  color: rgba(154,219,184,.66);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.monthly-kpi-label{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: center;
+}
+
+.monthly-kpi-pill > span{
+  font-size: 10px;
+  color: rgba(154,219,184,.72);
+  text-transform: uppercase;
+}
+
+.monthly-kpi-pill strong{
+  font-size: 15px;
+  color: #7FD055;
+}
+
+.monthly-help{
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(154,219,184,.76);
+  cursor: help;
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.monthly-help i{
+  font-size: 12px;
+  line-height: 1;
+}
+
+.monthly-help:focus-visible{
+  outline: 1px solid rgba(127,208,85,.72);
+  outline-offset: 2px;
+}
+
+.monthly-help-tip{
+  position: absolute;
+  right: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(50%) translateY(-4px);
+  width: min(220px, 72vw);
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(127,208,85,.30);
+  background: rgba(4,13,10,.98);
+  box-shadow: 0 14px 34px rgba(0,0,0,.42);
+  color: rgba(233,255,243,.92) !important;
+  font-size: 11px !important;
+  line-height: 1.35;
+  text-transform: none !important;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 20;
+  transition: opacity .14s ease, transform .14s ease, visibility .14s ease;
+}
+
+.monthly-help:hover .monthly-help-tip,
+.monthly-help:focus .monthly-help-tip,
+.monthly-help:active .monthly-help-tip{
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(50%) translateY(0);
+}
+
+.monthly-legend-row{
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.monthly-leg{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: rgba(233,255,243,.82);
+}
+
+.monthly-leg-sq{
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.monthly-leg-sq--real{ background: #7FD055; }
+.monthly-leg-sq--below{ background: rgba(127,208,85,.45); }
+.monthly-leg-sq--exp{ background: rgba(190,200,210,.45); }
+
+.monthly-progress-wrap{
+  margin-top: 10px;
+  background: rgba(255,255,255,.04);
+  border-radius: 6px;
+  height: 5px;
+  overflow: hidden;
+}
+
+.monthly-progress-fill{
+  height: 100%;
+  width: 0%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #39e58c, #7fd055);
+  transition: width .3s ease;
+}
+
+.monthly-bottom-meta{
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: rgba(154,219,184,.64);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ✅ Glow no gráfico */
+.plant-chart-card canvas{
+  filter:
+    drop-shadow(0 0 8px rgba(57,229,140,.12))
+    drop-shadow(0 0 16px rgba(57,229,140,.08));
+}
+
+/* =========================================================
+   HEADER GRID
+========================================================= */
+.header-grid{
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) auto;
+  gap: 28px;
+  align-items: start;
+}
+
+/* =========================================================
+   HEADER USINA
+========================================================= */
+.header-main{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 4px;
+}
+
+
+.summary-station,
+.weather-station{
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 8px 2px;
+  min-height: 0;
+}
+
+.summary-station{
+  justify-self: start;
+  width: 100%;
+}
+
+.weather-station{
+  justify-self: end;
+  margin-left: auto;
+  text-align: left;
+}
+
+.summary-station .plant-kpis{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.summary-station .kpi{
+  min-width: 0;
+}
+
+.summary-station .kpi strong{
+  font-size: 28px;
+}
+
+.card-header{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* =========================================================
+   HEADER (TOPO ESQUERDO) — REWORK
+========================================================= */
+.plant-header-title{
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  column-gap: 14px;
+  row-gap: 4px;
+  margin-top: 0;
+}
+
+/* Botão voltar base (mantido) */
+.back-btn{
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(57,229,140,0.22);
+  background: rgba(20,34,28,0.85);
+  color: rgba(233,255,243,0.92);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+}
+
+.back-btn:hover{
+  background: rgba(57,229,140,0.10);
+  box-shadow: 0 0 16px rgba(57,229,140,0.22);
+  transform: translateX(-2px);
+}
+
+/* ✅ versão modern (quadradinho) + mais alta */
+.back-btn--modern{
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(57,229,140,0.22);
+  background: rgba(12,20,17,0.72);
+  color: rgba(233,255,243,0.92);
+
+  box-shadow:
+    0 14px 30px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+  margin-top: 0;
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+.back-btn--modern:hover{
+  background: rgba(57,229,140,0.10);
+  border-color: rgba(57,229,140,0.30);
+  box-shadow:
+    0 18px 38px rgba(0,0,0,0.55),
+    0 0 26px rgba(57,229,140,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+
+.back-btn--modern:active{
+  transform: translateY(0px) scale(0.98);
+}
+
+.back-svg{
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+/* Linha 2: badge + texto */
+.plant-title-row{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+/* Badge plantinha */
+.plant-badge{
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+
+  background:
+    radial-gradient(circle at 30% 25%, rgba(57,229,140,0.22), rgba(12,18,32,0.12) 55%),
+    rgba(12,20,17,0.65);
+
+  border: 1px solid rgba(57,229,140,0.30);
+
+  box-shadow:
+    0 0 0 1px rgba(57,229,140,0.10),
+    0 0 22px rgba(57,229,140,0.24),
+    0 10px 24px rgba(127,208,85,.08),
+    0 14px 30px rgba(0,0,0,0.45);
+
+  animation: neonGlow 2.8s ease-in-out infinite;
+}
+
+.plant-badge i{
+  font-size: 18px;
+  color: var(--neon);
+  filter: drop-shadow(0 0 14px rgba(57,229,140,0.42));
+}
+
+/* Textos */
+.plant-title-text{
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plant-name{
+  margin: 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  color: rgba(244,246,255,0.95);
+  text-shadow:
+    0 0 22px rgba(57,229,140,0.10),
+    0 0 36px rgba(57,229,140,0.06);
+}
+
+.plant-subline{
+  font-size: 12px;
+  color: rgba(154,219,184,0.70);
+  text-shadow: 0 0 18px rgba(57,229,140,0.08);
+}
+
+
+.plant-subline--alarm{
+  color: rgba(255, 122, 122, 0.92);
+  text-shadow:
+    0 0 10px rgba(255,59,59,0.34),
+    0 0 20px rgba(255,59,59,0.18);
+  animation: plantAlarmTextBlink 1.5s ease-in-out infinite;
+}
+
+/* =========================================================
+   KPI
+========================================================= */
+.plant-kpis{
+  display: flex;
+  gap: 40px;
+  margin-top: 14px;
+}
+
+.kpi-label{
+  font-size: 11px;
+  color: #8be8c0;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 14px rgba(255,255,255,0.05);
+}
+
+.kpi strong{
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 700;
+
+  color: var(--neon);
+  text-shadow:
+    0 0 10px rgba(57,229,140,0.22),
+    0 0 22px rgba(57,229,140,0.12),
+    0 0 44px rgba(57,229,140,0.08);
+
+  animation: neonTextGlow 2.6s ease-in-out infinite;
+}
+
+/* =========================================================
+   WEATHER
+========================================================= */
+.weather-station{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-self: stretch;
+  align-items: flex-end;
+}
+
+.weather-title{
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.7px;
+  color: #b6e5cf;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(57,229,140,0.10);
+}
+
+.weather-items-row{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, auto));
+  gap: 14px;
+  justify-content: end;
+}
+
+.weather-item{
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  grid-template-areas:
+    "icon label"
+    "value value";
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+  color: rgba(233,255,243,0.88);
+  text-shadow: 0 0 14px rgba(255,255,255,0.06);
+}
+
+.weather-item .weather-icon{ grid-area: icon; }
+.weather-item span{ grid-area: label; }
+.weather-item strong{ grid-area: value; }
+
+.weather-item strong{
+  color: var(--warm-yellow);
+  text-shadow:
+    0 0 10px var(--warm-yellow-glow),
+    0 0 20px rgba(255,152,0,0.10);
+}
+
+.weather-icon{
+  color: var(--warm-yellow);
+  font-size: 14px;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 8px rgba(255,152,0,0.18));
+}
+
+/* =========================================================
+   🔴 ALARMES — PREMIUM RED GLOW
+========================================================= */
+.plant-alarms-card{
+  background: linear-gradient(180deg, var(--card-0), var(--card-1));
+  border-radius: 16px;
+  padding: 20px 24px;
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.08),
+    0 14px 32px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+  overflow: hidden;
+  position: relative;
+}
+
+.plant-alarms-card::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius: 18px;
+  background:
+    radial-gradient(520px 140px at 14% 40%, rgba(255,59,59,0.08), transparent 62%),
+    radial-gradient(520px 140px at 92% 60%, rgba(57,229,140,0.06), transparent 62%);
+  opacity: .9;
+  pointer-events:none;
+}
+
+.plant-alarms-card .card-title{
+  margin-bottom: 14px;
+}
+
+#plantActiveAlarms{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.alarm-row{
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  font-size: 13px;
+  align-items: center;
+  overflow: hidden;
+
+  background: linear-gradient(180deg, rgba(16,26,22,0.72), rgba(10,16,14,0.72));
+  border: 1px solid rgba(255,255,255,0.06);
+  color: rgba(244,246,255,0.92);
+
+  box-shadow:
+    0 12px 26px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease;
+}
+
+.alarm-row::before{
+  content:"";
+  position:absolute;
+  left: 10px;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.12);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25) inset;
+  pointer-events:none;
+}
+
+.alarm-row::after{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius: 16px;
+  background:
+    radial-gradient(520px 120px at 12% 50%, rgba(255,255,255,0.06), transparent 60%),
+    radial-gradient(520px 120px at 88% 55%, rgba(255,255,255,0.03), transparent 62%);
+  pointer-events:none;
+  opacity: .65;
+}
+
+.alarm-row span{
+  text-shadow: 0 0 14px rgba(255,255,255,0.06);
+}
+
+.alarm-row:hover{
+  transform: translateY(-1px);
+  box-shadow:
+    0 16px 34px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.alarm-row.critical,
+.alarm-row.high{
+  background:
+    linear-gradient(90deg, rgba(255,59,59,0.22), rgba(255,59,59,0.06)),
+    linear-gradient(180deg, rgba(18,10,12,0.72), rgba(10,6,8,0.72));
+  border-color: rgba(255,59,59,0.28);
+  color: rgba(255,255,255,0.95);
+  box-shadow:
+    0 18px 40px rgba(0,0,0,0.55),
+    0 0 28px var(--alarm-red-glow-2),
+    inset 0 0 0 1px rgba(255,59,59,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.alarm-row.critical::before,
+.alarm-row.high::before{
+  background: linear-gradient(180deg, rgba(255,59,59,0.95), rgba(255,92,119,0.55));
+  box-shadow:
+    0 0 10px var(--alarm-red-glow-1),
+    0 0 20px var(--alarm-red-glow-2);
+}
+
+.alarm-row.critical::after,
+.alarm-row.high::after{
+  background:
+    radial-gradient(520px 160px at 16% 50%, rgba(255,59,59,0.18), transparent 60%),
+    radial-gradient(520px 160px at 88% 55%, rgba(255,92,119,0.12), transparent 62%),
+    radial-gradient(280px 120px at 40% 10%, rgba(255,255,255,0.05), transparent 55%);
+  opacity: .95;
+}
+
+.alarm-row.critical span,
+.alarm-row.high span{
+  text-shadow:
+    0 0 10px rgba(255,255,255,0.18),
+    0 0 20px rgba(255,59,59,0.12);
+}
+
+
+.alarm-row.critical,
+.alarm-row.high{
+  animation: plantAlarmGlowPulse 1.7s ease-in-out infinite;
+}
+
+.alarm-row.medium{
+  background: linear-gradient(90deg, rgba(255,186,65,0.18), rgba(255,186,65,0.05));
+  border-color: rgba(255,186,65,0.22);
+  color: rgba(255,255,255,0.92);
+}
+.alarm-row.medium::before{
+  background: linear-gradient(180deg, rgba(255,186,65,0.95), rgba(255,186,65,0.45));
+  box-shadow: 0 0 10px rgba(255,186,65,0.26);
+}
+
+.alarm-row.low{
+  background: linear-gradient(90deg, rgba(80,180,255,0.16), rgba(80,180,255,0.05));
+  border-color: rgba(80,180,255,0.18);
+}
+.alarm-row.low::before{
+  background: linear-gradient(180deg, rgba(80,180,255,0.95), rgba(80,180,255,0.45));
+  box-shadow: 0 0 10px rgba(80,180,255,0.22);
+}
+
+/* =========================================================
+   SUMMARY (se usar depois)
+========================================================= */
+.plant-summary-strip{
+  background: linear-gradient(180deg, rgba(18,30,25,0.96), rgba(10,18,15,0.96));
+  border-radius: 16px;
+  padding: 18px 22px;
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.12),
+    0 12px 28px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+  overflow: hidden;
+}
+
+.plant-summary-strip::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius: 18px;
+  background:
+    radial-gradient(580px 140px at 16% 40%, rgba(57,229,140,0.10), transparent 60%),
+    radial-gradient(520px 140px at 86% 70%, rgba(57,229,140,0.06), transparent 62%);
+  opacity: .9;
+  pointer-events:none;
+}
+
+.summary-strip-grid{
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 18px;
+}
+
+.summary-strip-item{
+  background: linear-gradient(180deg, rgba(20,34,28,0.95), rgba(12,20,17,0.95));
+  border-radius: 12px;
+  padding: 16px 18px;
+  border: 1px solid rgba(57,229,140,0.18);
+}
+
+.summary-strip-item strong{
+  font-size: 20px;
+  color: var(--neon);
+  text-shadow:
+    0 0 10px rgba(57,229,140,.20),
+    0 0 24px rgba(57,229,140,.10);
+}
+
+/* =========================================================
+   INVERSORES — ISOLADO
+========================================================= */
+.inverter-header,
+.inverter-row{
+  display: grid;
+  grid-template-columns: 14px 1.2fr 1fr 1fr 1fr 1fr 0.6fr 1.6fr;
+  gap: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+}
+
+.inverter-header{
+  color: #9adbb8;
+  text-transform: uppercase;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 6px;
+}
+
+.inverter-row{
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+  align-items: center;
+  box-shadow:
+    0 10px 22px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.inverter-name{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  color: #2fd27d;
+  text-shadow:
+    0 0 10px rgba(47,210,125,.28),
+    0 0 24px rgba(47,210,125,.15);
+}
+
+.inverter-row > span{
+  min-width: 0;
+}
+
+.inverter-row > span:not(.inverter-name){
+  color: rgba(233,255,243,0.96);
+  font-size: 14px;
+}
+
+.metric-number{
+  color: #49ffa8;
+  font-weight: 700;
+  text-shadow:
+    0 0 10px rgba(73,255,168,.28),
+    0 0 22px rgba(73,255,168,.16);
+}
+
+.metric-unit{
+  color: rgba(245,255,250,0.98);
+  font-weight: 600;
+}
+
+.arrow{
+  font-size: 12px;
+  color: var(--neon);
+  transition: transform 0.3s ease;
+  filter: drop-shadow(0 0 10px rgba(57,229,140,.18));
+}
+
+.inverter-row.open .arrow{
+  transform: rotate(180deg);
+}
+
+.status-dot{
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+/* ✅ dot online premium */
+.inverter-row.online{
+  border-color: rgba(57,229,140,0.16);
+  box-shadow:
+    0 14px 30px rgba(0,0,0,0.42),
+    0 0 26px rgba(57,229,140,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.inverter-row.online .status-dot{
+  background: var(--neon);
+  box-shadow:
+    0 0 10px rgba(57,229,140,0.55),
+    0 0 22px rgba(57,229,140,0.22);
+  animation: neonDotGlow 2.4s ease-in-out infinite;
+}
+
+/* ✅ offline */
+.inverter-row.offline{
+  border-color: rgba(255,92,92,0.14);
+}
+.inverter-row.offline .status-dot{
+  background: #ff5c5c;
+  box-shadow: 0 0 10px rgba(255,92,92,0.18);
+}
+
+/* Strings */
+.inverter-strings{
+  max-height: 0;
+  overflow: clip;
+  transition: max-height 0.35s ease, opacity 0.25s ease;
+  opacity: 0;
+}
+
+.inverter-strings.open{
+  max-height: 900px;
+  opacity: 1;
+}
+
+.strings-grid{
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 10px;
+  padding: 12px 12px 10px;
+}
+
+/* =========================================================
+   STRING CARDS (base dashboard)
+========================================================= */
+.string-card{
+  position: relative;
+  border-radius: 12px;
+  padding: 10px 8px;
+  font-size: 12px;
+  text-align: center;
+  letter-spacing: .2px;
+
+  background: linear-gradient(180deg, rgba(14, 28, 22, .85), rgba(7, 14, 11, .85));
+  border: 1px solid rgba(57,229,140,.12);
+  color: rgba(154, 219, 184, .95);
+
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.02),
+    0 6px 18px rgba(0,0,0,.35);
+
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, filter .18s ease, opacity .18s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.string-card strong{
+  display:block;
+  margin-top: 6px;
+  font-weight: 800;
+  color: var(--neon);
+  text-shadow:
+    0 0 10px rgba(57,229,140,.18),
+    0 0 22px rgba(57,229,140,.10);
+}
+
+.string-card.active{
+  border-color: rgba(57,229,140,.50);
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,.18),
+    0 0 0 1px rgba(57,229,140,.08),
+    0 10px 26px rgba(0,0,0,.40),
+    0 0 22px rgba(57,229,140,.22),
+    0 0 44px rgba(57,229,140,.14);
+}
+
+.string-card.active::after{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 0%, rgba(57,229,140,.24), transparent 55%);
+  filter: blur(10px);
+  opacity: .9;
+  pointer-events:none;
+}
+
+.string-card:hover{
+  transform: translateY(-1px);
+  border-color: rgba(57,229,140,.42);
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,.12),
+    0 12px 30px rgba(0,0,0,.45),
+    0 0 26px rgba(57,229,140,.18);
+}
+
+.string-card:active{
+  transform: translateY(0px) scale(.99);
+}
+
+
+.string-card.removing{
+  animation: stringRemoveOut .18s ease forwards;
+}
+
+@keyframes stringRemoveOut{
+  from{
+    opacity: 1;
+    transform: scale(1);
   }
-  return labels;
-}
-
-function looksLikeDayOnlyLabel(label) {
-  const s = String(label ?? "").trim();
-  if (!s) return false;
-  if (s.includes("/") || s.includes("-")) return false;
-  return /^\d{1,2}$/.test(s);
-}
-
-function hasDuplicateLabels(labels) {
-  const set = new Set();
-  for (const l of labels) {
-    const key = String(l);
-    if (set.has(key)) return true;
-    set.add(key);
+  to{
+    opacity: 0;
+    transform: scale(.85);
   }
-  return false;
 }
 
-function valueOrDash(v) {
-  return v === null || v === undefined || v === "" ? "—" : v;
+.string-card-add{
+  border: 1px dashed rgba(57,229,140,.55);
+  background: linear-gradient(180deg, rgba(10, 42, 28, .92), rgba(6, 28, 19, .92));
+  color: var(--neon);
+  display: grid;
+  place-items: center;
+  gap: 2px;
 }
 
-function fmtDatePtBR(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? "—" : d.toLocaleString("pt-BR");
+.string-card-add .plus{
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 0 12px rgba(57,229,140,.35);
 }
 
-function numFixedOrDash(v, digits = 1) {
-  // ✅ IMPORTANT: 0 deve aparecer como "0.0", não "—"
-  const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+.string-card-add strong{
+  margin-top: 2px;
+  color: rgba(233,255,243,.95);
 }
 
-function normalizePercentMaybe(v) {
-  const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-  if (!Number.isFinite(n)) return null;
-  if (n <= 1.0) return n * 100;
-  return n;
+.string-card.nodata{
+  border-color: rgba(154,219,184,.18);
+  color: rgba(154,219,184,.55);
+  filter: saturate(.65);
+  cursor: default;
 }
 
-function fmtAmp(v) {
-  const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-  if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(2)} A`;
+.string-card.nodata strong{
+  color: rgba(154,219,184,.55);
+  text-shadow: none;
 }
 
-// ======================================================
-// ✅ HELPERS NUMÉRICOS PARA MENSAL (UNIDADE + OUTLIER)
-// ======================================================
-function median(arr) {
-  const a = arr.filter(x => Number.isFinite(x)).slice().sort((x, y) => x - y);
-  if (!a.length) return 0;
-  const mid = Math.floor(a.length / 2);
-  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+.string-card.disabled{
+  background: linear-gradient(180deg, rgba(30,30,30,.55), rgba(14,14,14,.55));
+  border-color: rgba(180,180,180,.10);
+  color: rgba(210,210,210,.45);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.02), 0 6px 18px rgba(0,0,0,.35);
+  filter: grayscale(1) saturate(0);
+  opacity: .65;
+  cursor: not-allowed;
 }
 
-function p95(arr) {
-  const a = arr.filter(x => Number.isFinite(x)).slice().sort((x, y) => x - y);
-  if (!a.length) return 0;
-  const idx = Math.max(0, Math.min(a.length - 1, Math.floor((a.length - 1) * 0.95)));
-  return a[idx];
+.string-card.disabled strong,
+.string-card.disabled{
+  color: rgba(210,210,210,.35);
 }
 
-/**
- * Converte Wh->kWh se detectar escala absurda.
- * - Para 30 dias de uma usina ~2MW, MTD em kWh não deveria ir pra milhões.
- */
-function maybeConvertWhToKwh(dailyArr, mtdArr) {
-  const maxCum = Math.max(...(mtdArr || []), 0);
-  const looksLikeWh = maxCum > 500000; // gatilho conservador
-  if (!looksLikeWh) return { daily: dailyArr, mtd: mtdArr, converted: false };
-  return {
-    daily: dailyArr.map(v => v / 1000),
-    mtd: mtdArr.map(v => v / 1000),
-    converted: true
-  };
+.string-card.disabled::after{
+  display:none;
 }
 
-/**
- * Trata outliers: se um dia é MUITO maior que o normal, capamos pra não destruir o gráfico.
- * Regra: se v > max(mediana*25, p95*4) => cap = max(mediana*10, p95*1.5)
- */
-function capMonthlyOutliers(dailyArr) {
-  const daily = dailyArr.map(v => Number(v) || 0);
-
-  const med = median(daily);
-  const q95 = p95(daily);
-
-  const spikeThreshold = Math.max(med * 25, q95 * 4);
-  const capValue = Math.max(med * 10, q95 * 1.5);
-
-  let changed = false;
-  const capped = daily.map(v => {
-    if (med <= 0 && q95 <= 0) return v;
-    if (v > spikeThreshold && capValue > 0) {
-      changed = true;
-      return capValue;
-    }
-    return v;
-  });
-
-  return { daily: capped, changed, med, q95, spikeThreshold, capValue };
+.string-card.fault{
+  color: #ff5c5c;
+  box-shadow: inset 0 0 0 1px rgba(255,92,92,0.4);
 }
 
-// ======================================================
-// ✅ NORMALIZA PAYLOAD DIÁRIO (00:00 até último dado do dia)
-// - Filtra apenas pontos do dia atual quando houver timestamp por ponto
-// - Preenche faltas com 0 para evitar buracos visuais
-// ======================================================
-function normalizeDailyPayload(payload) {
-  if (!payload) return payload;
+.string-card.string-alarm{
+  border-color: rgba(255,78,78,.65);
+  background: linear-gradient(180deg, rgba(118,16,16,.92), rgba(58,8,8,.9));
+  box-shadow:
+    inset 0 0 0 1px rgba(255,88,88,.24),
+    0 0 0 1px rgba(255,78,78,.2),
+    0 10px 24px rgba(0,0,0,.42),
+    0 0 18px rgba(255,78,78,.28),
+    0 0 36px rgba(255,78,78,.16);
+  animation: stringAlarmPulse 1.35s ease-in-out infinite;
+}
 
-  const labelsRaw = Array.isArray(payload.labels) ? payload.labels.slice() : [];
+.string-card.string-alarm strong{
+  color: #ffd4d4;
+  text-shadow: 0 0 12px rgba(255,120,120,.32);
+}
 
-  const powerRaw =
-    Array.isArray(payload.activePower) ? payload.activePower.slice() :
-    Array.isArray(payload.active_power_kw) ? payload.active_power_kw.slice() :
-    Array.isArray(payload.power_kw) ? payload.power_kw.slice() :
-    [];
+.string-card.string-alarm::after{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius:14px;
+  pointer-events:none;
+  background: radial-gradient(220px 80px at 50% 0%, rgba(255,110,110,.25), transparent 60%);
+}
 
-  const irrRaw =
-    Array.isArray(payload.irradiance) ? payload.irradiance.slice() :
-    Array.isArray(payload.irradiance_wm2) ? payload.irradiance_wm2.slice() :
-    [];
+.string-alarm-badge{
+  position:absolute;
+  top:8px;
+  right:10px;
+  width:20px;
+  height:20px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:rgba(255,59,59,.14);
+  border:1px solid rgba(255,92,92,.5);
+  color:#ff5c5c;
+  box-shadow:0 0 12px rgba(255,92,92,.28);
+  animation: inverterStringAlarmBlink .9s ease-in-out infinite;
+  z-index:2;
+}
 
-  const expectedRaw =
-    Array.isArray(payload.expectedPower) ? payload.expectedPower.slice() :
-    Array.isArray(payload.expected_power_kw) ? payload.expected_power_kw.slice() :
-    Array.isArray(payload.expected_power) ? payload.expected_power.slice() :
-    [];
+.string-alarm-badge i{
+  font-size:11px;
+  line-height:1;
+}
 
-  if (!labelsRaw.length) return payload;
+.inverter-row.has-string-alarm{
+  box-shadow:
+    0 12px 26px rgba(0,0,0,0.42),
+    inset 0 0 0 1px rgba(255,85,85,.12),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+}
 
-  // timestamp por ponto (se existir), para filtrar estritamente o DIA ATUAL
-  const pointTsRaw =
-    Array.isArray(payload.timestamps) ? payload.timestamps :
-    Array.isArray(payload.ts) ? payload.ts :
-    Array.isArray(payload.point_timestamps) ? payload.point_timestamps :
-    Array.isArray(payload.time) ? payload.time :
-    null;
+@keyframes stringAlarmPulse{
+  0%,100%{ filter: saturate(1); }
+  50%{ filter: saturate(1.35) brightness(1.08); }
+}
 
-  const hasPointTimestamps = Array.isArray(pointTsRaw) && pointTsRaw.length > 0;
+@keyframes inverterStringAlarmBlink{
+  0%,100%{ opacity:1; transform:scale(1); }
+  50%{ opacity:.45; transform:scale(.92); }
+}
 
-  // "HH:mm" -> minutos desde 00:00
-  const toMin = (hhmm) => {
-    const m = String(hhmm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return null;
-    const hh = Number(m[1]), mm = Number(m[2]);
-    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-    return hh * 60 + mm;
-  };
-
-  const dateKeyInFortaleza = (d) => {
-    if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
-    return d.toLocaleDateString("en-CA", { timeZone: "America/Fortaleza" });
-  };
-
-  const todayKeyFortaleza = new Date().toLocaleDateString("en-CA", { timeZone: "America/Fortaleza" });
-
-  const points = [];
-  for (let i = 0; i < labelsRaw.length; i++) {
-    const minute = toMin(labelsRaw[i]);
-    if (minute == null) continue;
-
-    if (hasPointTimestamps) {
-      const ts = pointTsRaw[i];
-      const d = ts ? new Date(ts) : null;
-      const key = dateKeyInFortaleza(d);
-      if (!key || key !== todayKeyFortaleza) continue;
-    }
-
-    points.push({
-      minute,
-      power: powerRaw[i] != null ? asNumber(powerRaw[i], 0) : 0,
-      irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : 0,
-      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : 0
-    });
+/* =========================================================
+   RESPONSIVO
+========================================================= */
+@media (max-width: 1100px){
+  .header-grid,
+  .plant-charts-grid{
+    grid-template-columns: 1fr;
   }
 
-  if (!points.length) {
-    return {
-      ...payload,
-      labels: [],
-      activePower: [],
-      irradiance: [],
-      expectedPower: []
-    };
+  .summary-strip-grid{
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* =========================================================
+   LEGENDA DO GRÁFICO
+========================================================= */
+.chart-legend{
+  margin-top: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.legend-bars{
+  display: grid;
+  grid-auto-rows: 8px;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.bar{
+  width: 26px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.bar--green{
+  background: var(--neon);
+  box-shadow:
+    0 0 12px rgba(57,229,140,0.35),
+    0 0 26px rgba(57,229,140,0.18);
+}
+
+.bar--yellow{
+  background: rgba(255,152,0,0.95);
+  box-shadow:
+    0 0 12px rgba(255,152,0,0.35),
+    0 0 26px rgba(255,152,0,0.18);
+}
+
+.bar--gray{
+  background: rgba(205, 213, 225, 0.82);
+  box-shadow:
+    0 0 8px rgba(205,213,225,0.14),
+    0 0 18px rgba(205,213,225,0.08);
+}
+
+.legend-text{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.15;
+}
+
+.legend-line{
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.legend-line--green{
+  color: rgba(233,255,243,0.92);
+  text-shadow: 0 0 12px rgba(57,229,140,0.10);
+}
+
+.legend-line--yellow{
+  color: rgba(233,255,243,0.92);
+  text-shadow: 0 0 12px rgba(255,152,0,0.10);
+}
+
+.legend-line--gray{
+  color: rgba(220,228,238,0.88);
+  text-shadow: 0 0 10px rgba(205,213,225,0.08);
+}
+
+/* =========================================================
+   ANIMAÇÕES — glow “respirando”
+========================================================= */
+
+@keyframes plantAlarmGlowPulse{
+  0%, 100%{
+    transform: translateY(0) scale(1);
+    filter: brightness(1);
+    box-shadow:
+      0 18px 40px rgba(0,0,0,0.55),
+      0 0 22px var(--alarm-red-glow-2),
+      inset 0 0 0 1px rgba(255,59,59,0.14),
+      inset 0 1px 0 rgba(255,255,255,0.08);
+  }
+  50%{
+    transform: translateY(-1px) scale(0.985);
+    filter: brightness(1.08);
+    box-shadow:
+      0 18px 40px rgba(0,0,0,0.58),
+      0 0 34px var(--alarm-red-glow-1),
+      inset 0 0 0 1px rgba(255,59,59,0.22),
+      inset 0 1px 0 rgba(255,255,255,0.10);
+  }
+}
+
+@keyframes plantAlarmTextBlink{
+  0%, 100%{ opacity: 1; filter: brightness(1); }
+  50%{ opacity: .72; filter: brightness(1.16); }
+}
+
+@keyframes neonTextGlow{
+  0%, 100%{
+    text-shadow:
+      0 0 10px rgba(57,229,140,.18),
+      0 0 22px rgba(57,229,140,.10),
+      0 0 40px rgba(57,229,140,.06);
+    filter: brightness(1);
+  }
+  50%{
+    text-shadow:
+      0 0 14px rgba(57,229,140,.28),
+      0 0 30px rgba(57,229,140,.16),
+      0 0 54px rgba(57,229,140,.10);
+    filter: brightness(1.06);
+  }
+}
+
+@keyframes neonGlow{
+  0%, 100%{
+    box-shadow:
+      0 0 0 1px rgba(57,229,140,0.10),
+      0 0 18px rgba(57,229,140,0.18),
+      0 14px 30px rgba(0,0,0,0.45);
+    filter: brightness(1);
+  }
+  50%{
+    box-shadow:
+      0 0 0 1px rgba(57,229,140,0.14),
+      0 0 26px rgba(57,229,140,0.26),
+      0 14px 30px rgba(0,0,0,0.45);
+    filter: brightness(1.05);
+  }
+}
+
+@keyframes neonDotGlow{
+  0%, 100%{
+    box-shadow:
+      0 0 10px rgba(57,229,140,0.40),
+      0 0 18px rgba(57,229,140,0.16);
+  }
+  50%{
+    box-shadow:
+      0 0 14px rgba(57,229,140,0.55),
+      0 0 26px rgba(57,229,140,0.22);
+  }
+}
+
+/* Acessibilidade */
+@media (prefers-reduced-motion: reduce){
+  .plant-badge,
+  .kpi strong,
+  .inverter-row.online .status-dot,
+  .plant-subline--alarm,
+  .alarm-row.critical,
+  .alarm-row.high{
+    animation: none !important;
+  }
+}
+
+/* =========================================================
+   DEVICE NAV (BOTÕES CENTRALIZADOS / MESMO TAMANHO / GLOW)
+========================================================= */
+.plant-device-nav-card{
+  padding: 14px 18px;
+  background: linear-gradient(180deg, rgba(18,30,25,0.96), rgba(10,18,15,0.96));
+  border-radius: 16px;
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.10),
+    0 14px 32px rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.device-nav-wrap{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+
+.device-nav-btn{
+  width: 170px;
+  height: 46px;
+  padding: 0 18px;
+
+  border-radius: 14px;
+  border: 1px solid rgba(57,229,140,0.26);
+  background: rgba(12,20,17,0.62);
+  color: rgba(233,255,243,0.92);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+
+  box-shadow:
+    0 14px 30px rgba(0,0,0,0.35),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+
+  transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.device-nav-btn i{
+  width: 18px;
+  text-align: center;
+  color: var(--neon);
+  filter: drop-shadow(0 0 12px rgba(57,229,140,0.25));
+  opacity: .95;
+}
+
+.device-nav-btn span{
+  display: inline-block;
+  text-align: center;
+  letter-spacing: .2px;
+}
+
+.device-nav-btn:hover{
+  border-color: rgba(57,229,140,0.40);
+  background: rgba(57,229,140,0.08);
+  box-shadow:
+    0 18px 38px rgba(0,0,0,0.45),
+    0 0 24px rgba(57,229,140,0.14),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: translateY(-1px);
+}
+
+.device-nav-btn:active{
+  transform: translateY(0px) scale(.99);
+}
+
+.scroll-anchor{
+  scroll-margin-top: 120px;
+  height: 0;
+}
+
+/* =========================================================
+   ✅ RELÉ — CLEAN + GLOW (igual seu print)
+========================================================= */
+.relay-row{
+  display: grid;
+  grid-template-columns: 14px max-content 1fr max-content;
+  align-items: center;
+  column-gap: 14px;
+
+  padding: 14px 16px;
+  border-radius: 12px;
+
+  background:
+    radial-gradient(520px 180px at 18% 40%, rgba(57,229,140,0.06), transparent 60%),
+    linear-gradient(180deg, rgba(16,26,22,0.78), rgba(10,16,14,0.78));
+
+  border: 1px solid rgba(255,255,255,0.06);
+
+  box-shadow:
+    0 14px 30px rgba(0,0,0,0.40),
+    0 0 22px rgba(57,229,140,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+
+  position: relative;
+  overflow: visible;
+}
+
+.relay-row::before{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  border-radius: 14px;
+  pointer-events:none;
+  background:
+    radial-gradient(520px 160px at 16% 50%, rgba(57,229,140,0.10), transparent 60%),
+    radial-gradient(520px 160px at 88% 55%, rgba(57,229,140,0.06), transparent 62%),
+    radial-gradient(220px 120px at 40% 0%, rgba(255,255,255,0.03), transparent 55%);
+  opacity: .9;
+}
+
+.relay-row.online{
+  border-color: rgba(57,229,140,0.18);
+  box-shadow:
+    0 16px 34px rgba(0,0,0,0.46),
+    0 0 26px rgba(57,229,140,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+.relay-row.offline{
+  border-color: rgba(255,92,92,0.14);
+}
+
+/* usa o MESMO dot do inversor */
+.relay-row.online .status-dot{
+  background: var(--neon);
+  box-shadow:
+    0 0 10px rgba(57,229,140,0.55),
+    0 0 22px rgba(57,229,140,0.22);
+  animation: neonDotGlow 2.4s ease-in-out infinite;
+}
+
+.relay-row.offline .status-dot{
+  background: #ff5c5c;
+  box-shadow: 0 0 10px rgba(255,92,92,0.18);
+}
+
+.relay-left{
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.relay-title{
+  font-size: 14px;
+  font-weight: 650;
+  color: rgba(244,246,255,0.92);
+  letter-spacing: 0.2px;
+}
+
+#relayRow .relay-right{
+  display: none !important;
+}
+
+#relayStateBadge,
+#relayRow .relay-right .relay-state,
+#relayRow .relay-right .relay-power,
+#relayRow .relay-right .relay-last,
+#relayRow .relay-state,
+#relayRow .relay-power{
+  display: none !important;
+}
+
+#relayCommandBarWrap{
+  grid-column: 4;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 20px !important;
+  justify-self: end;
+  align-self: center;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: relative;
+  z-index: 12;
+}
+
+.relay-last{
+  font-size: 12px;
+  color: rgba(154,219,184,0.65);
+  text-shadow: 0 0 14px rgba(57,229,140,0.08);
+}
+
+/* Badge ON/OFF */
+.relay-state{
+  height: 30px;
+  min-width: 64px;
+  padding: 0 12px;
+  border-radius: 999px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(12,20,17,0.55);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 10px 22px rgba(0,0,0,0.35);
+}
+
+/* ON */
+.relay-state--on{
+  color: rgba(233,255,243,0.95);
+  border-color: rgba(57,229,140,0.28);
+  background: rgba(57,229,140,0.10);
+  box-shadow:
+    0 0 16px rgba(57,229,140,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* OFF */
+.relay-state--off{
+  color: rgba(255,255,255,0.95);
+  border-color: rgba(255,92,92,0.28);
+  background: rgba(255,92,92,0.08);
+  box-shadow:
+    0 0 16px rgba(255,92,92,0.12),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* UNKNOWN */
+.relay-state--unknown{
+  color: rgba(233,255,243,0.72);
+  border-color: rgba(255,255,255,0.10);
+  background: rgba(12,20,17,0.45);
+}
+
+.relay-power{
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(233,255,243,0.92);
+  letter-spacing: 0.02em;
+}
+
+/* opcional: kW verde quando vier valor válido */
+.relay-power--valid{
+  color: var(--neon);
+  text-shadow:
+    0 0 10px rgba(57,229,140,0.18),
+    0 0 22px rgba(57,229,140,0.10);
+}
+
+.relay-metrics-wrap{
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 18px;
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+}
+
+#relayTsText{
+  margin: 0 !important;
+  font-size: 12px;
+  color: rgba(154,219,184,0.78);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.relay-power-main{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.relay-power-value{
+  font-size: 14px;
+  font-weight: 800;
+  color: rgba(233,255,243,0.94);
+  text-shadow: 0 0 12px rgba(57,229,140,0.10);
+  white-space: nowrap;
+}
+
+.relay-voltage-list{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.relay-voltage-item{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.relay-voltage-label{
+  font-size: 11px;
+  color: rgba(180,190,200,0.72);
+  letter-spacing: .02em;
+}
+
+.relay-voltage-value{
+  font-size: 13px;
+  font-weight: 800;
+  color: #39e58c;
+  text-shadow: 0 0 10px rgba(57,229,140,0.12);
+  min-width: auto;
+  text-align: right;
+}
+
+@media (max-width: 900px){
+  .relay-row{
+    grid-template-columns: 14px 1fr !important;
+    row-gap: 10px;
   }
 
-  const mins = points.map(p => p.minute).sort((a, b) => a - b);
-
-  // detecta o passo (1,5,10,15...) olhando o menor diff positivo
-  let step = 5; // fallback
-  if (mins.length >= 3) {
-    const diffs = [];
-    for (let i = 1; i < mins.length; i++) {
-      const d = mins[i] - mins[i - 1];
-      if (d > 0 && d <= 60) diffs.push(d);
-    }
-    if (diffs.length) step = Math.max(1, Math.min(...diffs));
+  .relay-left{
+    grid-column: 2;
   }
 
-  const mapP = new Map();
-  const mapI = new Map();
-  const mapE = new Map();
-  points.forEach(p => {
-    mapP.set(p.minute, p.power);
-    mapI.set(p.minute, p.irr);
-    mapE.set(p.minute, p.expected);
-  });
-
-  // começa SEMPRE em 00:00 e termina no último minuto que chegou dado hoje
-  const lastMin = Math.max(...mins);
-
-  const labels = [];
-  const activePower = [];
-  const irradiance = [];
-  const expectedPower = [];
-
-  for (let m = 0; m <= lastMin; m += step) {
-    const hh = String(Math.floor(m / 60)).padStart(2, "0");
-    const mm = String(m % 60).padStart(2, "0");
-    labels.push(`${hh}:${mm}`);
-
-    // sem buraco visual: minutos faltantes viram 0
-    activePower.push(mapP.has(m) ? mapP.get(m) : 0);
-    irradiance.push(mapI.has(m) ? mapI.get(m) : 0);
-    expectedPower.push(mapE.has(m) ? mapE.get(m) : 0);
+  .relay-metrics-wrap{
+    grid-column: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
   }
 
-  return {
-    ...payload,
-    labels,
-    activePower,
-    irradiance,
-    expectedPower
-  };
+  .relay-power-main{
+    justify-content: flex-start;
+  }
+
+  .relay-voltage-list{
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    white-space: normal;
+  }
+
+  #relayCommandBarWrap{
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  #relayTsText{
+    white-space: normal;
+  }
+}
+
+/* =========================================================
+   MOBILE / TABLET RESPONSIVE (iPhone + Android)
+========================================================= */
+@media (max-width: 900px){
+  body{
+    padding: 14px;
+  }
+
+  .plant-layout{
+    gap: 14px;
+  }
+
+  .card{
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .plant-header-card{
+    position: static;
+  }
+
+  .header-grid{
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .weather-station,
+  .summary-station{
+    justify-self: stretch;
+  }
+
+  .plant-header-title{
+    grid-template-columns: auto 1fr;
+    align-items: center;
+  }
+
+  .plant-title-row{
+    align-items: center;
+  }
+
+  .plant-name{
+    font-size: 18px;
+  }
+
+  .plant-subline{
+    font-size: 11px;
+  }
+
+  .back-btn--modern{
+    margin-top: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+
+  .plant-kpis{
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+  }
+
+  .summary-station,
+  .weather-station{
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .kpi strong{
+    font-size: 15px;
+  }
+
+  .weather-station{
+    padding: 10px 4px 2px;
+    align-items: stretch;
+  }
+
+  .weather-items-row{
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .weather-item{
+    grid-template-columns: 16px 1fr auto;
+    grid-template-areas: "icon label value";
+    gap: 8px;
+    font-size: 12px;
+    padding: 8px 0;
+  }
+
+  .weather-item strong{ text-align: right; }
+
+  .device-nav-wrap{
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .device-nav-btn{
+    width: calc(50% - 5px);
+    min-width: 140px;
+    height: 42px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  .plant-charts-grid{
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .plant-chart-card{
+    height: 300px;
+  }
+
+  .card-title,
+  .plant-chart-card h2{
+    font-size: 16px;
+    margin: 0;
+  }
+
+  .subtitle{
+    font-size: 12px;
+  }
+
+  .inverters-section{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .inverter-header,
+  .inverter-row{
+    grid-template-columns: 14px 1.2fr 0.95fr 0.9fr 0.8fr 0.8fr 0.6fr 1.2fr;
+    font-size: 12px;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .strings-grid{
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 10px 6px 12px;
+  }
+
+  .alarm-row{
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 12px 12px 12px 16px;
+  }
+
+  .relay-row{
+    grid-template-columns: 14px 1fr;
+    row-gap: 10px;
+  }
+
+  .relay-right{
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+
+  .relay-state,
+  .relay-power,
+  .relay-last{
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 560px){
+  body{
+    padding: 10px;
+  }
+
+  .card{
+    padding: 12px;
+  }
+
+  .plant-kpis{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .device-nav-btn{
+    width: 100%;
+    min-width: 0;
+  }
+
+  .weather-title,
+  .kpi-label{
+    font-size: 10px;
+  }
+
+  .plant-name{
+    font-size: 17px;
+  }
+
+  .plant-badge{
+    width: 38px;
+    height: 38px;
+  }
+
+  .plant-badge i{
+    font-size: 16px;
+  }
+
+  .plant-chart-card{
+    height: 260px;
+  }
+
+  .chart-legend{
+    margin-top: 6px;
+    gap: 8px;
+  }
+
+  .legend-line{
+    font-size: 12px;
+  }
+
+  .strings-grid{
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile alignment polish for plant page */
+@media (max-width: 640px){
+  .plant-top,
+  .plant-title-wrap,
+  .card-header,
+  .card-title{
+    text-align: center;
+    justify-content: center;
+  }
+
+  .weather-item,
+  .alarm-row,
+  .inverter-row,
+  .relay-row{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .inverters-section,
+  .relay-table{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 
-// ======================================================
-// SÉRIES REAIS (API)
-// ======================================================
-let DAILY = null;
-let MONTHLY = null;
-let ACTIVE_ALARMS = [];
-let PLANT_ALARMS_MENU_OPEN = false;
-let INVERTERS_REALTIME = [];
-let RELAY_REALTIME = null; // ✅ NEW
-let MULTIMETER_REALTIME = null;
-window.INVERTERS_REALTIME = INVERTERS_REALTIME;
-window.RELAY_REALTIME = RELAY_REALTIME;
-window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
-let OPEN_INVERTER_REAL_ID = null;
-const STRINGS_REFRESH_SEQ_MAP = new Map();
-let IS_REFRESHING_PLANT = false;
-let INVERTER_EXTRAS_BY_ID = new Map(); // inverter_id (string) -> objeto inv completo
+/* Entrada suave da tela da usina */
+body.plant-enter .card,
+body.plant-enter .plant-charts-grid,
+body.plant-enter .inverters-section,
+body.plant-enter #relaySection{
+  animation: plantCardEnter .42s cubic-bezier(.22,.61,.36,1);
+}
 
-let PLANT_CATALOG = {
-  inverters: [],
-  hasRelay: false
-};
-
-let RELAY_SUPPORTED = null; // null = desconhecido / true / false
-let MULTIMETER_SUPPORTED = null; // null = desconhecido / true / false
-
-const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
-const PLANT_REFRESH_INTERVAL_MS = 10000;
-const PLANT_ID = new URLSearchParams(window.location.search).get("plant_id");
-
-function normalizeApiBody(data) {
-  if (data && data.body) {
-    return typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+@keyframes plantCardEnter{
+  from{
+    opacity: 0;
+    transform: translateY(10px);
   }
-  return data;
+  to{
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-function normalizeAlarmState(value) {
-  const s = String(value ?? "").trim().toUpperCase();
-  if (!s) return "UNKNOWN";
-  if (["ACTIVE", "ACTIVO", "ATIVO", "OPEN", "ABERTO"].includes(s)) return "ACTIVE";
-  if (["CLEARED", "CLEAR", "RESOLVED", "RESOLVIDO", "INACTIVE", "FECHADO", "CLOSED"].includes(s)) return "CLEARED";
-  return s;
+/* Cross-device tuning (PC + Android + iPhone) */
+.inverters-section,
+.inverter-strings{
+  overscroll-behavior-y: auto;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
 }
 
-function normalizeAlarmSeverity(value) {
-  const s = String(value ?? "").trim().toLowerCase();
-  if (!s) return "info";
-  if (["critical", "critico", "crítico", "high", "alta"].includes(s)) return "critical";
-  if (["warning", "warn", "media", "média", "medium"].includes(s)) return "warning";
-  if (["minor", "low", "baixa", "info", "informational"].includes(s)) return "info";
-  return s;
+.string-card,
+.string-card-add{
+  min-height: 58px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
-function dedupePlantAlarms(alarms) {
-  const map = new Map();
-  (Array.isArray(alarms) ? alarms : []).forEach((alarm) => {
-    const key = String(
-      alarm?.event_row_id ??
-      alarm?.alarm_id ??
-      alarm?.id ??
-      `${alarm?.event_code ?? "evt"}:${alarm?.timestamp ?? alarm?.started_at ?? ""}`
+@media (max-width: 900px){
+  .inverter-strings.open{
+    max-height: 1100px;
+  }
+
+  .strings-grid{
+    gap: 8px;
+    padding: 10px 8px;
+  }
+
+  .inverter-name{
+    font-size: 15px;
+  }
+
+  .inverter-row > span:not(.inverter-name){
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 640px){
+  .inverters-section{
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .inverter-header,
+  .inverter-row{
+    min-width: 0;
+  }
+
+  .inverter-strings.open{
+    max-height: 1100px;
+    overflow: visible;
+  }
+
+  .strings-grid{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 8px 6px 10px;
+  }
+
+  .string-card,
+  .string-card-add{
+    min-height: 52px;
+    padding: 8px 6px;
+    font-size: 11px;
+  }
+
+  .string-card strong,
+  .string-card-add strong{
+    margin-top: 4px;
+    font-size: 11px;
+  }
+
+  .inverter-name{
+    font-size: 14px;
+  }
+
+  .inverter-row > span:not(.inverter-name){
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 430px){
+  .summary-station .kpi strong{ font-size: 20px; }
+  .summary-station, .weather-station{ padding: 10px; }
+  .inverter-strings.open{ max-height: 1100px; }
+
+  .string-card,
+  .string-card-add{
+    min-height: 48px;
+    border-radius: 10px;
+  }
+}
+
+/* =========================================================
+   ✅ INVERSOR EXTRAS — flow com setas AC/DC
+========================================================= */
+.inv-flow{
+  position: relative;
+  padding: 16px 12px 10px;
+  display: grid;
+  grid-template-columns: 1fr 220px 1fr;
+  grid-template-rows: 150px auto;
+  column-gap: 22px;
+  row-gap: 14px;
+  align-items: start;
+}
+
+.inv-flow-arrows{
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  width: 100%;
+  height: 200px;
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.arrow-path{
+  fill: none;
+  stroke: rgba(57,229,140,0.95);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 10px rgba(57,229,140,0.35))
+          drop-shadow(0 0 22px rgba(57,229,140,0.18));
+}
+
+.arrow-path--ac{ opacity: 0.95; }
+.arrow-path--dc{ opacity: 0.75; }
+
+.inv-center{
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  margin-top: 0;
+}
+
+.inv-icon{
+  width: 150px;
+  height: 150px;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 18px rgba(57,229,140,0.10));
+}
+
+.inv-center-tags{
+  margin-top: 2px;
+  display: flex;
+  gap: 10px;
+}
+
+.inv-tag{
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(57,229,140,0.20);
+  background: rgba(12,20,17,0.42);
+  color: rgba(154,219,184,0.85);
+  box-shadow: 0 0 14px rgba(57,229,140,0.08);
+}
+
+.inv-side{
+  margin-top: 0;
+  padding: 10px 10px 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(12,20,17,0.35), rgba(7,14,11,0.35));
+  border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.25);
+}
+
+.inv-side--ac{
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  margin-top: 0;
+}
+
+.inv-side--dc{
+  grid-column: 3;
+  grid-row: 2;
+  align-self: start;
+  justify-self: start;
+  width: 100%;
+  margin-top: 0;
+}
+
+.inv-side--dc .inv-side-row{
+  justify-content: flex-start;
+  align-content: flex-start;
+}
+
+.inv-side-title{
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(154,219,184,0.75);
+  margin-bottom: 10px;
+}
+
+.inv-side-row{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.inv-flow + .strings-grid{
+  margin-top: 0;
+}
+
+/* mantém compatibilidade caso exista wrapper legado */
+.inv-extras{ display:none; }
+
+/* chip verde (mesma linguagem do site) */
+.inv-chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+  user-select: none;
+
+  background: linear-gradient(180deg, rgba(14,28,22,0.80), rgba(7,14,11,0.80));
+  border: 1px solid rgba(57,229,140,0.18);
+
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.08),
+    0 10px 20px rgba(0,0,0,0.28),
+    0 0 18px rgba(57,229,140,0.06);
+}
+
+.inv-chip__label{
+  font-weight: 650;
+  font-size: 12px;
+  opacity: 0.82;
+  letter-spacing: 0.02em;
+  color: rgba(233,255,243,0.88);
+}
+
+.inv-chip__value{
+  font-weight: 850;
+  font-size: 12px;
+  color: var(--neon);
+  text-shadow:
+    0 0 10px rgba(57,229,140,0.18),
+    0 0 18px rgba(57,229,140,0.10);
+}
+
+.inv-chip:hover{
+  transform: translateY(-1px);
+  border-color: rgba(57,229,140,0.30);
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.12),
+    0 14px 28px rgba(0,0,0,0.34),
+    0 0 26px rgba(57,229,140,0.10);
+}
+
+/* mobile */
+@media (max-width: 900px){
+  .inv-flow{
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+  .inv-center{ grid-column: 1; grid-row: 1; }
+  .inv-side--ac{ grid-column: 1; grid-row: 2; }
+  .inv-side--dc{ grid-column: 1; grid-row: 3; }
+  .inv-side{ margin-top: 0; }
+  .inv-flow-arrows{ display:none; }
+
+  .inv-side-row{ gap: 8px; }
+  .inv-chip{ padding: 7px 10px; }
+  .inv-chip__label, .inv-chip__value{ font-size: 11px; }
+}
+
+/* =========================================================
+   TRACKERS PANEL
+========================================================= */
+.trackers-section{
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(57,229,140,0.14);
+}
+
+.trackers-section.trackers-hidden{
+  display:none;
+}
+
+.trackers-tab-toggle{
+  width:100%;
+  height:42px;
+  border-radius:999px;
+  border:1px solid rgba(57,229,140,0.28);
+  background:rgba(12,20,17,0.74);
+  color:rgba(233,255,243,0.94);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 16px;
+  font-weight:700;
+  letter-spacing:.04em;
+  cursor:pointer;
+  box-shadow:0 10px 20px rgba(0,0,0,0.35);
+}
+
+.trackers-tab-toggle i{
+  transition: transform .2s ease;
+}
+
+.trackers-panel-body{
+  margin-top: 12px;
+  max-height: 1400px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height .28s ease, opacity .2s ease, margin-top .2s ease;
+}
+
+.trackers-section.is-collapsed .trackers-panel-body{
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+
+.trackers-section:not(.is-collapsed) .trackers-tab-toggle i{
+  transform: rotate(180deg);
+}
+
+.trackers-toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:14px;
+}
+
+.trackers-search-box{
+  flex:1;
+  min-width:220px;
+  max-width:420px;
+}
+
+.trackers-search-box input{
+  width:100%;
+  height:38px;
+  border-radius:999px;
+  border:1px solid rgba(57,229,140,0.25);
+  background:rgba(12,20,17,0.72);
+  color:#e9fff3;
+  padding:0 14px;
+  outline:none;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.trackers-mode-switch{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.tracker-mode-btn{
+  height:34px;
+  border-radius:999px;
+  border:1px solid rgba(57,229,140,0.24);
+  background:rgba(12,20,17,0.72);
+  color:rgba(233,255,243,0.9);
+  padding:0 14px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.04em;
+  cursor:pointer;
+  transition:all .18s ease;
+}
+
+.tracker-mode-btn:hover,
+.tracker-mode-btn.is-active{
+  border-color:rgba(57,229,140,0.52);
+  background:rgba(57,229,140,0.13);
+  box-shadow:0 0 16px rgba(57,229,140,0.18);
+}
+
+.trackers-layout{
+  display:grid;
+  grid-template-columns:260px 1fr;
+  gap:14px;
+}
+
+.trackers-sidebar{
+  border:1px solid rgba(57,229,140,0.15);
+  background:rgba(12,20,17,0.62);
+  border-radius:12px;
+  padding:12px;
+  box-shadow:0 12px 28px rgba(0,0,0,0.36);
+}
+
+.trackers-zoom-controls{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:8px;
+  margin-bottom:12px;
+}
+
+.trackers-legend{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  font-size:12px;
+}
+
+.trackers-legend-item{
+  display:grid;
+  grid-template-columns:12px 1fr;
+  gap:8px;
+  align-items:center;
+  color:rgba(233,255,243,0.85);
+}
+
+.trackers-legend-dot{
+  width:12px;
+  height:12px;
+  border-radius:3px;
+  border:1px solid rgba(255,255,255,0.3);
+}
+
+.trackers-stage-wrap{
+  position:relative;
+  overflow:hidden;
+  min-height:420px;
+  border-radius:14px;
+  border:1px solid rgba(57,229,140,0.18);
+  background:
+    radial-gradient(500px 280px at 14% 20%, rgba(57,229,140,0.08), transparent 62%),
+    linear-gradient(180deg, rgba(8,14,12,0.92), rgba(3,7,6,0.95));
+}
+
+.trackers-map{
+  position:absolute;
+  inset:0;
+  background:#0b0f14;
+  border-radius:18px;
+  overflow:hidden;
+}
+
+.trackers-map-fallback{
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+  color:rgba(233,255,243,.72);
+  font-size:13px;
+  background:rgba(3,7,6,.72);
+  z-index: 350;
+}
+
+.tracker-node{
+  position:absolute;
+  width:12px;
+  height:24px;
+  border-radius:3px;
+  border:1px solid rgba(255,255,255,0.42);
+  background:#7a8791;
+  box-shadow:0 0 8px rgba(0,0,0,0.35);
+  transition:transform .14s ease, filter .14s ease;
+}
+
+.leaflet-container{
+  background: #07110c;
+}
+
+#trackersMap .leaflet-tile-pane{
+  filter:saturate(0.9) brightness(0.72) contrast(1.08);
+}
+
+#trackersMap .leaflet-control-container{
+  display:none;
+}
+
+.tracker-map-marker{
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  border:1px solid rgba(255,255,255,.75);
+  box-shadow:0 0 10px rgba(0,0,0,.35);
+}
+
+.tracker-node:hover{
+  transform:scale(1.1);
+  filter:brightness(1.2);
+}
+
+.tracker-tooltip{
+  position:absolute;
+  z-index:4;
+  pointer-events:none;
+  min-width:180px;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid rgba(57,229,140,0.3);
+  background:rgba(9,16,14,0.95);
+  color:#eafff4;
+  font-size:12px;
+  line-height:1.45;
+  box-shadow:0 14px 24px rgba(0,0,0,0.5),0 0 16px rgba(57,229,140,0.16);
+}
+
+@media (max-width: 1024px){
+  .trackers-layout{ grid-template-columns:1fr; }
+  .trackers-sidebar{ order:0; }
+  .trackers-stage-wrap{ min-height:360px; }
+}
+
+@media (max-width: 640px){
+  .trackers-toolbar{ align-items:stretch; }
+  .trackers-search-box{ min-width:100%; max-width:100%; }
+  .trackers-mode-switch{ width:100%; }
+  .tracker-mode-btn{ flex:1; min-width:90px; }
+}
+
+/* =========================================================
+   ALARMES — LAYOUT HORIZONTAL (override final)
+========================================================= */
+#plantActiveAlarms{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(360px, 1fr));
+  gap:12px;
+}
+
+#plantActiveAlarms .alarm-row{
+  display:grid !important;
+  grid-template-columns:minmax(0, 1.2fr) minmax(0, 1fr) auto !important;
+  align-items:center;
+  gap:14px;
+  min-height:68px;
+}
+
+#plantActiveAlarms .alarm-device,
+#plantActiveAlarms .alarm-desc,
+#plantActiveAlarms .alarm-time{
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+#plantActiveAlarms .alarm-time{
+  font-family:var(--font-mono);
+  color:rgba(127,208,85,0.86);
+  text-align:right;
+}
+
+@media (max-width: 900px){
+  #plantActiveAlarms{
+    grid-template-columns:1fr;
+  }
+  #plantActiveAlarms .alarm-row{
+    grid-template-columns:minmax(0, 1fr) auto !important;
+    grid-template-areas:
+      "device time"
+      "desc desc";
+    row-gap:8px;
+    column-gap:12px;
+  }
+  #plantActiveAlarms .alarm-device{ grid-area:device; }
+  #plantActiveAlarms .alarm-desc{ grid-area:desc; }
+  #plantActiveAlarms .alarm-time{ grid-area:time; }
+
+  .chart-toolbar{
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .chart-zoom-btn{
+    width: 38px;
+    height: 38px;
+  }
+
+  .plant-chart-card--monthly{
+    min-height: 330px;
+  }
+}
+
+/* =========================================================
+   HOTFIX — KPI/WEATHER overlap + monthly chart spacing
+========================================================= */
+.summary-station .plant-kpis{
+  grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* =========================================================
+   HEADER COMPACTO + MENU DE ALARMES (dropdown)
+========================================================= */
+.plant-header-card{
+  top: 12px;
+  z-index: 20;
+  padding: 14px 18px;
+  overflow: visible;
+  box-shadow:
+    inset 0 0 0 1px rgba(57,229,140,0.16),
+    0 14px 34px rgba(0,0,0,0.62),
+    0 0 22px rgba(57,229,140,0.08);
+}
+
+.plant-header-compact{
+  display: grid;
+  grid-template-columns: minmax(260px, auto) 1fr auto;
+  gap: 22px;
+  align-items: center;
+}
+
+.plant-head-left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  min-width:0;
+  min-height: 74px;
+}
+
+.plant-head-center{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(140px, 1fr));
+  gap:22px;
+  align-items:end;
+  justify-items:center;
+  align-self:center;
+  padding-top:8px;
+  max-width:760px;
+  margin:0 auto;
+  transform: translateY(6px);
+}
+
+.plant-head-center .kpi{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:flex-end;
+  text-align:center;
+}
+
+.plant-badge{
+  width: 36px;
+  height: 36px;
+}
+
+.plant-badge i{
+  font-size: 15px;
+}
+
+.plant-name{
+  font-size: 18px;
+  line-height: 1.05;
+}
+
+.plant-subline{
+  font-size: 11px;
+}
+
+.kpi-label{
+  font-size: 10px;
+}
+
+.plant-head-center .kpi strong,
+.kpi strong{
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.plant-head-right{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:flex-end;
+  align-self:center;
+  min-height:74px;
+  gap:10px;
+  padding-top:6px;
+  transform: translateY(4px);
+}
+
+.plant-weather-compact{
+  display:grid;
+  gap:6px;
+  justify-items:end;
+  align-self:center;
+}
+
+.plant-weather-compact.weather-station{
+  padding: 0;
+  margin: 0;
+}
+
+.weather-title{
+  font-size: 11px;
+  margin: 0;
+}
+
+.weather-title-row{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:6px;
+}
+
+.weather-expand-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:30px;
+  height:30px;
+  background:rgba(255,190,30,0.12);
+  border:1.5px solid rgba(255,190,30,0.45);
+  border-radius:8px;
+  cursor:pointer;
+  color:var(--warm-yellow);
+  font-size:18px;
+  padding:0;
+  transition:background 0.2s, border-color 0.2s, box-shadow 0.2s, transform 0.28s;
+  line-height:1;
+  box-shadow:0 0 8px rgba(255,190,30,0.15);
+  flex-shrink:0;
+}
+.weather-expand-btn.is-open{
+  transform:rotate(180deg);
+  background:rgba(255,190,30,0.22);
+  border-color:rgba(255,190,30,0.75);
+  box-shadow:0 0 14px rgba(255,190,30,0.35);
+}
+.weather-expand-btn:hover{
+  background:rgba(255,190,30,0.22);
+  border-color:rgba(255,190,30,0.70);
+  box-shadow:0 0 14px rgba(255,190,30,0.30);
+}
+
+.weather-expand-panel{
+  max-height:0;
+  overflow:hidden;
+  opacity:0;
+  transition:max-height 0.3s ease, opacity 0.2s ease;
+  margin-top:0;
+}
+.weather-expand-panel.is-open{
+  max-height:300px;
+  opacity:1;
+  margin-top:12px;
+}
+
+.weather-expand-grid{
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  gap:8px;
+}
+
+.weather-expand-item{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:10px 12px;
+  background:rgba(255,190,30,0.05);
+  border:1px solid rgba(255,190,30,0.12);
+  border-radius:10px;
+}
+
+.wei-icon{
+  font-size:14px;
+  color:var(--warm-yellow);
+  display:flex;
+  align-items:center;
+}
+.wei-label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+  color:rgba(154,219,184,0.6);
+}
+.wei-value{
+  font-size:15px;
+  font-weight:700;
+  color:var(--warm-yellow);
+  text-shadow:0 0 10px rgba(255,152,0,0.15);
+}
+
+@media (max-width: 640px){
+  .weather-expand-grid{ grid-template-columns:repeat(2, 1fr); }
+}
+
+.plant-weather-compact .weather-items-row{
+  grid-template-columns: repeat(3, minmax(120px, auto));
+  gap: 12px;
+  align-items: start;
+  justify-items: end;
+}
+
+.plant-weather-compact .weather-item{
+  display:grid;
+  grid-template-columns:16px auto;
+  grid-template-areas:
+    "icon label"
+    "icon value";
+  column-gap:8px;
+  row-gap:2px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.plant-weather-compact .weather-item strong{
+  font-size: 12px;
+}
+
+.plant-header-actions{
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.plant-header-actions--inline-left{
+  justify-content:flex-start;
+  margin-top:8px;
+  width:max-content;
+}
+
+.plant-header-actions--inline-left .plant-alarm-menu-panel{
+  left:0;
+  right:auto;
+}
+
+.plant-alarm-menu-btn{
+  position: relative;
+  height: 38px;
+  min-width: 120px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(12,20,17,0.78);
+  color: rgba(233,255,243,0.92);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  box-shadow: 0 14px 28px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: .18s ease;
+}
+
+.plant-alarm-menu-btn:hover{ transform: translateY(-1px); }
+
+.plant-alarm-menu-btn.is-clean{
+  border-color: rgba(57,229,140,0.26);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.42), 0 0 18px rgba(57,229,140,0.10), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.plant-alarm-menu-btn.is-alert{
+  border-color: rgba(255,92,92,0.30);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.42), 0 0 20px rgba(255,59,59,0.18), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+.plant-alarm-menu-icon{
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+}
+
+.plant-alarm-menu-icon svg{
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.plant-alarm-menu-btn.is-clean .plant-alarm-menu-icon{
+  color: var(--neon);
+  filter: drop-shadow(0 0 10px rgba(57,229,140,0.28));
+}
+
+.plant-alarm-menu-btn.is-alert .plant-alarm-menu-icon{
+  color: #ff5c5c;
+  filter: drop-shadow(0 0 12px rgba(255,92,92,0.30));
+  animation: alarmPulse 1.15s ease-in-out infinite;
+}
+
+.plant-alarm-menu-count{
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(255,59,59,0.88);
+  box-shadow: 0 0 14px rgba(255,59,59,0.28);
+}
+
+.plant-alarm-menu-panel{
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(760px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: 460px;
+  overflow: auto;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(13,20,18,0.96), rgba(7,11,10,0.96));
+  box-shadow: 0 24px 54px rgba(0,0,0,0.56), 0 0 22px rgba(57,229,140,0.08);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition: .18s ease;
+  z-index: 50;
+}
+
+.plant-alarm-menu-panel.open{
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.plant-alarm-menu-panel-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: rgba(233,255,243,0.92);
+}
+
+.plant-alarm-menu-close{
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.03);
+  color: rgba(233,255,243,0.9);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.plant-alarm-menu-close:hover{
+  border-color: rgba(255,92,92,0.35);
+  color: #ff8a8a;
+}
+
+.plant-alarm-menu-empty{
+  padding: 14px 4px 4px;
+  font-size: 13px;
+  color: rgba(154,219,184,0.72);
+}
+
+.plant-alarm-menu-list{
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plant-alarm-menu-list .alarm-row{
+  grid-template-columns: minmax(180px, 1.1fr) minmax(220px, 1.6fr) auto !important;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 14px 12px 16px;
+  border-radius: 12px;
+  align-items: center;
+}
+
+.plant-alarm-menu-list .alarm-device,
+.plant-alarm-menu-list .alarm-desc,
+.plant-alarm-menu-list .alarm-time{
+  min-width: 0;
+  overflow: visible;
+}
+
+.plant-alarm-menu-list .alarm-device{
+  font-size: 12px;
+  font-weight: 700;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.plant-alarm-menu-list .alarm-desc{
+  font-size: 12px;
+  opacity: 0.92;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.plant-alarm-menu-list .alarm-time{
+  font-size: 11px;
+  color: rgba(154,219,184,0.72);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.plant-alarms-card{
+  display:none !important;
+}
+
+@keyframes alarmPulse{
+  0%,100%{ transform: scale(1); opacity:1; }
+  50%{ transform: scale(1.08); opacity:.78; }
+}
+
+@media (max-width: 900px){
+  .plant-header-compact{
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .plant-head-center{
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+  }
+
+  .plant-head-right{
+    justify-content: flex-start;
+    align-items:flex-start;
+  }
+
+  .plant-alarm-menu-panel{
+    right: auto;
+    left: 0;
+    width: min(100%, calc(100vw - 28px));
+  }
+
+  .plant-header-actions--inline-left{
+    width:100%;
+  }
+
+  .plant-weather-compact{ justify-items:start; }
+  .plant-weather-compact .weather-items-row{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-items:start;
+  }
+
+  .plant-alarm-menu-list .alarm-row{
+    grid-template-columns: 1fr !important;
+    gap: 6px;
+  }
+
+  .plant-alarm-menu-list .alarm-time{
+    text-align: left;
+  }
+}
+
+/* =========================================================
+   DEVICE COMMANDS — compact control + popover + modals
+========================================================= */
+.device-command-cell{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:88px;
+  position: relative;
+  overflow: visible !important;
+  z-index: 8;
+}
+
+#relaySection,
+#multimeterSection,
+#relayRow,
+#multimeterRow,
+#relayCommandBarWrap,
+#multimeterCommandBarWrap,
+.multimeter-row{
+  overflow: visible !important;
+}
+
+.device-command-control{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  overflow: visible;
+  z-index: 20;
+}
+
+.device-command-trigger{
+  width:56px;
+  height:32px;
+  padding:0;
+  border:none;
+  background:transparent;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  transition: transform .16s ease, filter .18s ease;
+}
+
+.device-command-trigger:focus-visible{
+  outline:2px solid rgba(127,208,85,0.55);
+  outline-offset:4px;
+  border-radius:999px;
+}
+
+.device-command-switch{
+  position:relative;
+  display:block;
+  width:56px;
+  height:32px;
+}
+
+.device-command-switch-track{
+  width:56px;
+  height:32px;
+  display:block;
+  overflow:visible;
+  filter:
+    drop-shadow(0 10px 18px rgba(0,0,0,0.36))
+    drop-shadow(0 0 14px rgba(127,208,85,0.12));
+  transition: filter .2s ease;
+}
+
+.device-command-switch-track__outer{
+  fill: rgba(7,16,11,0.96);
+  stroke: rgba(127,208,85,0.28);
+  stroke-width: 1.6;
+  transition: fill .2s ease, stroke .2s ease, opacity .2s ease;
+}
+
+.device-command-switch-track__inner{
+  fill: rgba(17,30,21,0.92);
+  stroke: rgba(255,255,255,0.04);
+  stroke-width: 1;
+  transition: fill .2s ease, stroke .2s ease, opacity .2s ease;
+}
+
+.device-command-switch-track__pulse{
+  fill: none;
+  stroke: rgba(127,208,85,0.34);
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .45;
+  transition: stroke .2s ease, opacity .2s ease;
+}
+
+.device-command-switch-thumb{
+  position:absolute;
+  top:4px;
+  left:4px;
+  width:24px;
+  height:24px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  color: rgba(127,208,85,0.72);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(233,255,243,0.96), rgba(179,228,151,0.92) 42%, rgba(69,121,56,0.92) 100%);
+  border: 1px solid rgba(196,255,182,0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    0 0 0 1px rgba(0,0,0,0.24),
+    0 5px 12px rgba(0,0,0,0.32),
+    0 0 14px rgba(127,208,85,0.18);
+  transform: translateX(0);
+  transition: transform .24s cubic-bezier(.22,.61,.36,1), background .2s ease, color .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.device-command-switch-glyph{
+  width:12px;
+  height:12px;
+  display:block;
+  filter: drop-shadow(0 0 6px rgba(127,208,85,0.16));
+}
+
+.device-command-control.is-on .device-command-switch-track__outer{
+  fill: rgba(8,30,17,0.96);
+  stroke: rgba(127,208,85,0.56);
+}
+
+.device-command-control.is-on .device-command-switch-track__inner{
+  fill: rgba(17,66,36,0.95);
+  stroke: rgba(194,255,183,0.10);
+}
+
+.device-command-control.is-on .device-command-switch-track__pulse{
+  stroke: rgba(196,255,182,0.88);
+  opacity: .95;
+}
+
+.device-command-control.is-on .device-command-switch-thumb{
+  color: rgba(23,91,39,0.92);
+  transform: translateX(24px);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(248,255,240,1), rgba(182,245,126,0.98) 40%, rgba(82,168,59,0.98) 100%);
+  border-color: rgba(208,255,180,0.70);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.40),
+    0 0 0 1px rgba(0,0,0,0.24),
+    0 7px 16px rgba(0,0,0,0.34),
+    0 0 18px rgba(127,208,85,0.34),
+    0 0 28px rgba(127,208,85,0.22);
+}
+
+.device-command-control.is-off .device-command-switch-track__outer{
+  fill: rgba(6,14,10,0.96);
+  stroke: rgba(127,208,85,0.22);
+}
+
+.device-command-control.is-off .device-command-switch-track__inner{
+  fill: rgba(17,26,20,0.94);
+}
+
+.device-command-control.is-off .device-command-switch-track__pulse{
+  stroke: rgba(127,208,85,0.28);
+  opacity: .34;
+}
+
+.device-command-control.is-off .device-command-switch-thumb{
+  color: rgba(38,86,36,0.78);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(240,246,234,0.96), rgba(157,195,133,0.92) 42%, rgba(53,76,45,0.95) 100%);
+  border-color: rgba(180,214,158,0.30);
+}
+
+.device-command-control.is-reset-flash .device-command-switch-track__outer{
+  fill: rgba(40,28,8,0.96);
+  stroke: rgba(245,200,66,0.55);
+}
+
+.device-command-control.is-reset-flash .device-command-switch-track__inner{
+  fill: rgba(78,56,10,0.82);
+}
+
+.device-command-control.is-reset-flash .device-command-switch-track__pulse{
+  stroke: rgba(255,226,143,0.88);
+  opacity: .92;
+}
+
+.device-command-control.is-reset-flash .device-command-switch-thumb{
+  color: rgba(117,70,0,0.94);
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,247,214,0.98), rgba(255,211,93,0.96) 42%, rgba(196,124,15,0.96) 100%);
+  border-color: rgba(255,226,143,0.74);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.40),
+    0 0 0 1px rgba(0,0,0,0.24),
+    0 7px 16px rgba(0,0,0,0.34),
+    0 0 18px rgba(245,200,66,0.34);
+}
+
+.device-command-trigger:hover{
+  transform: translateY(-1px) scale(1.02);
+}
+
+.device-command-trigger:hover .device-command-switch-track{
+  filter:
+    drop-shadow(0 12px 20px rgba(0,0,0,0.40))
+    drop-shadow(0 0 18px rgba(127,208,85,0.18));
+}
+
+.device-command-trigger:hover .device-command-switch-thumb{
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.42),
+    0 0 0 1px rgba(0,0,0,0.24),
+    0 8px 18px rgba(0,0,0,0.36),
+    0 0 18px rgba(127,208,85,0.24);
+}
+
+.device-command-trigger:active{
+  transform: translateY(0) scale(.98);
+}
+
+.device-command-popover{
+  position:absolute;
+  right:0;
+  top:auto;
+  bottom:calc(100% + 8px);
+  display:none;
+  flex-direction:column;
+  gap:6px;
+  padding:8px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(8,14,12,.96);
+  min-width:108px;
+  z-index:80;
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.42),
+    0 0 0 1px rgba(255,255,255,0.05);
+}
+
+.device-command-control.is-open .device-command-popover{
+  display:flex;
+}
+
+/* =========================================================
+   RELÉ / MULTIMEDIDOR — TABELA HORIZONTAL
+========================================================= */
+.device-mini-table{
+  display:flex;
+  flex-direction:column;
+  gap:0;
+}
+
+.device-mini-stack{
+  display:flex;
+  flex-direction:column;
+}
+
+.device-mini-header{
+  display:grid;
+  grid-template-columns: 14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px;
+  align-items:center;
+  column-gap:14px;
+  padding:12px 16px;
+  border-radius:10px;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.06);
+  color:rgba(154,219,184,0.78);
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+
+.device-mini-header > span{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:100%;
+  line-height:1;
+  text-align:center;
+  white-space:nowrap;
+}
+
+.device-mini-header > span:nth-child(2){
+  justify-content:flex-start;
+  text-align:left;
+}
+
+.relay-row--table,
+#multimeterRow{
+  display:grid !important;
+  grid-template-columns: 14px minmax(220px,1.45fr) minmax(130px,0.95fr) minmax(130px,0.95fr) minmax(130px,0.95fr) minmax(160px,1fr) 88px !important;
+  grid-template-rows: 1fr !important;
+  align-items:center !important;
+  column-gap:14px !important;
+  padding:10px 16px !important;
+  cursor:pointer;
+}
+
+.relay-row--table .relay-left,
+#multimeterRow .relay-left,
+#multimeterRow .multimeter-left{
+  grid-column:2 !important;
+  grid-row:1 !important;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:nowrap;
+  align-self:center;
+}
+
+.relay-row--table .relay-right,
+#multimeterRow .relay-right,
+#multimeterRight{
+  display:none !important;
+}
+
+.relay-row--table .status-dot,
+#multimeterRow .status-dot{
+  grid-column:1 !important;
+  grid-row:1 !important;
+  margin-top:0 !important;
+  align-self:center;
+}
+
+.device-metric-cell{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:2px;
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:13px;
+  font-weight:700;
+  color:rgba(233,255,243,0.94);
+  text-align:center;
+  text-shadow:0 0 12px rgba(57,229,140,0.10);
+  align-self:center;
+  grid-row:1 !important;
+  padding-top:0;
+}
+
+.relay-timestamp-cell{
+  font-size:12px;
+  font-weight:700;
+  color:rgba(154,219,184,0.78);
+  text-align:center;
+  justify-content:center;
+}
+
+#relaySection .device-mini-header span:nth-child(2),
+#multimeterSection .device-mini-header span:nth-child(2){
+  opacity:0;
+}
+
+.relay-expand-icon{
+  margin-left:6px;
+  font-size:11px;
+  color:rgba(154,219,184,0.74);
+  transition:transform .18s ease;
+  flex:0 0 auto;
+}
+
+.relay-row.open .relay-expand-icon{
+  transform:rotate(180deg);
+}
+
+#relayCommandBarWrap,
+#multimeterCommandBarWrap{
+  grid-column:7 !important;
+  grid-row:1 !important;
+  justify-self:center !important;
+  align-self:center !important;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:4px;
+  align-items:center !important;
+  justify-content:center !important;
+  min-width:88px !important;
+  margin-top:0 !important;
+}
+
+#relayTsText,
+#multimeterLastReadingValue{
+  justify-content:center !important;
+  text-align:center !important;
+}
+
+#relayActivePowerValue,
+#relayApparentPowerValue,
+#relayReactivePowerValue,
+#multimeterActivePowerValue,
+#multimeterApparentPowerValue,
+#multimeterReactivePowerValue{
+  justify-content:center !important;
+  text-align:center !important;
+}
+
+#relayOnlineBadge,
+#multimeterOnlineBadge{
+  height:28px;
+  min-width:66px;
+  padding:0 12px;
+  border-radius:999px;
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  margin-left:8px !important;
+}
+.relay-details-panel{
+  overflow:hidden;
+  max-height:0;
+  opacity:0;
+  margin-top:0;
+  transition:max-height .24s ease, opacity .18s ease, margin-top .18s ease;
+}
+
+.relay-details-panel.open{
+  opacity:1;
+  margin-top:12px;
+}
+
+.relay-details-card{
+  padding:16px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,0.06);
+  background:linear-gradient(180deg, rgba(12,20,17,0.72), rgba(7,13,11,0.74));
+  box-shadow:0 12px 26px rgba(0,0,0,0.34);
+}
+
+.relay-details-panel.open{
+  display:grid;
+  grid-template-columns:1.1fr 1fr;
+  gap:14px;
+}
+
+.relay-details-title{
+  margin-bottom:12px;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  color:rgba(154,219,184,0.76);
+}
+
+.relay-details-grid,
+.relay-flag-grid{
+  display:grid;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  gap:10px;
+}
+
+.relay-detail-chip,
+.relay-flag-pill{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,0.06);
+  background:rgba(255,255,255,0.03);
+}
+
+.relay-detail-chip span,
+.relay-flag-pill span{
+  font-size:11px;
+  color:rgba(154,219,184,0.72);
+}
+
+.relay-detail-chip strong,
+.relay-flag-pill strong{
+  font-size:13px;
+  color:rgba(233,255,243,0.94);
+}
+
+.relay-flag-pill.is-on{
+  border-color:rgba(57,229,140,0.28);
+  background:rgba(57,229,140,0.08);
+}
+
+.relay-flag-pill.is-off{
+  border-color:rgba(255,255,255,0.06);
+}
+
+.relay-details-empty{
+  padding:14px 16px;
+  color:rgba(154,219,184,0.72);
+}
+
+@media (max-width: 900px){
+  .device-mini-header{
+    display:none;
+  }
+
+  .relay-row--table,
+  #multimeterRow{
+    grid-template-columns:14px 1fr !important;
+    row-gap:10px !important;
+  }
+
+  .device-metric-cell,
+  #relayCommandBarWrap,
+  #multimeterCommandBarWrap{
+    grid-column:2 !important;
+    justify-self:start !important;
+    justify-content:flex-start !important;
+    text-align:left !important;
+  }
+
+  .relay-timestamp-cell{
+    justify-content:flex-start !important;
+  }
+
+  .relay-details-panel.open{
+    grid-template-columns:1fr;
+  }
+
+  .relay-details-grid,
+  .relay-flag-grid{
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+}
+
+.device-command-option{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  border:none;
+  background:transparent;
+  color:rgba(205,212,208,.9);
+  font-size:11px;
+  letter-spacing:.06em;
+  cursor:pointer;
+}
+
+.device-command-option .dot{
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  display:inline-block;
+}
+
+.device-command-option--on .dot{ background:#65d46f; }
+.device-command-option--off .dot{ background:#ff6b6b; }
+.device-command-option--reset .dot{ background:#f5c842; }
+
+.device-command-modal{
+  position:fixed;
+  inset:0;
+  z-index:80;
+  display:grid;
+  place-items:center;
+  background:rgba(3,8,7,.7);
+}
+
+.device-command-modal.hidden{ display:none; }
+
+.device-command-modal-card{
+  width:min(420px, calc(100vw - 28px));
+  background:rgba(10,16,14,.96);
+  border:1px solid rgba(255,255,255,.09);
+  border-radius:14px;
+  padding:16px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.device-command-modal-card input{
+  height:36px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.03);
+  color:#e9fff3;
+  padding:0 10px;
+}
+
+.device-command-modal-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+
+.device-command-modal-actions button{
+  height:34px;
+  padding:0 12px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.03);
+  color:#e9fff3;
+  cursor:pointer;
+}
+
+.device-command-progress-wrap{
+  width:100%;
+  height:10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  overflow:hidden;
+}
+
+#deviceCommandProgressBar{
+  width:0%;
+  height:100%;
+  background:linear-gradient(90deg, #39e58c, #7fd055);
+}
+
+@media (min-width: 901px){
+  .inverter-header,
+  .inverter-row{
+    grid-template-columns: 14px 1.15fr 0.82fr 0.82fr 0.82fr 0.82fr 0.55fr 1.2fr 88px;
+  }
+}
+
+@media (max-width: 900px){
+  .inverter-header,
+  .inverter-row{
+    grid-template-columns: 14px 1.15fr 0.9fr 0.9fr 0.85fr 0.85fr 0.6fr 1.2fr 88px;
+  }
+}
+
+@media (max-width: 560px){
+  .plant-alarm-menu-btn{
+    width: 100%;
+    justify-content: center;
+  }
+
+  .summary-station .plant-kpis{
+    grid-template-columns: 1fr;
+  }
+}
+
+.kpi{
+  min-width:0;
+}
+
+.weather-items-row{
+  grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));
+  width:100%;
+}
+
+.plant-chart-card{
+  height:auto;
+  min-height:312px;
+}
+
+.plant-chart-card--monthly{
+  display:flex;
+  flex-direction:column;
+  height:auto;
+  min-height:330px;
+}
+
+.plant-chart-card--monthly .chart-wrapper{
+  flex:1;
+  min-height:130px;
+  height:auto;
+}
+
+.plant-chart-card .chart-wrapper{
+  height:214px;
+  min-height:214px;
+}
+
+.plant-chart-card canvas{
+  width:100% !important;
+  height:100% !important;
+}
+
+@media (max-width: 640px){
+  .summary-station .plant-kpis{
+    grid-template-columns:1fr;
+  }
+
+  .weather-items-row{
+    grid-template-columns:1fr;
+  }
+
+  .weather-item{
+    grid-template-columns:16px 1fr auto;
+    grid-template-areas:"icon label value";
+    padding:10px 12px;
+    gap:8px;
+  }
+
+  .weather-item strong{
+    text-align:right;
+  }
+
+  .plant-chart-card{
+    min-height:292px;
+  }
+
+  .plant-chart-card--monthly{
+    min-height:500px;
+  }
+
+  .plant-chart-card--monthly .chart-wrapper{
+    min-height:200px;
+  }
+
+  .plant-chart-card .chart-wrapper{
+    min-height:198px;
+    height:198px;
+  }
+}
+
+@media (max-width: 560px){
+  .plant-chart-card--monthly{
+    min-height: 520px;
+  }
+
+  .plant-chart-card--monthly .chart-wrapper{
+    min-height: 200px;
+  }
+}
+
+/* relay-timestamp-cell alinhamento */
+.relay-timestamp-cell{
+  align-self:center !important;
+}
+
+/* ── Multimedidor title ── */
+.multimeter-title{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.multimeter-svg-icon{
+  width:32px;
+  height:32px;
+  flex-shrink:0;
+  filter:drop-shadow(0 0 6px rgba(57,229,140,0.35)) drop-shadow(0 0 14px rgba(57,229,140,0.15));
+}
+
+.relay-title-heading{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.relay-svg-icon{
+  width:32px;
+  height:32px;
+  flex-shrink:0;
+  filter:drop-shadow(0 0 6px rgba(57,229,140,0.35)) drop-shadow(0 0 14px rgba(57,229,140,0.15));
+}
+
+/* ── Cabin groups ── */
+.cabin-group{
+  margin-top:18px;
+}
+.cabin-group:first-child{
+  margin-top:0;
+}
+.cabin-group-header{
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:10px 14px;
+  margin-bottom:8px;
+  border-radius:10px;
+  background:linear-gradient(90deg, rgba(57,229,140,0.06), transparent);
+  border-left:3px solid rgba(57,229,140,0.45);
+  user-select:none;
+}
+.cabin-group-header__icon{
+  color:var(--color-accent, #00e5a0);
+  flex-shrink:0;
+}
+.cabin-group-header__name{
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  color:rgba(154,219,184,0.9);
+}
+.cabin-group-header__count{
+  font-size:11px;
+  color:rgba(154,219,184,0.5);
+  margin-left:auto;
+  font-family:var(--font-mono);
+}
+.cabin-group-header__chevron{
+  margin-left:8px;
+  transition:transform 0.25s ease;
+  color:var(--color-accent, #00e5a0);
+  flex-shrink:0;
+}
+.cabin-group[data-cabin-collapsed="true"] .cabin-group-header__chevron{
+  transform:rotate(-90deg);
+}
+.cabin-group-body{
+  overflow:hidden;
+  transition:max-height 0.3s ease, opacity 0.2s ease;
+}
+.cabin-group-body.is-collapsed{
+  max-height:0 !important;
+  opacity:0;
+  pointer-events:none;
+}
+
+/* =========================================================
+   MOBILE — max-width: 768px
+========================================================= */
+@media (max-width: 768px){
+
+  /* ── Gráficos: coluna única ── */
+  .plant-charts-grid{
+    grid-template-columns: 1fr !important;
+    gap: 14px;
+  }
+
+  .plant-chart-card{
+    height: 280px;
+    min-height: 240px;
+  }
+
+  /* ── Card mensal mobile ── */
+  .plant-chart-card--monthly{
+    min-height: 420px;
+    padding: 14px 10px;
+  }
+
+  .plant-chart-card--monthly .chart-wrapper{
+    min-height: 220px;
+    height: 240px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .monthly-head-wrap{
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .monthly-kpis{
+    width: 100%;
+    gap: 6px;
+  }
+
+  .monthly-kpi-pill{
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+  }
+
+  .monthly-kpi-pill span{
+    font-size: 9px;
+  }
+
+  .monthly-kpi-pill strong{
+    font-size: 12px;
+    word-break: break-all;
+  }
+
+  .monthly-legend-row{
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .monthly-leg{
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .monthly-leg-sq{
+    width: 8px;
+    height: 8px;
+  }
+
+  .monthly-bottom-meta{
+    font-size: 10px;
+  }
+
+  .plant-chart-card .chart-wrapper{
+    height: 200px;
+    min-height: 180px;
+  }
+
+  /* ── Headers das tabelas de dispositivos: ocultar em mobile ── */
+  .device-mini-header{
+    display: none !important;
+  }
+
+  /* ── Inversores: card vertical com labels em mobile ── */
+  .inverter-header{
+    display: none !important;
+  }
+
+  .inverter-row{
+    display: grid !important;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 6px 10px;
+    padding: 12px 14px;
+    min-width: 0 !important;
+    font-size: 13px;
+  }
+
+  .inverter-row > .status-dot{
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+  }
+
+  .inverter-row > .inverter-name{
+    grid-row: 1;
+    grid-column: 2;
+    font-size: 15px;
+  }
+
+  .inverter-row > .device-command-cell{
+    grid-row: 1;
+    grid-column: 3;
+    align-self: center;
+  }
+
+  /* Métricas viram grid de pills */
+  .inv-metrics-grid{
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    grid-column: 1 / -1;
+  }
+
+  .inv-metric{
+    background: rgba(57,229,140,0.04);
+    border: 1px solid rgba(57,229,140,0.10);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .inv-metric::before{
+    content: attr(data-label);
+    display: block !important;
+    font-size: 9px;
+    text-transform: uppercase;
+    color: rgba(154,219,184,0.6);
+    letter-spacing: 0.04em;
+  }
+
+  /* Última leitura ocupa linha inteira */
+  .inv-metric--wide{
+    grid-column: 1 / -1;
+  }
+
+  /* ── Relay / Multimeter rows: trocar grid 7col por flex-wrap ── */
+  .relay-row--table,
+  #multimeterRow{
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    padding: 12px 14px !important;
+    gap: 8px !important;
+    column-gap: 8px !important;
+    row-gap: 10px !important;
+  }
+
+  /* dot: tamanho fixo, não cresce */
+  .relay-row--table .status-dot,
+  #multimeterRow .status-dot{
+    flex: 0 0 auto;
+    align-self: center;
+  }
+
+  /* nome + badge: cresce para preencher a linha do topo */
+  .relay-row--table .relay-left,
+  #multimeterRow .relay-left,
+  #multimeterRow .multimeter-left{
+    flex: 1 1 auto !important;
+    min-width: 0;
+    align-self: center;
+    overflow: hidden;
+  }
+
+  /* commandBar: cola na direita da linha do topo via margin-left auto */
+  #relayCommandBarWrap,
+  #multimeterCommandBarWrap{
+    flex: 0 0 auto !important;
+    margin-left: auto !important;
+    align-self: center !important;
+    grid-column: unset !important;
+    grid-row: unset !important;
+  }
+
+  /* metric cells: dois por linha (≈50% cada) */
+  .device-metric-cell{
+    flex: 1 1 calc(50% - 12px) !important;
+    max-width: calc(50% - 12px);
+    grid-column: unset !important;
+    grid-row: unset !important;
+    background: rgba(57,229,140,0.03);
+    border: 1px solid rgba(57,229,140,0.08);
+    border-radius: 8px;
+    padding: 8px 6px;
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  /* badge ONLINE/OFFLINE menor em mobile */
+  #relayOnlineBadge,
+  #multimeterOnlineBadge{
+    font-size: 10px !important;
+    padding: 0 8px !important;
+    height: 22px !important;
+    min-width: 54px !important;
+  }
+
+  /* relay-title legível */
+  .relay-title{
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* painel de detalhes do relé: coluna única em mobile */
+  .relay-details-panel.open{
+    grid-template-columns: 1fr !important;
+  }
+
+  .relay-details-grid,
+  .relay-flag-grid{
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 400px){
+  .monthly-kpi-pill strong{
+    font-size: 11px;
+  }
+
+  .monthly-legend-row{
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
+/* ── Inverter metrics grid (desktop: spans participam do grid pai) ── */
+.inv-metrics-grid{
+  display: contents;
+}
+
+.inv-metric::before{
+  display: none;
+}
+
+/* ── Inverter panel loading spinner ── */
+.inv-panel-loader{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 0;
+  gap: 10px;
+  color: rgba(154,219,184,0.6);
+  font-size: 12px;
+}
+
+.inv-panel-spinner{
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(57,229,140,0.15);
+  border-top-color: var(--neon);
+  border-radius: 50%;
+  animation: invSpin 0.7s linear infinite;
+}
+
+@keyframes invSpin{
+  to{ transform: rotate(360deg); }
+}
+
+/* ══════════════════════════════════════════════════
+   COMMAND CONSOLE — modal central de comandos
+══════════════════════════════════════════════════ */
+.cmd-console-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: cmdFadeIn .18s ease;
+}
+
+.cmd-console-overlay.hidden{ display: none; }
+
+@keyframes cmdFadeIn{
+  from{ opacity:0; }
+  to{ opacity:1; }
+}
+
+.cmd-console{
+  width: 100%;
+  max-width: 480px;
+  background: linear-gradient(160deg, rgba(8,20,12,.98) 0%, rgba(4,10,6,.98) 100%);
+  border: 1px solid rgba(57,229,140,.22);
+  border-radius: 20px;
+  box-shadow:
+    0 0 0 1px rgba(57,229,140,.06) inset,
+    0 24px 64px rgba(0,0,0,.6),
+    0 0 48px rgba(57,229,140,.06);
+  overflow: hidden;
+  animation: cmdSlideUp .22s cubic-bezier(.22,.61,.36,1);
+}
+
+@keyframes cmdSlideUp{
+  from{ transform: translateY(18px); opacity:0; }
+  to{ transform: translateY(0); opacity:1; }
+}
+
+/* ── Header ── */
+.cmd-console__header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(57,229,140,.10);
+  background: rgba(57,229,140,.03);
+}
+
+.cmd-console__title-group{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cmd-console__icon{
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: radial-gradient(circle, rgba(57,229,140,.18), rgba(57,229,140,.04));
+  border: 1px solid rgba(57,229,140,.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--neon);
+  box-shadow: 0 0 14px rgba(57,229,140,.2);
+  flex-shrink: 0;
+}
+
+.cmd-console__label{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: rgba(154,219,184,.55);
+  margin-bottom: 3px;
+}
+
+.cmd-console__device-name{
+  font-family: 'Exo 2', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #e8f5ec;
+  letter-spacing: .01em;
+  line-height: 1.2;
+}
+
+.cmd-console__close{
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  color: rgba(154,219,184,.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background .16s, color .16s, border-color .16s;
+  flex-shrink: 0;
+}
+
+.cmd-console__close:hover{
+  background: rgba(255,100,100,.12);
+  border-color: rgba(255,100,100,.28);
+  color: #ff8080;
+}
+
+/* ── Estado atual ── */
+.cmd-console__state-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(57,229,140,.07);
+}
+
+.cmd-console__state-dot{
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cmd-console__state-dot.is-on{
+  background: var(--neon);
+  box-shadow: 0 0 8px rgba(57,229,140,.8);
+  animation: consolePulse 2s ease-in-out infinite;
+}
+
+.cmd-console__state-dot.is-off{
+  background: #ff5c5c;
+  box-shadow: 0 0 8px rgba(255,92,92,.7);
+}
+
+.cmd-console__state-dot.is-unknown{
+  background: rgba(255,255,255,.3);
+}
+
+@keyframes consolePulse{
+  0%,100%{ opacity:1; transform:scale(1); }
+  50%{ opacity:.55; transform:scale(.85); }
+}
+
+.cmd-console__state-text{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: rgba(154,219,184,.65);
+  text-transform: uppercase;
+  letter-spacing: .10em;
+}
+
+/* ── Botões de comando ── */
+.cmd-console__cmds{
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 20px;
+}
+
+.cmd-console__cmd{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform .16s, box-shadow .16s, border-color .18s, background .16s;
+  position: relative;
+  overflow: hidden;
+}
+
+.cmd-console__cmd::before{
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .18s;
+  border-radius: inherit;
+}
+
+.cmd-console__cmd:hover{ transform: translateY(-2px); }
+.cmd-console__cmd:hover::before{ opacity: 1; }
+.cmd-console__cmd:active{ transform: translateY(0) scale(.97); }
+
+/* ON */
+.cmd-console__cmd--on{
+  background: rgba(57,229,140,.07);
+  border-color: rgba(57,229,140,.18);
+}
+.cmd-console__cmd--on::before{
+  background: radial-gradient(circle at 50% 0%, rgba(57,229,140,.12), transparent 70%);
+}
+.cmd-console__cmd--on:hover{
+  border-color: rgba(57,229,140,.4);
+  box-shadow: 0 6px 24px rgba(57,229,140,.18), 0 0 0 1px rgba(57,229,140,.1) inset;
+  background: rgba(57,229,140,.11);
+}
+.cmd-console__cmd--on i{ color: var(--neon); text-shadow: 0 0 10px rgba(57,229,140,.7); }
+
+/* OFF */
+.cmd-console__cmd--off{
+  background: rgba(255,92,92,.07);
+  border-color: rgba(255,92,92,.18);
+}
+.cmd-console__cmd--off::before{
+  background: radial-gradient(circle at 50% 0%, rgba(255,92,92,.12), transparent 70%);
+}
+.cmd-console__cmd--off:hover{
+  border-color: rgba(255,92,92,.40);
+  box-shadow: 0 6px 24px rgba(255,92,92,.18), 0 0 0 1px rgba(255,92,92,.1) inset;
+  background: rgba(255,92,92,.11);
+}
+.cmd-console__cmd--off i{ color: #ff5c5c; text-shadow: 0 0 10px rgba(255,92,92,.6); }
+
+/* RESET */
+.cmd-console__cmd--reset{
+  background: rgba(245,200,66,.07);
+  border-color: rgba(245,200,66,.18);
+}
+.cmd-console__cmd--reset::before{
+  background: radial-gradient(circle at 50% 0%, rgba(245,200,66,.12), transparent 70%);
+}
+.cmd-console__cmd--reset:hover{
+  border-color: rgba(245,200,66,.40);
+  box-shadow: 0 6px 24px rgba(245,200,66,.16), 0 0 0 1px rgba(245,200,66,.1) inset;
+  background: rgba(245,200,66,.11);
+}
+.cmd-console__cmd--reset i{ color: #f5c842; text-shadow: 0 0 10px rgba(245,200,66,.6); }
+
+.cmd-console__cmd i{
+  font-size: 22px;
+}
+
+.cmd-console__cmd-label{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #ddeee4;
+}
+
+.cmd-console__cmd-desc{
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: rgba(154,219,184,.45);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* ── Footer aviso ── */
+.cmd-console__footer{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: rgba(154,219,184,.38);
+  border-top: 1px solid rgba(57,229,140,.07);
+  letter-spacing: .04em;
+}
+
+.cmd-console__footer i{
+  color: rgba(245,200,66,.55);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ── Mobile ── */
+@media (max-width: 480px){
+  .cmd-console{
+    border-radius: 16px;
+  }
+  .cmd-console__cmds{
+    gap: 8px;
+    padding: 16px 14px;
+  }
+  .cmd-console__cmd{
+    padding: 14px 8px 12px;
+  }
+  .cmd-console__cmd i{ font-size: 18px; }
+  .cmd-console__cmd-label{ font-size: 12px; }
+  .cmd-console__cmd-desc{ display: none; }
+}
+
+/* ── CMD CONSOLE: Feedback de execução ─────────────────── */
+.cmd-console__feedback {
+  margin: 12px 0 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+.cmd-console__feedback.hidden { display: none; }
+.cmd-console__feedback.is-success {
+  background: rgba(34,197,94,0.12);
+  border: 1px solid rgba(34,197,94,0.35);
+  color: #4ade80;
+}
+.cmd-console__feedback.is-error {
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.35);
+  color: #f87171;
+}
+.cmd-console__feedback-inner { display: flex; align-items: center; gap: 8px; }
+.cmd-console__feedback-icon  { font-size: 1rem; flex-shrink: 0; }
+.cmd-console__feedback-text  { line-height: 1.35; }
+
+/* ── CMD CONSOLE: Alarmes do dispositivo ───────────────── */
+.cmd-console__alarms-section {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding-top: 12px;
+}
+.cmd-console__alarms-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.40);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.cmd-console__alarms-title i { color: #facc15; font-size: 0.75rem; }
+.cmd-console__alarm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.cmd-console__alarm-empty {
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.28);
+  font-style: italic;
+  padding: 4px 0;
+}
+.cmd-console__alarm-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(250,204,21,0.06);
+  border-left: 2px solid #facc15;
+  font-size: 0.78rem;
+}
+.cmd-console__alarm-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #facc15;
+  flex-shrink: 0;
+}
+.cmd-console__alarm-msg {
+  flex: 1;
+  color: rgba(255,255,255,0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmd-console__alarm-time {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.35);
+  flex-shrink: 0;
+}
+
+/* ── CMD CONSOLE: Setar Potência ───────────────────────── */
+.cmd-console__power-section {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(57,229,140,0.04);
+  border: 1px solid rgba(57,229,140,0.14);
+}
+.cmd-console__power-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.40);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.cmd-console__power-label i { color: #39e58c; font-size: 0.75rem; }
+.cmd-console__power-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cmd-console__power-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(57,229,140,0.22);
+  border-radius: 7px;
+  color: #d4f5e4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.18s;
+}
+.cmd-console__power-input:focus {
+  border-color: rgba(57,229,140,0.55);
+  box-shadow: 0 0 0 2px rgba(57,229,140,0.08);
+}
+.cmd-console__power-input::placeholder { color: rgba(255,255,255,0.22); }
+.cmd-console__power-input::-webkit-inner-spin-button,
+.cmd-console__power-input::-webkit-outer-spin-button { opacity: 0.4; }
+.cmd-console__power-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.35);
+  flex-shrink: 0;
+}
+.cmd-console__power-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 7px;
+  background: rgba(57,229,140,0.12);
+  border: 1px solid rgba(57,229,140,0.32);
+  color: #39e58c;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, box-shadow 0.18s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cmd-console__power-btn:hover {
+  background: rgba(57,229,140,0.20);
+  border-color: rgba(57,229,140,0.55);
+  box-shadow: 0 0 12px rgba(57,229,140,0.18);
+}
+.cmd-console__power-btn i { font-size: 0.75rem; }
+
+.cmd-device-picker {
+  max-width: 520px;
+}
+
+.cmd-device-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px 20px;
+  max-height: min(58vh, 430px);
+  overflow-y: auto;
+}
+
+.cmd-device-picker__item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(57,229,140,0.14);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.035);
+  color: #dff0e8;
+  cursor: pointer;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.cmd-device-picker__item:hover,
+.cmd-device-picker__item:focus-visible {
+  border-color: rgba(57,229,140,0.34);
+  background: rgba(57,229,140,0.08);
+  outline: none;
+}
+
+.cmd-device-picker__type {
+  color: var(--neon);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.cmd-device-picker__label,
+.cmd-device-picker__id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-device-picker__label {
+  font-weight: 600;
+}
+
+.cmd-device-picker__id {
+  color: rgba(223,240,232,0.58);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.cmd-device-picker__empty {
+  color: rgba(223,240,232,0.68);
+  border: 1px dashed rgba(57,229,140,0.18);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .cmd-device-picker__item {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ======================================================
+   MAPA DE CABINES
+   ====================================================== */
+
+.inv-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.inv-view-toggle {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.inv-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(57,229,140,.18);
+  background: rgba(6,14,11,.82);
+  color: rgba(205,238,221,.68);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s, transform .15s;
+}
+
+.inv-view-btn:hover:not(.is-active) {
+  background: rgba(57,229,140,.07);
+  color: rgba(205,238,221,.9);
+}
+
+.inv-view-btn.is-active {
+  background: rgba(57,229,140,.14);
+  color: rgba(57,229,140,.96);
+  border-color: rgba(57,229,140,.42);
+}
+
+.cabine-map-view {
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.cabine-map-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cabine-map-ctrl-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(57,229,140,.24);
+  background: rgba(6,14,11,.92);
+  color: rgba(57,229,140,.9);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+
+.cabine-map-ctrl-btn:hover {
+  background: rgba(57,229,140,.12);
+  border-color: rgba(57,229,140,.46);
+}
+
+.cabine-map-ctrl-btn:active {
+  transform: translateY(1px);
+}
+
+.cabine-map-hint {
+  font-size: 11px;
+  color: rgba(205,238,221,.42);
+  margin-left: 8px;
+}
+
+.cabine-map-stage-wrap {
+  width: 100%;
+  height: 70vh;
+  min-height: 430px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(57,229,140,.11);
+  background:
+    linear-gradient(rgba(57,229,140,.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(57,229,140,.045) 1px, transparent 1px),
+    radial-gradient(ellipse at 18% 25%, rgba(57,229,140,.055) 0%, transparent 58%),
+    radial-gradient(ellipse at 82% 18%, rgba(212,83,126,.045) 0%, transparent 52%),
+    linear-gradient(180deg, rgba(4,10,8,.97), rgba(3,8,6,.99));
+  background-size: 46px 46px, 46px 46px, auto, auto, auto;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+}
+
+.cabine-map-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: max-content;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.cabine-external-nodes {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.cabine-relay-node,
+.cabine-meter-node {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(57,229,140,.18);
+  background: rgba(6,18,13,.92);
+  width: 240px;
+  position: relative;
+  box-shadow: 0 10px 26px rgba(0,0,0,.28);
+}
+
+.cabine-meter-node {
+  border-color: rgba(212,83,126,.25);
+  background: rgba(14,8,12,.92);
+}
+
+.cabine-relay-node.cabine-node--online,
+.cabine-meter-node.cabine-node--online {
+  box-shadow: 0 10px 26px rgba(0,0,0,.28), 0 0 18px rgba(57,229,140,.08);
+}
+
+.cabine-relay-node.cabine-node--offline,
+.cabine-meter-node.cabine-node--offline {
+  opacity: .78;
+}
+
+.cabine-relay-node__icon,
+.cabine-meter-node__icon {
+  opacity: .9;
+}
+
+.cabine-relay-node__label,
+.cabine-meter-node__label {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(57,229,140,.82);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.cabine-meter-node__label {
+  color: rgba(212,83,126,.85);
+}
+
+.cabine-relay-node__data,
+.cabine-meter-node__data {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: rgba(205,238,221,.84);
+}
+
+.cabine-meter-node__data {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.cabine-data-lbl {
+  font-size: 10px;
+  color: rgba(205,238,221,.46);
+  margin-right: 4px;
+}
+
+.cabine-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  color: rgba(205,238,221,.58);
+}
+
+.cabine-badge--online {
+  border-color: rgba(57,229,140,.42);
+  background: rgba(57,229,140,.11);
+  color: rgba(57,229,140,.94);
+}
+
+.cabine-badge--offline {
+  border-color: rgba(220,80,60,.34);
+  background: rgba(220,80,60,.07);
+  color: rgba(220,80,60,.82);
+}
+
+.cabine-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cabine-grid-cols, 5), minmax(340px, 1fr));
+  gap: 20px;
+  align-items: start;
+  width: max-content;
+  max-width: none;
+}
+
+.cabine-grid--single {
+  grid-template-columns: minmax(640px, 860px);
+}
+
+.cabine-grid--empty {
+  min-width: 320px;
+}
+
+.cabine-map-empty {
+  padding: 18px 20px;
+  border-radius: 10px;
+  border: 1px dashed rgba(57,229,140,.22);
+  background: rgba(6,14,11,.76);
+  color: rgba(205,238,221,.66);
+  font-size: 13px;
+}
+
+.cabine-block {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  min-width: 460px;
+  max-width: 900px;
+  border-radius: 14px;
+  border: 1px solid rgba(57,229,140,.17);
+  background:
+    linear-gradient(180deg, rgba(8,20,15,.96), rgba(5,13,10,.98));
+  box-shadow: 0 10px 28px rgba(0,0,0,.32), inset 0 0 0 1px rgba(57,229,140,.03);
+}
+
+.cabine-block--single {
+  min-width: min(900px, calc(100vw - 120px));
+  max-width: 900px;
+}
+
+.cabine-block__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(57,229,140,.07);
+  border-bottom: 1px solid rgba(57,229,140,.13);
+  font-size: 12px;
+  font-weight: 800;
+  color: rgba(57,229,140,.92);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.cabine-block__count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(205,238,221,.52);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cabine-block__body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px;
+}
+
+.cabine-block--single .cabine-block__body {
+  gap: 12px;
+}
+
+/* Inverter card — redesigned */
+.cabine-inv-card {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 0;
+  width: 230px;
+  min-height: 280px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(57,229,140,.16);
+  background:
+    linear-gradient(160deg, rgba(10,22,16,.98) 0%, rgba(4,12,9,.99) 100%);
+  box-shadow:
+    0 6px 20px rgba(0,0,0,.32),
+    inset 0 1px 0 rgba(57,229,140,.06);
+  transition: border-color .22s, box-shadow .22s, opacity .22s;
+  cursor: default;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Color stripe at top */
+.cabine-inv-card::before {
+  content: '';
+  display: block;
+  height: 3px;
+  width: 100%;
+  background: rgba(57,229,140,.0);
+  transition: background .3s;
+}
+.cabine-inv-card.is-online::before {
+  background: linear-gradient(90deg, rgba(57,229,140,.7), rgba(57,229,140,.3), transparent);
+}
+.cabine-inv-card.has-alarm::before {
+  background: linear-gradient(90deg, rgba(239,159,39,.8), rgba(239,159,39,.3), transparent);
+}
+
+.cabine-block--single .cabine-inv-card {
+  width: 210px;
+}
+
+.cabine-inv-card.is-online {
+  border-color: rgba(57,229,140,.26);
+  box-shadow:
+    0 8px 24px rgba(0,0,0,.36),
+    0 0 0 1px rgba(57,229,140,.08) inset,
+    0 0 28px rgba(57,229,140,.07);
+}
+
+.cabine-inv-card.is-offline {
+  border-color: rgba(70,85,80,.2);
+  opacity: .65;
+}
+
+.cabine-inv-card.has-alarm {
+  border-color: rgba(239,159,39,.45);
+  box-shadow: 0 0 20px rgba(239,159,39,.10);
+}
+
+.cabine-inv-card__top {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  min-height: 36px;
+}
+
+.cabine-inv-card__status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-online {
+  background: #39e58c;
+  box-shadow: 0 0 7px rgba(57,229,140,.85);
+}
+
+.dot-offline {
+  background: rgba(100,110,105,.45);
+}
+
+.cabine-inv-card__name {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(205,238,221,.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cabine-inv-card__state {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: rgba(205,238,221,.45);
+}
+
+.cabine-inv-card.is-online .cabine-inv-card__state {
+  color: rgba(57,229,140,.84);
+}
+
+.cabine-inv-card.has-alarm .cabine-inv-card__state {
+  color: rgba(239,159,39,.9);
+}
+
+.cabine-inv-card__cmd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: scale(.78);
+  transform-origin: right center;
+  width: 44px;
+  height: 26px;
+}
+
+/* Icon row — SVG + horizontal power bar */
+.cabine-inv-card__icon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 6px;
+  background: rgba(57,229,140,.03);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+
+.cabine-inv-svg {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  filter:
+    drop-shadow(0 0 8px rgba(57,229,140,.22))
+    drop-shadow(0 2px 4px rgba(0,0,0,.4));
+}
+
+.cabine-bolt-path {
+  transition: fill .8s ease, opacity .8s ease;
+  animation: cabineBoltPulse 1.9s ease-in-out infinite;
+}
+
+.cabine-inv-card.is-offline .cabine-bolt-path {
+  animation: none;
+}
+
+body.plant-map-mode .cabine-inv-card.is-offline .cabine-bolt-path,
+body.plant-map-mode .cabine-inv-card:not(.is-online) .cabine-bolt-path {
+  animation: none;
+}
+
+@keyframes cabineBoltPulse {
+  0%, 100% { opacity: .72; }
+  50% { opacity: 1; }
+}
+
+/* Horizontal power bar */
+.cabine-inv-card__power-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cabine-inv-card__power-bar-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(57,229,140,.08);
+  border: 1px solid rgba(57,229,140,.12);
+  overflow: hidden;
+  position: relative;
+}
+
+.cabine-inv-card__power-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(57,229,140,.9), rgba(118,255,178,.75));
+  transition: width .8s cubic-bezier(.4,0,.2,1), background .6s ease;
+}
+
+.cabine-inv-card.is-offline .cabine-inv-card__power-bar {
+  background: rgba(70,86,78,.45);
+}
+
+.cabine-inv-card.has-alarm .cabine-inv-card__power-bar {
+  background: linear-gradient(90deg, rgba(239,159,39,.9), rgba(255,190,70,.7));
+}
+
+.cabine-inv-card__power-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.cabine-inv-card__power-label {
+  font-size: 14px;
+  font-weight: 800;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: rgba(57,229,140,.95);
+  white-space: nowrap;
+  letter-spacing: -.02em;
+}
+
+.cabine-inv-card.is-offline .cabine-inv-card__power-label {
+  color: rgba(205,238,221,.4);
+}
+
+.cabine-inv-card__load-label {
+  font-size: 10px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: rgba(205,238,221,.42);
+  white-space: nowrap;
+}
+
+/* Metrics grid — 3 columns */
+.cabine-inv-card__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid rgba(255,255,255,.05);
+}
+
+.cabine-inv-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+  border-right: 1px solid rgba(255,255,255,.05);
+  min-width: 0;
+}
+.cabine-inv-metric:last-child,
+.cabine-inv-metric:nth-child(3),
+.cabine-inv-metric:nth-child(6) {
+  border-right: none;
+}
+
+.cabine-inv-metric__lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: rgba(205,238,221,.34);
+}
+
+.cabine-inv-metric__val {
+  font-size: 11px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: rgba(205,238,221,.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cabine-inv-metric__val.val-warn {
+  color: rgba(239,159,39,.94);
+}
+
+@media (max-width: 760px) {
+  .inv-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cabine-map-stage-wrap {
+    height: 58vh;
+    min-height: 380px;
+  }
+
+  .cabine-map-stage {
+    padding: 28px;
+  }
+
+  .cabine-grid {
+    grid-template-columns: repeat(var(--cabine-grid-cols, 1), minmax(280px, 1fr));
+  }
+
+  .cabine-grid--single {
+    grid-template-columns: minmax(280px, 1fr);
+  }
+
+  .cabine-block,
+  .cabine-block--single {
+    min-width: 280px;
+    max-width: 620px;
+  }
+
+  .cabine-inv-card,
+  .cabine-block--single .cabine-inv-card {
+    width: 190px;
+    min-height: 260px;
+  }
+
+  .cabine-map-hint {
+    display: none;
+  }
+}
+
+/* ======================================================
+   VISÃO MAPA EM TELA CHEIA + GRÁFICOS COMPACTOS
+   ====================================================== */
+
+body:not(.plant-map-mode) .plant-charts-grid {
+  gap: 16px;
+}
+
+body:not(.plant-map-mode) .plant-chart-card,
+body:not(.plant-map-mode) .plant-chart-card--monthly {
+  height: 280px;
+  min-height: 280px;
+  padding: 16px 18px;
+}
+
+body:not(.plant-map-mode) .plant-chart-card .chart-wrapper,
+body:not(.plant-map-mode) .plant-chart-card--monthly .chart-wrapper {
+  height: 170px;
+  min-height: 170px;
+  padding-top: 6px;
+}
+
+body:not(.plant-map-mode) .plant-chart-card h2 {
+  font-size: 18px;
+}
+
+body:not(.plant-map-mode) .monthly-legend-row {
+  gap: 10px;
+}
+
+body:not(.plant-map-mode) .monthly-leg {
+  font-size: 10px;
+}
+
+body.plant-map-mode {
+  padding: 10px 14px;
+  overflow: hidden;
+}
+
+body.plant-map-mode .plant-layout {
+  width: 100%;
+  max-width: none;
+  height: calc(100vh - 20px);
+  min-height: calc(100vh - 20px);
+  grid-template-areas:
+    "header"
+    "devices";
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+body.plant-map-mode .plant-alarms-card,
+body.plant-map-mode .plant-summary-strip,
+body.plant-map-mode .plant-charts-grid,
+body.plant-map-mode .plant-device-nav-card {
+  display: none !important;
+}
+
+body.plant-map-mode .plant-header-card {
+  top: 8px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  width: 100%;
+}
+
+body.plant-map-mode .plant-devices-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  padding: 10px;
+  border-radius: 14px;
+}
+
+body.plant-map-mode .plant-devices-card::before {
+  opacity: .42;
+}
+
+body.plant-map-mode #sec-multimeter,
+body.plant-map-mode #sec-relay,
+body.plant-map-mode #sec-trackers,
+body.plant-map-mode #multimeterSection,
+body.plant-map-mode #relaySection,
+body.plant-map-mode #trackersSection,
+body.plant-map-mode #cabineMapChartDock {
+  display: none !important;
+}
+
+body.plant-map-mode .inv-section-head {
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+body.plant-map-mode .inv-section-head .card-title {
+  margin: 0;
+  font-size: 15px;
+  opacity: .86;
+}
+
+body.plant-map-mode .cabine-map-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+body.plant-map-mode .unifilar-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body.plant-map-mode .unif-content,
+body.plant-map-mode .unif-stage-wrap,
+body.plant-map-mode .unif-overview,
+body.plant-map-mode .unif-cabin-detail {
+  min-height: 0;
+}
+
+body.plant-map-mode .unif-content {
+  flex: 1 1 auto;
+}
+
+body.plant-map-mode .cabine-map-controls {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 18;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(3, 10, 8, .76);
+  border: 1px solid rgba(57,229,140,.14);
+  backdrop-filter: blur(10px);
+}
+
+body.plant-map-mode .cabine-map-stage-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  border-radius: 12px;
+}
+
+body.plant-map-mode .cabine-map-stage {
+  padding: 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.cabine-map-chart-dock {
+  width: 100%;
+  max-width: 900px;
+  pointer-events: auto;
+  margin-top: 8px;
+}
+
+.cabine-map-chart-dock:empty {
+  display: none;
+}
+
+.cabine-map-chart-dock .plant-charts-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.cabine-map-chart-dock .plant-chart-card,
+.cabine-map-chart-dock .plant-chart-card--monthly {
+  height: 176px;
+  min-height: 176px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(5,14,11,.88), rgba(2,8,7,.92));
+  border-color: rgba(57,229,140,.14);
+  box-shadow:
+    0 14px 32px rgba(0,0,0,.34),
+    inset 0 0 0 1px rgba(57,229,140,.05);
+  backdrop-filter: blur(10px);
+}
+
+.cabine-map-chart-dock .plant-chart-card::before {
+  opacity: .38;
+}
+
+.cabine-map-chart-dock .card-header {
+  min-height: 0;
+  margin-bottom: 4px;
+}
+
+.cabine-map-chart-dock .plant-chart-card h2 {
+  font-size: 13px;
+  line-height: 1;
+  margin: 0;
+}
+
+.cabine-map-chart-dock .chart-wrapper,
+.cabine-map-chart-dock .plant-chart-card--monthly .chart-wrapper {
+  height: 106px;
+  min-height: 106px;
+  padding: 2px 0 0;
+}
+
+.cabine-map-chart-dock .chart-toolbar {
+  gap: 4px;
+  margin: 0;
+}
+
+.cabine-map-chart-dock .chart-zoom-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.cabine-map-chart-dock .chart-legend,
+.cabine-map-chart-dock .monthly-legend-row,
+.cabine-map-chart-dock .subtitle,
+.cabine-map-chart-dock .monthly-bottom-meta {
+  display: none;
+}
+
+.cabine-map-chart-dock .monthly-head-wrap {
+  gap: 6px;
+  align-items: center;
+}
+
+.cabine-map-chart-dock .monthly-kpis {
+  gap: 5px;
+}
+
+.cabine-map-chart-dock .monthly-kpi-pill {
+  min-width: 72px;
+  padding: 4px 7px;
+}
+
+.cabine-map-chart-dock .monthly-kpi-pill span {
+  font-size: 8px;
+}
+
+.cabine-map-chart-dock .monthly-kpi-pill strong {
+  font-size: 10px;
+}
+
+.cabine-map-chart-dock .monthly-subtitle-note,
+.cabine-map-chart-dock .monthly-help {
+  display: none;
+}
+
+.cabine-map-chart-dock .monthly-progress-wrap {
+  height: 3px;
+  margin-top: 4px;
+}
+
+@media (max-width: 1250px) {
+  .cabine-map-chart-dock .plant-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body:not(.plant-map-mode) .plant-chart-card,
+  body:not(.plant-map-mode) .plant-chart-card--monthly {
+    height: 250px;
+    min-height: 250px;
+  }
+
+  body:not(.plant-map-mode) .plant-chart-card .chart-wrapper,
+  body:not(.plant-map-mode) .plant-chart-card--monthly .chart-wrapper {
+    height: 152px;
+    min-height: 152px;
+  }
+
+  body.plant-map-mode {
+    overflow: hidden;
+  }
+
+  body.plant-map-mode .plant-layout {
+    height: calc(100vh - 20px);
+    min-height: calc(100vh - 20px);
+  }
+
+  body.plant-map-mode .plant-devices-card {
+    height: 100%;
+    min-height: 0;
+  }
+
+  body.plant-map-mode .cabine-map-stage {
+    padding: 24px;
+  }
+
+  .cabine-map-chart-dock .plant-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cabine-map-chart-dock .plant-chart-card,
+  .cabine-map-chart-dock .plant-chart-card--monthly {
+    height: 160px;
+    min-height: 160px;
+  }
+
+  .cabine-map-chart-dock .chart-wrapper,
+  .cabine-map-chart-dock .plant-chart-card--monthly .chart-wrapper {
+    height: 92px;
+    min-height: 92px;
+  }
+}
+
+/* ======================================================
+   STRINGS + AC/DC CHIPS (cabine map card extensions)
+   ====================================================== */
+
+.cabine-inv-card__strings {
+  border-top: 1px solid rgba(255,255,255,.05);
+  padding: 7px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cabine-inv-strings-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: rgba(205,238,221,.36);
+}
+
+.cabine-inv-strings-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cabine-string-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.03);
+  min-width: 30px;
+}
+
+.cabine-string-chip.chip-ok {
+  border-color: rgba(57,229,140,.2);
+  background: rgba(57,229,140,.05);
+}
+
+.cabine-string-chip.chip-alarm {
+  border-color: rgba(239,159,39,.4);
+  background: rgba(239,159,39,.08);
+}
+
+.cabine-string-chip.chip-nodata {
+  border-color: rgba(255,255,255,.06);
+  opacity: .5;
+}
+
+.chip-idx {
+  font-size: 8px;
+  color: rgba(205,238,221,.45);
+  font-weight: 700;
+  letter-spacing: .03em;
+}
+
+.chip-alarm .chip-idx { color: rgba(239,159,39,.85); }
+.chip-ok    .chip-idx { color: rgba(57,229,140,.65); }
+
+.chip-amp {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: rgba(205,238,221,.78);
+  white-space: nowrap;
+}
+
+.cabine-inv-card__acdc {
+  border-top: 1px solid rgba(255,255,255,.05);
+  padding: 7px 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cabine-acdc-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.cabine-acdc-label {
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: rgba(57,229,140,.5);
+  margin-top: 2px;
+  min-width: 18px;
+}
+
+.cabine-acdc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+}
+
+.cabine-acdc-chip {
+  display: flex;
+  gap: 3px;
+  align-items: baseline;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+}
+
+.cabine-acdc-chip__lbl {
+  font-size: 8px;
+  color: rgba(205,238,221,.38);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.cabine-acdc-chip__val {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: rgba(205,238,221,.82);
+  white-space: nowrap;
+}
+
+/* ======================================================
+   BALLOON DE STRINGS (csb = cabine strings balloon)
+   ====================================================== */
+
+.csb-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: none;
+  transition: background 0.22s ease, backdrop-filter 0.22s ease;
+  pointer-events: auto;
+}
+
+.csb-backdrop--visible {
+  background: rgba(0, 0, 0, 0.48);
+  backdrop-filter: none;
+}
+
+/* Balloon container */
+.csb-balloon {
+  position: fixed;
+  z-index: 3001;
+  max-height: min(560px, 85vh);
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(160deg, rgba(7,20,13,.97) 0%, rgba(3,9,6,.99) 100%);
+  border: 1px solid rgba(57,229,140,.32);
+  border-radius: 16px;
+  box-shadow:
+    0 32px 72px rgba(0,0,0,.72),
+    0 0 0 1px rgba(57,229,140,.07) inset,
+    0 0 48px rgba(57,229,140,.08);
+  overflow: hidden;
+  opacity: 0;
+  transform: scale(0.94) translateY(6px);
+  transform-origin: top center;
+  transition:
+    opacity 0.2s ease,
+    transform 0.22s cubic-bezier(.34,1.4,.64,1);
+  pointer-events: auto;
+}
+
+.csb-backdrop--visible .csb-balloon {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+/* Tail — arrow pointing at the inverter card */
+.csb-balloon::before,
+.csb-balloon::after {
+  content: '';
+  position: absolute;
+  top: var(--csb-tail-y, 40px);
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* tail-left: balloon is to the RIGHT of the card → tail points LEFT */
+.csb-balloon--tail-left::before {
+  left: -10px;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-right: 10px solid rgba(57,229,140,.32);
+}
+.csb-balloon--tail-left::after {
+  left: -8px;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-right: 9px solid rgba(7,20,13,.97);
+}
+
+/* tail-right: balloon is to the LEFT of the card → tail points RIGHT */
+.csb-balloon--tail-right::before {
+  right: -10px;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  border-left: 10px solid rgba(57,229,140,.32);
+}
+.csb-balloon--tail-right::after {
+  right: -8px;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 9px solid rgba(3,9,6,.99);
+}
+
+/* Header */
+.csb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  background: rgba(57,229,140,.06);
+  border-bottom: 1px solid rgba(57,229,140,.14);
+  flex-shrink: 0;
+}
+
+.csb-header-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  opacity: .85;
+}
+
+.csb-inv-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: rgba(205,238,221,.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.csb-header-pills {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.csb-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(57,229,140,.1);
+  border: 1px solid rgba(57,229,140,.22);
+  color: rgba(57,229,140,.9);
+  white-space: nowrap;
+}
+
+.csb-pill--alarm {
+  background: rgba(239,159,39,.12);
+  border-color: rgba(239,159,39,.3);
+  color: rgba(239,159,39,.95);
+}
+
+.csb-pill--warn {
+  background: rgba(180,140,50,.1);
+  border-color: rgba(180,140,50,.25);
+  color: rgba(200,170,80,.85);
+}
+
+.csb-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(205,238,221,.6);
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+.csb-close:hover {
+  background: rgba(239,80,80,.18);
+  border-color: rgba(239,80,80,.3);
+  color: rgba(239,100,100,.9);
+}
+
+/* Body */
+.csb-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(57,229,140,.2) transparent;
+  padding: 10px 12px 12px;
+}
+
+/* Column labels */
+.csb-col-labels {
+  display: grid;
+  grid-template-columns: 28px 1fr 52px 1fr;
+  gap: 0 8px;
+  padding: 0 4px 6px;
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: rgba(205,238,221,.3);
+}
+
+/* Strings grid */
+.csb-strings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.csb-str-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 52px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 7px;
+  background: rgba(255,255,255,.025);
+  border: 1px solid rgba(255,255,255,.05);
+  transition: background 0.12s;
+}
+.csb-str-row:hover {
+  background: rgba(57,229,140,.04);
+}
+
+.csb-str-row.csb-str--ok {
+  border-color: rgba(57,229,140,.12);
+}
+.csb-str-row.csb-str--alarm {
+  border-color: rgba(239,159,39,.28);
+  background: rgba(239,159,39,.06);
+}
+.csb-str-row.csb-str--nodata {
+  opacity: .55;
+}
+.csb-str-row.csb-str--disabled {
+  opacity: .38;
+}
+
+.csb-str-idx {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  color: rgba(205,238,221,.6);
+  text-align: center;
+}
+
+.csb-str--ok    .csb-str-idx { color: rgba(57,229,140,.75); }
+.csb-str--alarm .csb-str-idx { color: rgba(239,159,39,.9); }
+
+.csb-str-bar-wrap {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,.07);
+  overflow: hidden;
+  position: relative;
+}
+
+.csb-str-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(57,229,140,.85), rgba(118,255,178,.65));
+  transition: width 0.5s ease;
+}
+
+.csb-str--alarm  .csb-str-bar { background: linear-gradient(90deg, rgba(239,159,39,.9), rgba(255,190,70,.65)); }
+.csb-str--nodata .csb-str-bar { background: rgba(120,140,130,.3); }
+
+.csb-str-amp {
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  color: rgba(205,238,221,.85);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.csb-str-volt {
+  font-size: 9.5px;
+  font-family: var(--font-mono, monospace);
+  color: rgba(205,238,221,.48);
+  white-space: nowrap;
+}
+
+.csb-str-status {
+  font-size: 9.5px;
+  color: rgba(205,238,221,.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.csb-str--ok    .csb-str-status { color: rgba(57,229,140,.65); }
+.csb-str--alarm .csb-str-status { color: rgba(239,159,39,.9); font-weight: 600; }
+
+/* Empty state */
+.csb-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(205,238,221,.38);
+}
+
+/* When balloon has voltage column — optional 5-col layout */
+.csb-str-row:has(.csb-str-volt) {
+  grid-template-columns: 28px 1fr 52px 42px 1fr;
+}
+.csb-col-labels:has(+ .csb-strings-grid .csb-str-volt) {
+  grid-template-columns: 28px 1fr 52px 42px 1fr;
+}
+
+@media (max-width: 600px) {
+  .csb-balloon {
+    width: calc(100vw - 24px) !important;
+    left: 12px !important;
+    right: 12px;
+    top: auto !important;
+    bottom: 12px;
+    max-height: 70vh;
+    border-radius: 16px 16px 12px 12px;
+  }
+  .csb-balloon::before,
+  .csb-balloon::after { display: none; }
+}
+
+/* =========================================================
+   MODO UNIFILAR — SINGLE LINE DIAGRAM
+========================================================= */
+
+/* Estrutura principal */
+.unifilar-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  background: rgba(4,8,16,.6);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* ── Barra de ferramentas (toolbar) ── */
+.unif-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(4,8,16,.8);
+  border-bottom: 1px solid rgba(127,208,85,.1);
+  flex-shrink: 0;
+}
+
+.unif-mode-btns {
+  display: flex;
+  gap: 2px;
+  background: rgba(0,0,0,.35);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.unif-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-display);
+  letter-spacing: .04em;
+  color: rgba(127,208,85,.6);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.unif-mode-btn:hover { background: rgba(127,208,85,.08); color: rgba(127,208,85,.9); }
+.unif-mode-btn.is-active {
+  background: rgba(127,208,85,.15);
+  color: var(--neon);
+  box-shadow: 0 0 0 1px rgba(127,208,85,.25);
+}
+
+/* Navegação de cabines */
+.unif-cabin-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+.unif-nav-arr {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(127,208,85,.3);
+  background: rgba(127,208,85,.07);
+  color: var(--neon);
+  cursor: pointer;
+  transition: background .2s, border-color .2s, transform .15s;
+}
+.unif-nav-arr:hover {
+  background: rgba(127,208,85,.18);
+  border-color: rgba(127,208,85,.6);
+  transform: scale(1.1);
+}
+.unif-nav-arr:active { transform: scale(.95); }
+.unif-cabin-nav-label {
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--neon);
+  letter-spacing: .05em;
+  min-width: 120px;
+  text-align: center;
+}
+
+/* Legenda */
+.unif-legend { display: flex; gap: 14px; flex-shrink: 0; }
+.unif-leg-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(205,238,221,.55); }
+.unif-leg-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.unif-leg-dot--online  { background: #7fd055; box-shadow: 0 0 5px rgba(127,208,85,.8); }
+.unif-leg-dot--alarm   { background: #ef9f27; box-shadow: 0 0 5px rgba(239,159,39,.8); }
+.unif-leg-dot--offline { background: rgba(100,120,110,.5); border: 1px solid rgba(100,120,110,.3); }
+
+/* ── Conteúdo principal: diagrama + painel lateral ── */
+.unif-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Área do diagrama ── */
+.unif-stage-wrap {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── OVERVIEW: planta inteira ── */
+.unif-overview {
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: 24px 28px;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127,208,85,.25) transparent;
+}
+
+.unif-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  width: 100%;
+  min-height: 100%;
+}
+
+/* Strip de labels de seção */
+.unif-sec-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
+  align-items: flex-end;
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(127,208,85,.08);
+  min-width: 0;
+  width: 100%;
+}
+.unif-sec-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: rgba(127,208,85,.55);
+  font-family: var(--font-display);
+  flex-shrink: 0;
+}
+.unif-sec-lbl--gen  { min-width: 0; }
+.unif-sec-lbl--cc   { display: none; min-width: 90px; margin-left: 0; }
+.unif-sec-lbl--trafo{ min-width: 110px; margin-left: 0; }
+.unif-sec-lbl--qgbt { display: none; min-width: 110px; margin-left: 0; }
+
+/* Fluxo horizontal principal */
+.unif-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 20px 0 12px;
+  min-width: 0;
+  width: 100%;
+  flex: 1;
+}
+
+/* Seção de geração: cabines + bus vertical */
+.unif-gen-section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 42px;
+  align-items: start;
+  justify-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  align-self: stretch;
+}
+
+.unif-cabins {
+  --unif-cluster-gap-x: 12px;
+  --unif-cluster-gap-y: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--unif-cluster-gap-y) var(--unif-cluster-gap-x);
+  min-width: 0;
+  width: 100%;
+  max-width: 1780px;
+  margin: 0 auto;
+  padding: 26px 28px 34px;
+  border: 1px solid rgba(127,208,85,.24);
+  border-radius: 14px;
+  background:
+    radial-gradient(720px 160px at 50% 0%, rgba(127,208,85,.055), transparent 72%),
+    linear-gradient(180deg, rgba(4,12,9,.42), rgba(3,8,12,.28));
+  box-shadow:
+    inset 0 0 0 1px rgba(127,208,85,.055),
+    0 0 24px rgba(127,208,85,.045);
+  position: relative;
+  overflow: visible;
+  isolation: isolate;
+}
+
+.unif-cabins::before {
+  content: '';
+  position: absolute;
+  inset: 18px 22px 22px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .58;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--unif-cabin-min, 156px) - 10px),
+      rgba(127,208,85,.22) calc(var(--unif-cabin-min, 156px) - 10px),
+      rgba(127,208,85,.22) calc(var(--unif-cabin-min, 156px) - 8px),
+      transparent calc(var(--unif-cabin-min, 156px) - 8px),
+      transparent calc(var(--unif-cabin-min, 156px) + var(--unif-cluster-gap-x))
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 78px,
+      rgba(127,208,85,.16) 78px,
+      rgba(127,208,85,.16) 80px,
+      transparent 80px,
+      transparent 126px
     );
-    if (!map.has(key)) map.set(key, alarm);
-  });
-  return Array.from(map.values());
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 0%, #000 72%, transparent 100%);
+  mask-image: radial-gradient(ellipse at center, #000 0%, #000 72%, transparent 100%);
+  animation: unifClusterWebFlow 7s linear infinite;
 }
 
-function hasActivePlantAlarms() {
-  return Array.isArray(ACTIVE_ALARMS) && ACTIVE_ALARMS.length > 0;
-}
-
-const DEVICE_COMMAND_STATE = new Map();
-let DEVICE_COMMAND_MENU_OPEN_KEY = null;
-
-function getDeviceKey(deviceType, deviceId) {
-  return `${String(deviceType || "")}:${String(deviceId ?? "")}`;
-}
-
-function getDevicePersistentState(deviceType, deviceId, fallback = "off") {
-  return DEVICE_COMMAND_STATE.get(getDeviceKey(deviceType, deviceId)) || fallback;
-}
-
-function setDevicePersistentState(deviceType, deviceId, state) {
-  if (state !== "on" && state !== "off") return;
-  DEVICE_COMMAND_STATE.set(getDeviceKey(deviceType, deviceId), state);
-}
-
-function isTruthyFlag(value) {
-  if (value === true) return true;
-  if (value === false || value == null) return false;
-  const s = String(value).trim().toLowerCase();
-  return ["1", "true", "on", "online", "yes", "y", "sim"].includes(s);
-}
-
-function isFalsyFlag(value) {
-  if (value === false) return true;
-  if (value === true || value == null) return false;
-  const s = String(value).trim().toLowerCase();
-  return ["0", "false", "off", "offline", "no", "n", "nao", "não"].includes(s);
-}
-
-function normalizeCommunicationFault(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(String(value).replace(",", ".").trim());
-  return Number.isFinite(n) ? n : null;
-}
-
-function commFaultMeansOnline(value) {
-  const n = normalizeCommunicationFault(value);
-  if (n === null) return null;
-  if (n === 192) return true;
-  if (n === 28) return false;
-  return null;
-}
-
-function relayOnlineFromPayload(relayItem) {
-  const eventRaw = relayItem?.event?.raw ?? {};
-
-  const commCandidates = [
-    relayItem?.communication_fault,
-    relayItem?.event?.communication_fault,
-    eventRaw?.communication_fault
-  ];
-
-  for (const c of commCandidates) {
-    const commDecision = commFaultMeansOnline(c);
-    if (commDecision !== null) return commDecision;
-  }
-
-  const statusCandidates = [
-    relayItem?.is_online,
-    relayItem?.online,
-    relayItem?.isOnline,
-    relayItem?.event?.is_online,
-    eventRaw?.is_online,
-    eventRaw?.online,
-    eventRaw?.status_online
-  ];
-
-  for (const candidate of statusCandidates) {
-    if (isTruthyFlag(candidate)) return true;
-    if (isFalsyFlag(candidate)) return false;
-  }
-
-  return false;
-}
-
-function relayStateFromPayload(relayItem) {
-  if (!relayItem) return "off";
-
-  if (relayItem?.relay_on === true) return "on";
-  if (relayItem?.relay_on === false) return "off";
-
-  const eventRaw = relayItem?.event?.raw ?? {};
-  const commCandidates = [
-    relayItem?.communication_fault,
-    relayItem?.event?.communication_fault,
-    eventRaw?.communication_fault,
-    relayItem?.analog?.communication_fault
-  ];
-
-  for (const c of commCandidates) {
-    const decision = commFaultMeansOnline(c);
-    if (decision === true) return "on";
-    if (decision === false) return "off";
-  }
-
-  if (relayItem?.is_online === true || relayItem?.online === true) return "on";
-  if (relayItem?.is_online === false || relayItem?.online === false) return "off";
-
-  return "off";
-}
-
-function multimeterOnlineFromPayload(item) {
-  const analog = item?.analog ?? {};
-  const data = item?.data ?? {};
-
-  const commCandidates = [
-    item?.communication_fault,
-    analog?.communication_fault,
-    data?.communication_fault
-  ];
-
-  for (const c of commCandidates) {
-    const commDecision = commFaultMeansOnline(c);
-    if (commDecision !== null) return commDecision;
-  }
-
-  const statusCandidates = [
-    item?.is_online,
-    item?.online,
-    item?.isOnline,
-    item?.status_online,
-    analog?.is_online,
-    data?.is_online
-  ];
-
-  for (const candidate of statusCandidates) {
-    if (isTruthyFlag(candidate)) return true;
-    if (isFalsyFlag(candidate)) return false;
-  }
-
-  return false;
-}
-
-function renderDeviceCommandControl(deviceType, deviceId, currentState = "off") {
-  const safeType = String(deviceType || "");
-  const safeId = String(deviceId ?? "");
-  const state = getDevicePersistentState(safeType, safeId, currentState);
-  const stateClass = state === "on" ? "is-on" : "is-off";
-  const key = getDeviceKey(safeType, safeId);
-  return `
-    <div class="device-command-control ${stateClass}" data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}">
-      <button type="button" class="device-command-trigger" data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}" aria-label="Comandos do dispositivo">
-        <span class="device-command-switch" aria-hidden="true">
-          <svg class="device-command-switch-track" viewBox="0 0 72 40" preserveAspectRatio="none" focusable="false" aria-hidden="true">
-            <rect class="device-command-switch-track__outer" x="2" y="4" width="68" height="32" rx="16"></rect>
-            <rect class="device-command-switch-track__inner" x="4.5" y="6.5" width="63" height="27" rx="13.5"></rect>
-            <path class="device-command-switch-track__pulse" d="M14 21h10l4-6 6 12 5-8h18"></path>
-          </svg>
-          <span class="device-command-switch-thumb">
-            <svg class="device-command-switch-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-              <use href="#device-command-switch-glyph"></use>
-            </svg>
-          </span>
-        </span>
-      </button>
-      <div class="device-command-popover" data-device-key="${key}">
-        <button type="button" class="device-command-option device-command-option--on" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="on"><span class="dot"></span><span>ON</span></button>
-        <button type="button" class="device-command-option device-command-option--off" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="off"><span class="dot"></span><span>OFF</span></button>
-        <button type="button" class="device-command-option device-command-option--reset" data-device-type="${safeType}" data-device-id="${safeId}" data-device-key="${key}" data-action="reset"><span class="dot"></span><span>RESET</span></button>
-      </div>
-    </div>
-  `;
-}
-
-function applyDeviceVisualState(deviceType, deviceId, state) {
-  const key = getDeviceKey(deviceType, deviceId);
-  document.querySelectorAll(`.device-command-control[data-device-key="${key}"]`).forEach((el) => {
-    el.classList.remove("is-on", "is-off", "is-reset-flash");
-    el.classList.add(state === "on" ? "is-on" : "is-off");
-  });
-}
-
-function closeAllDeviceCommandMenus() {
-  DEVICE_COMMAND_MENU_OPEN_KEY = null;
-  document.querySelectorAll(".device-command-control.is-open").forEach((el) => {
-    el.classList.remove("is-open");
-  });
-}
-
-function ensureDeviceCommandModals() {
-  if (document.getElementById("deviceCommandAuthModal")) return;
-  const wrap = document.createElement("div");
-  wrap.innerHTML = `
-    <div id="deviceCommandAuthModal" class="device-command-modal hidden">
-      <div class="device-command-modal-card">
-        <h3>Autenticação</h3>
-        <p id="deviceCommandAuthLabel">Confirme usuário e senha</p>
-        <input id="deviceCommandUser" type="text" placeholder="Usuário" />
-        <input id="deviceCommandPass" type="password" placeholder="Senha" />
-        <div class="device-command-modal-actions">
-          <button id="deviceCommandCancelBtn" type="button">Cancelar</button>
-          <button id="deviceCommandConfirmBtn" type="button">Confirmar</button>
-        </div>
-      </div>
-    </div>
-    <div id="deviceCommandRunModal" class="device-command-modal hidden">
-      <div class="device-command-modal-card">
-        <h3 id="deviceCommandRunTitle">Executando comando</h3>
-        <p id="deviceCommandRunSub">Processando...</p>
-        <div class="device-command-progress-wrap"><div id="deviceCommandProgressBar"></div></div>
-        <div id="deviceCommandProgressPct">0%</div>
-        <p id="deviceCommandRunResult"></p>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(wrap);
-}
-
-function ensureCommandConsoleModal() {
-  if (document.getElementById("cmdConsoleOverlay")) return;
-  const el = document.createElement("div");
-  el.innerHTML = `
-    <div id="cmdConsoleOverlay" class="cmd-console-overlay hidden" role="dialog" aria-modal="true" aria-label="Console de Comandos">
-      <div class="cmd-console">
-        <div class="cmd-console__header">
-          <div class="cmd-console__title-group">
-            <div class="cmd-console__icon"><i class="fa-solid fa-terminal"></i></div>
-            <div>
-              <div class="cmd-console__label">Console de Comandos</div>
-              <div class="cmd-console__device-name" id="cmdConsoleDeviceName">—</div>
-            </div>
-          </div>
-          <button class="cmd-console__close" id="cmdConsoleClose" aria-label="Fechar console">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-
-        <div class="cmd-console__state-row">
-          <span class="cmd-console__state-dot is-unknown" id="cmdConsoleStateDot"></span>
-          <span class="cmd-console__state-text" id="cmdConsoleStateText">Estado desconhecido</span>
-        </div>
-
-        <div class="cmd-console__cmds">
-          <button class="cmd-console__cmd cmd-console__cmd--on" id="cmdConsoleBtnOn">
-            <i class="fa-solid fa-power-off"></i>
-            <span class="cmd-console__cmd-label">ON</span>
-            <span class="cmd-console__cmd-desc">Ligar equipamento</span>
-          </button>
-          <button class="cmd-console__cmd cmd-console__cmd--off" id="cmdConsoleBtnOff">
-            <i class="fa-solid fa-stop"></i>
-            <span class="cmd-console__cmd-label">OFF</span>
-            <span class="cmd-console__cmd-desc">Desligar equipamento</span>
-          </button>
-          <button class="cmd-console__cmd cmd-console__cmd--reset" id="cmdConsoleBtnReset">
-            <i class="fa-solid fa-rotate"></i>
-            <span class="cmd-console__cmd-label">RESET</span>
-            <span class="cmd-console__cmd-desc">Reiniciar equipamento</span>
-          </button>
-        </div>
-
-        <!-- Setar potência -->
-        <div class="cmd-console__power-section">
-          <div class="cmd-console__power-label">
-            <i class="fa-solid fa-sliders"></i>
-            Setar Potência Ativa
-          </div>
-          <div class="cmd-console__power-row">
-            <input
-              id="cmdConsolePowerInput"
-              class="cmd-console__power-input"
-              type="number"
-              min="0"
-              step="0.1"
-              placeholder="kW"
-              aria-label="Potência em kW"
-            />
-            <span class="cmd-console__power-unit">kW</span>
-            <button class="cmd-console__power-btn" id="cmdConsoleBtnSetPower">
-              <i class="fa-solid fa-paper-plane"></i>
-              Setar
-            </button>
-          </div>
-        </div>
-
-        <!-- Feedback de execução -->
-        <div class="cmd-console__feedback hidden" id="cmdConsoleFeedback">
-          <div class="cmd-console__feedback-inner">
-            <span class="cmd-console__feedback-icon" id="cmdConsoleFeedbackIcon"></span>
-            <span class="cmd-console__feedback-text" id="cmdConsoleFeedbackText"></span>
-          </div>
-        </div>
-
-        <!-- Alarmes do dispositivo -->
-        <div class="cmd-console__alarms-section">
-          <div class="cmd-console__alarms-title">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            Alarmes do dispositivo
-          </div>
-          <div id="cmdConsoleAlarmList" class="cmd-console__alarm-list">
-            <div class="cmd-console__alarm-empty">Nenhum alarme ativo</div>
-          </div>
-        </div>
-
-        <div class="cmd-console__footer">
-          <i class="fa-solid fa-lock"></i>
-          Todos os comandos requerem autenticação antes de serem executados.
-        </div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(el);
-
-  document.getElementById("cmdConsoleOverlay").addEventListener("click", (e) => {
-    if (e.target === e.currentTarget) closeCommandConsole();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeCommandConsole();
-  });
-  document.getElementById("cmdConsoleClose").addEventListener("click", closeCommandConsole);
-}
-
-function openCommandConsole({ deviceType, deviceId }) {
-  ensureCommandConsoleModal();
-  ensureDeviceCommandModals();
-
-  const overlay   = document.getElementById("cmdConsoleOverlay");
-  const nameEl    = document.getElementById("cmdConsoleDeviceName");
-  const dotEl     = document.getElementById("cmdConsoleStateDot");
-  const textEl    = document.getElementById("cmdConsoleStateText");
-  const feedbackEl= document.getElementById("cmdConsoleFeedback");
-  const alarmList = document.getElementById("cmdConsoleAlarmList");
-  if (!overlay) return;
-
-  const typeLabel = String(deviceType || "").toUpperCase();
-  nameEl.textContent = `${typeLabel} — ID ${deviceId}`;
-
-  const state = getDevicePersistentState(deviceType, deviceId, "off");
-  dotEl.className = "cmd-console__state-dot " + (state === "on" ? "is-on" : "is-off");
-  textEl.textContent = state === "on" ? "ESTADO ATUAL: LIGADO" : "ESTADO ATUAL: DESLIGADO";
-
-  // Limpa feedback anterior
-  if (feedbackEl) feedbackEl.classList.add("hidden");
-
-  // Alarmes filtrados para este dispositivo
-  if (alarmList) {
-    const deviceAlarms = Array.isArray(ACTIVE_ALARMS)
-      ? ACTIVE_ALARMS.filter(a => {
-          const aid = String(a?.device_id ?? a?.deviceId ?? "");
-          return aid && aid === String(deviceId);
-        })
-      : [];
-    if (deviceAlarms.length === 0) {
-      alarmList.innerHTML = `<div class="cmd-console__alarm-empty">Nenhum alarme ativo</div>`;
-    } else {
-      alarmList.innerHTML = deviceAlarms.map(a => {
-        const msg = a.event_name
-          || (a.event_code != null ? `Evento ${a.event_code}` : null)
-          || a.message || a.description || a.alarm_message
-          || "Alarme sem descrição";
-        const ts = a.started_at ?? a.timestamp ?? a.created_at ?? null;
-        const timeStr = ts
-          ? new Date(ts).toLocaleString("pt-BR", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })
-          : "—";
-        const devLabel = a.device_name ? ` · ${a.device_name}` : "";
-        return `
-        <div class="cmd-console__alarm-item" title="${msg}">
-          <span class="cmd-console__alarm-dot"></span>
-          <span class="cmd-console__alarm-msg">${msg}${devLabel}</span>
-          <span class="cmd-console__alarm-time">${timeStr}</span>
-        </div>`;
-      }).join("");
-    }
-  }
-
-  // Reclona botões para limpar handlers anteriores
-  ["cmdConsoleBtnOn", "cmdConsoleBtnOff", "cmdConsoleBtnReset", "cmdConsoleBtnSetPower"].forEach(id => {
-    const btn = document.getElementById(id);
-    if (btn) { const c = btn.cloneNode(true); btn.parentNode.replaceChild(c, btn); }
-  });
-
-  // Limpa input de potência
-  const pwrInput = document.getElementById("cmdConsolePowerInput");
-  if (pwrInput) pwrInput.value = "";
-
-  const dispatch = (action, value) => {
-    closeCommandConsole();
-    openCommandAuthFlow({ deviceType, deviceId, action, value });
-  };
-  document.getElementById("cmdConsoleBtnOn").addEventListener("click",    () => dispatch("on"));
-  document.getElementById("cmdConsoleBtnOff").addEventListener("click",   () => dispatch("off"));
-  document.getElementById("cmdConsoleBtnReset").addEventListener("click", () => dispatch("reset"));
-  document.getElementById("cmdConsoleBtnSetPower").addEventListener("click", () => {
-    const input = document.getElementById("cmdConsolePowerInput");
-    const val = input ? parseFloat(input.value) : NaN;
-    if (isNaN(val) || val < 0) {
-      if (input) input.focus();
-      return;
-    }
-    dispatch("set_power", val);
-  });
-
-  overlay.classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-}
-
-function closeCommandConsole() {
-  const overlay = document.getElementById("cmdConsoleOverlay");
-  if (overlay) overlay.classList.add("hidden");
-  document.body.style.overflow = "";
-}
-
-function openCommandAuthFlow({ deviceType, deviceId, action, value }) {
-  ensureDeviceCommandModals();
-  const auth       = document.getElementById("deviceCommandAuthModal");
-  const authLabel  = document.getElementById("deviceCommandAuthLabel");
-  const cancelBtn  = document.getElementById("deviceCommandCancelBtn");
-  const confirmBtn = document.getElementById("deviceCommandConfirmBtn");
-  const userInput  = document.getElementById("deviceCommandUser");
-  const passInput  = document.getElementById("deviceCommandPass");
-  if (!auth || !confirmBtn || !cancelBtn || !userInput || !passInput) return;
-
-  // Limpa campos e mostra modal de autenticação
-  userInput.value = "";
-  passInput.value = "";
-  const actionLabel = action === "set_power"
-    ? `SET POWER → ${value} kW`
-    : action.toUpperCase();
-  authLabel.textContent = `${String(deviceType).toUpperCase()} ${deviceId} • ${actionLabel}`;
-  auth.classList.remove("hidden");
-
-  const closeAuth = () => auth.classList.add("hidden");
-  cancelBtn.onclick = closeAuth;
-
-  // Função auxiliar para exibir feedback no console (reabre se fechado)
-  function showConsoleFeedback({ success, message }) {
-    ensureCommandConsoleModal();
-    const overlay     = document.getElementById("cmdConsoleOverlay");
-    const feedbackEl  = document.getElementById("cmdConsoleFeedback");
-    const iconEl      = document.getElementById("cmdConsoleFeedbackIcon");
-    const textEl      = document.getElementById("cmdConsoleFeedbackText");
-    const nameEl      = document.getElementById("cmdConsoleDeviceName");
-    const dotEl       = document.getElementById("cmdConsoleStateDot");
-    const stateTextEl = document.getElementById("cmdConsoleStateText");
-
-    if (overlay) { overlay.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
-    if (nameEl) nameEl.textContent = `${String(deviceType).toUpperCase()} — ID ${deviceId}`;
-
-    // Atualiza estado visual se bem-sucedido
-    if (success && (action === "on" || action === "off")) {
-      setDevicePersistentState(deviceType, deviceId, action);
-      applyDeviceVisualState(deviceType, deviceId, action);
-      if (dotEl) dotEl.className = "cmd-console__state-dot " + (action === "on" ? "is-on" : "is-off");
-      if (stateTextEl) stateTextEl.textContent = `ESTADO ATUAL: ${action === "on" ? "LIGADO" : "DESLIGADO"}`;
-    }
-
-    if (feedbackEl && iconEl && textEl) {
-      feedbackEl.classList.remove("hidden", "is-success", "is-error");
-      feedbackEl.classList.add(success ? "is-success" : "is-error");
-      iconEl.innerHTML = success
-        ? `<i class="fa-solid fa-circle-check"></i>`
-        : `<i class="fa-solid fa-circle-xmark"></i>`;
-      textEl.textContent = message;
-    }
-  }
-
-  confirmBtn.onclick = async () => {
-    const username = userInput.value.trim();
-    const password = passInput.value;
-
-    if (!username || !password) {
-      authLabel.textContent = "Preencha usuário e senha.";
-      return;
-    }
-
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Aguarde...";
-
-    try {
-      if (!PLANT_ID) throw new Error("plant_id não encontrado na URL");
-
-      const headers = buildAuthHeaders(); // X-Customer-Id + X-Is-Superuser
-      const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/devices/${deviceId}/command`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action,
-          username,
-          password,
-          requested_by: username,
-          ...(action === "set_power" && value != null ? { value } : {}),
-        }),
-      });
-
-      let data = {};
-      try { data = await res.json(); } catch (_) {}
-
-      closeAuth();
-
-      if (res.ok && data.ok) {
-        const successMsg = action === "set_power"
-          ? `Potência setada para ${value} kW com sucesso.`
-          : `Comando ${action.toUpperCase()} enviado com sucesso.`;
-        showConsoleFeedback({ success: true, message: successMsg });
-      } else {
-        const errMsg = data.error
-          || (res.status === 401 ? "Credenciais inválidas." : `Falha ao executar comando. (${res.status})`)
-        showConsoleFeedback({ success: false, message: errMsg });
-      }
-    } catch (err) {
-      closeAuth();
-      showConsoleFeedback({ success: false, message: `Erro: ${err.message}` });
-    } finally {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirmar";
-    }
-  };
-}
-
-function wireDeviceCommandButtons(rootEl) {
-  if (!rootEl) return;
-  rootEl.querySelectorAll(".device-command-trigger").forEach((btn) => {
-    if (btn.dataset.wiredCmdTrigger === "true") return;
-    btn.dataset.wiredCmdTrigger = "true";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      closeAllDeviceCommandMenus();
-      openCommandConsole({
-        deviceType: btn.dataset.deviceType || "",
-        deviceId: btn.dataset.deviceId || "",
-      });
-    });
-  });
-
-  rootEl.querySelectorAll(".device-command-option").forEach((btn) => {
-    if (btn.dataset.wiredCmdOption === "true") return;
-    btn.dataset.wiredCmdOption = "true";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const deviceType = btn.dataset.deviceType || "";
-      const deviceId = btn.dataset.deviceId || "";
-      const action = btn.dataset.action || "";
-      closeAllDeviceCommandMenus();
-      openCommandAuthFlow({ deviceType, deviceId, action });
-    });
-  });
-}
-
-function renderAlarmMenuButton() {
-  const btn = document.getElementById("plantAlarmMenuButton");
-  const count = document.getElementById("plantAlarmMenuCount");
-  const panel = document.getElementById("plantAlarmMenuPanel");
-  const empty = document.getElementById("plantAlarmMenuEmptyState");
-  const icon = btn?.querySelector(".plant-alarm-menu-icon");
-
-  if (!btn) return;
-
-  const hasAlarms = hasActivePlantAlarms();
-
-  btn.classList.toggle("is-clean", !hasAlarms);
-  btn.classList.toggle("is-alert", hasAlarms);
-  btn.setAttribute("aria-expanded", PLANT_ALARMS_MENU_OPEN ? "true" : "false");
-
-  if (count) {
-    count.textContent = String(ACTIVE_ALARMS.length || 0);
-    count.style.display = hasAlarms ? "inline-flex" : "none";
-  }
-
-  if (icon) {
-    icon.innerHTML = hasAlarms
-      ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`
-      : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12.5l4 4 8-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
-  }
-
-  if (panel) {
-    panel.classList.toggle("open", PLANT_ALARMS_MENU_OPEN);
-  }
-
-  if (empty) {
-    empty.style.display = hasAlarms ? "none" : "";
-  }
-}
-
-function setPlantAlarmMenuOpen(open) {
-  PLANT_ALARMS_MENU_OPEN = !!open;
-  renderAlarmMenuButton();
-}
-
-function setupPlantAlarmMenu() {
-  const btn = document.getElementById("plantAlarmMenuButton");
-  const panel = document.getElementById("plantAlarmMenuPanel");
-  const closeBtn = document.getElementById("plantAlarmMenuClose");
-
-  if (!btn || !panel) return;
-  if (btn.dataset.wiredAlarmMenu === "true") return;
-  btn.dataset.wiredAlarmMenu = "true";
-
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setPlantAlarmMenuOpen(!PLANT_ALARMS_MENU_OPEN);
-  });
-
-  panel.addEventListener("click", (e) => {
-    e.stopPropagation();
-  });
-
-  closeBtn?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setPlantAlarmMenuOpen(false);
-  });
-
-  document.addEventListener("click", () => {
-    if (PLANT_ALARMS_MENU_OPEN) setPlantAlarmMenuOpen(false);
-  });
-
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && PLANT_ALARMS_MENU_OPEN) {
-      setPlantAlarmMenuOpen(false);
-    }
-  });
-}
-
-function sortPlantAlarmsDesc(alarms) {
-  return (Array.isArray(alarms) ? alarms : []).slice().sort((a, b) => {
-    const ta = Date.parse(a?.started_at ?? a?.timestamp ?? "") || 0;
-    const tb = Date.parse(b?.started_at ?? b?.timestamp ?? "") || 0;
-    return tb - ta;
-  });
-}
-
-function getUserContext() {
-  try {
-    const user = JSON.parse(localStorage.getItem("user"));
-    return {
-      customer_id: user?.customer_id ?? null,
-      is_superuser: user?.is_superuser ?? false
-    };
-  } catch {
-    return { customer_id: null, is_superuser: false };
-  }
-}
-
-function buildAuthHeaders() {
-  const ctx = getUserContext();
-  const headers = { "Content-Type": "application/json" };
-  if (ctx.customer_id) headers["X-Customer-Id"] = ctx.customer_id;
-  if (ctx.is_superuser) headers["X-Is-Superuser"] = "true";
-  return headers;
-}
-
-// ======================================================
-// ✅ PREFERÊNCIAS — STRINGS DESABILITADAS (LOCALSTORAGE)
-// ======================================================
-function getPrefKey() {
-  const ctx = getUserContext();
-  const customer = ctx.customer_id ?? "anon";
-  return `scada:strings_disabled:${customer}:${PLANT_ID}`;
-}
-
-function readDisabledPrefs() {
-  try {
-    return JSON.parse(localStorage.getItem(getPrefKey())) || {};
-  } catch {
-    return {};
-  }
-}
-
-function isDisabledPref(inverterRealId, stringIndex) {
-  const prefs = readDisabledPrefs();
-  return !!prefs?.[String(inverterRealId)]?.[String(stringIndex)];
-}
-
-function setDisabledPref(inverterRealId, stringIndex, disabled) {
-  const prefs = readDisabledPrefs();
-  const invKey = String(inverterRealId);
-  const sKey = String(stringIndex);
-
-  prefs[invKey] = prefs[invKey] || {};
-  if (disabled) prefs[invKey][sKey] = true;
-  else delete prefs[invKey][sKey];
-
-  localStorage.setItem(getPrefKey(), JSON.stringify(prefs));
-}
-
-// ======================================================
-// FETCH — TEMPO REAL, WEATHER, ALARMES, ENERGIA
-// ======================================================
-async function fetchPlantRealtime(plantId) {
-  const res = await fetch(`${API_BASE}/plants/${plantId}/realtime`, {
-    headers: buildAuthHeaders()
-  });
-  const data = await res.json();
-  return normalizeApiBody(data);
-}
-
-async function fetchActiveAlarms(plantId) {
-  const res = await fetch(`${API_BASE}/plants/${plantId}/alarms/active`, {
-    headers: buildAuthHeaders()
-  });
-  const data = normalizeApiBody(await res.json());
-  const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
-  const normalized = items.map((alarm) => ({
-    ...alarm,
-    state: normalizeAlarmState(alarm?.state ?? alarm?.alarm_state ?? alarm?.status),
-    severity: normalizeAlarmSeverity(alarm?.severity ?? alarm?.alarm_severity ?? alarm?.level)
-  }));
-  return sortPlantAlarmsDesc(
-    dedupePlantAlarms(
-      normalized.filter((alarm) => alarm.state === "ACTIVE" && alarm.acknowledged !== true)
-    )
+.unif-cabins::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: min(520px, 58%);
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(127,208,85,.85) 20%,
+    rgba(127,208,85,.95) 50%,
+    rgba(127,208,85,.85) 80%,
+    transparent
   );
+  box-shadow: 0 0 12px rgba(127,208,85,.38);
+  pointer-events: none;
+  z-index: 1;
 }
 
-async function acknowledgePlantAlarm(alarm) {
-  const alarmId = alarm?.alarm_id ?? alarm?.id ?? alarm?.event_row_id;
-  if (!alarmId) throw new Error("alarm_id ausente para ACK");
-
-  const user = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("user")) || {};
-    } catch {
-      return {};
-    }
-  })();
-
-  const response = await fetch(`${API_BASE}/alarms/${alarmId}/ack`, {
-    method: "POST",
-    headers: buildAuthHeaders(),
-    body: JSON.stringify({
-      event_row_id: alarm?.event_row_id ?? null,
-      power_plant_id: alarm?.power_plant_id ?? alarm?.plant_id ?? PLANT_ID ?? null,
-      acknowledged_by: user?.name ?? user?.email ?? user?.username ?? "frontend",
-      acknowledgment_note: "Reconhecido via operação SCADA"
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(`Falha ao reconhecer alarme (${response.status}): ${errorText}`);
+@keyframes unifClusterWebFlow {
+  0% {
+    background-position: 0 0, 0 0;
+    opacity: .42;
   }
-
-  return true;
-}
-
-async function fetchTrackersRealtime(plantId) {
-  const res = await fetch(`${API_BASE}/plants/${plantId}/trackers/realtime`, {
-    headers: buildAuthHeaders()
-  });
-
-  if (res.status === 404) {
-    console.warn("[trackers/realtime] 404");
-    return { items: [], plant_center: null, plant_bounds: null };
+  45% {
+    opacity: .66;
   }
-
-  if (!res.ok) {
-    console.warn(`[trackers/realtime] HTTP ${res.status}`);
-    return [];
-  }
-
-  const raw = await res.json();
-  const data = normalizeApiBody(raw);
-  if (Array.isArray(data)) return { items: data, plant_center: null, plant_bounds: null };
-  const items =
-    Array.isArray(data?.items) ? data.items :
-    Array.isArray(data?.trackers) ? data.trackers :
-    Array.isArray(data?.item) ? data.item : [];
-  return {
-    items,
-    plant_center: data?.plant_center ?? null,
-    plant_bounds: data?.plant_bounds ?? null
-  };
-}
-
-async function fetchDailyEnergy(plantId) {
-  const res = await fetch(`${API_BASE}/plants/${plantId}/energy/daily`, {
-    headers: buildAuthHeaders()
-  });
-  const data = await res.json();
-  return normalizeApiBody(data);
-}
-
-async function fetchMonthlyEnergy(plantId) {
-  const res = await fetch(`${API_BASE}/plants/${plantId}/energy/monthly`, {
-    headers: buildAuthHeaders()
-  });
-  const data = await res.json();
-  return normalizeApiBody(data);
-}
-
-async function safeFetchRelayIfSupported(plantId) {
-  if (RELAY_SUPPORTED === false) return null;
-
-  const url = `${API_BASE}/plants/${plantId}/relay/realtime`;
-  const res = await fetch(url, { headers: buildAuthHeaders() });
-
-  if (res.status === 404) {
-    RELAY_SUPPORTED = false;
-    return null;
-  }
-
-  if (!res.ok) {
-    console.warn(`[relay/realtime] HTTP ${res.status} em ${url}`);
-    return null;
-  }
-
-  RELAY_SUPPORTED = true;
-  const payload = normalizeApiBody(await res.json());
-  return payload?.item ?? null;
-}
-
-async function safeFetchMultimeterIfSupported(plantId) {
-  if (MULTIMETER_SUPPORTED === false) return null;
-
-  const url = `${API_BASE}/plants/${plantId}/multimeter/realtime`;
-  const res = await fetch(url, { headers: buildAuthHeaders() });
-
-  if (res.status === 404) {
-    MULTIMETER_SUPPORTED = false;
-    return null;
-  }
-
-  if (!res.ok) {
-    console.warn(`[multimeter/realtime] HTTP ${res.status} em ${url}`);
-    return null;
-  }
-
-  MULTIMETER_SUPPORTED = true;
-  const payload = normalizeApiBody(await res.json());
-  return payload?.item ?? payload ?? null;
-}
-
-function setRelaySectionVisible(visible) {
-  const relaySection = document.getElementById("relaySection");
-  if (relaySection) relaySection.style.display = visible ? "" : "none";
-  const btn = document.getElementById("navBtnRelay");
-  if (btn) btn.style.display = visible ? "" : "none";
-}
-
-function setMultimeterSectionVisible(visible) {
-  const section = document.getElementById("multimeterSection");
-  if (section) section.style.display = visible ? "" : "none";
-  const btn = document.getElementById("navBtnMultimeter");
-  if (btn) btn.style.display = visible ? "" : "none";
-}
-
-function setTrackersSectionVisible(visible) {
-  const section = document.getElementById("trackersSection");
-  const btn = document.getElementById("trackersMenuToggle");
-  if (!section) return;
-  section.classList.toggle("trackers-hidden", !visible);
-  if (btn) {
-    btn.classList.toggle("on", visible);
-    btn.setAttribute("aria-expanded", visible ? "true" : "false");
-    btn.style.display = visible ? "" : "none";
+  100% {
+    background-position:
+      calc(var(--unif-cabin-min, 156px) + var(--unif-cluster-gap-x)) 0,
+      0 126px;
+    opacity: .42;
   }
 }
 
-function setTrackersCollapsed(collapsed) {
-  const section = document.getElementById("trackersSection");
-  const tabToggleEl = document.getElementById("trackersTabToggle");
-  if (!section) return;
-
-  section.classList.toggle("is-collapsed", !!collapsed);
-
-  if (tabToggleEl) {
-    tabToggleEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
-  }
+/* Bus vertical entre cabines e CC */
+.unif-vbus {
+  width: 24px;
+  height: 42px;
+  min-height: 42px;
+  margin-top: -1px;
+  align-self: start;
+  justify-self: center;
+  position: relative;
+  flex-shrink: 0;
 }
-
-// ✅ realtime por inversor
-async function fetchInvertersRealtime(plantId) {
-  const candidates = [
-    `${API_BASE}/plants/${plantId}/inverters/realtime`,
-    `${API_BASE}/plants/${plantId}/inverters`
-  ];
-
-  for (const url of candidates) {
-    const res = await fetch(url, { headers: buildAuthHeaders() });
-    if (res.ok) {
-      const data = normalizeApiBody(await res.json());
-      return Array.isArray(data) ? data : (data?.items || []);
-    }
-
-    if (res.status === 404) continue;
-    console.warn(`[inverters realtime] HTTP ${res.status} em ${url}`);
-  }
-
-  console.warn("[inverters realtime] nenhum endpoint disponível -> mantendo estático");
-  return [];
-}
-
-// config (enabled/has_data)
-async function fetchInverterStrings(plantId, inverterRealId) {
-  const url = `${API_BASE}/plants/${plantId}/inverters/${inverterRealId}/strings`;
-  const res = await fetch(url, { headers: buildAuthHeaders() });
-
-  if (!res.ok) {
-    console.warn(`[strings] ${res.status} em ${url}`);
-    return null;
-  }
-  return normalizeApiBody(await res.json());
-}
-
-// medida (current_a)
-async function fetchInverterStringsRealtime(plantId, inverterRealId) {
-  const url = `${API_BASE}/plants/${plantId}/inverters/${inverterRealId}/strings/realtime`;
-  const res = await fetch(url, { headers: buildAuthHeaders() });
-
-  if (!res.ok) {
-    console.warn(`[strings/realtime] ${res.status} em ${url}`);
-    return null;
-  }
-  return normalizeApiBody(await res.json());
-}
-
-async function patchInverterString(plantId, inverterRealId, stringIndex, enabled) {
-  const url = `${API_BASE}/plants/${plantId}/inverters/${inverterRealId}/strings/${stringIndex}`;
-  const res = await fetch(url, {
-    method: "PATCH",
-    headers: buildAuthHeaders(),
-    body: JSON.stringify({ enabled })
-  });
-
-  if (!res.ok) {
-    throw new Error(`PATCH string falhou: HTTP ${res.status}`);
-  }
-  return normalizeApiBody(await res.json());
-}
-
-function getInvTsMs(inv) {
-  const iso =
-    inv.last_reading_at ??
-    inv.last_reading_ts ??
-    inv.last_ts ??
-    inv.timestamp ??
-    inv.event_ts ??
-    null;
-
-  const ms = iso ? new Date(iso).getTime() : NaN;
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function parseTsToMs(anyTs) {
-  if (!anyTs) return 0;
-  const ms = Date.parse(anyTs);
-  return Number.isFinite(ms) ? ms : 0;
-}
-
-function dedupInvertersById(list) {
-  const map = new Map();
-
-  for (const inv of (list || [])) {
-    const id = inv.inverter_id ?? inv.device_id ?? inv.id;
-    if (id == null) continue;
-
-    const ts = parseTsToMs(
-      inv.last_ts ??
-      inv.timestamp ??
-      inv.event_ts ??
-      inv.ts ??
-      inv.last_reading_at ??
-      inv.last_reading_ts
-    );
-
-    const prev = map.get(id);
-    const prevTs = prev ? parseTsToMs(
-      prev.last_ts ??
-      prev.timestamp ??
-      prev.event_ts ??
-      prev.ts ??
-      prev.last_reading_at ??
-      prev.last_reading_ts
-    ) : -1;
-
-    if (!prev || ts >= prevTs) map.set(id, inv);
-  }
-
-  return [...map.values()];
-}
-
-function computeInverterChipsByTelemetry(invertersRaw) {
-  const inverters = dedupInvertersById(invertersRaw);
-  const now = Date.now();
-
-  let noComm = 0;
-  let gen = 0;
-  let off = 0;
-
-  for (const inv of inverters) {
-    const lastMs = parseTsToMs(
-      inv.last_ts ??
-      inv.timestamp ??
-      inv.event_ts ??
-      inv.ts ??
-      inv.last_reading_at ??
-      inv.last_reading_ts
-    );
-    const age = lastMs ? (now - lastMs) : Number.POSITIVE_INFINITY;
-
-    if (age > INVERTER_NO_COMM_AFTER_MS) {
-      noComm++;
-      continue;
-    }
-
-    const working =
-      inv.working === true ||
-      inv.status === "working" ||
-      inv.is_working === true;
-
-    if (working) gen++;
-    else off++;
-  }
-
-  const total = inverters.length;
-  gen = Math.min(gen, total);
-  off = Math.min(off, total);
-  noComm = Math.min(noComm, total);
-
-  return { total, gen, off, noComm };
-}
-
-function setChipCount(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = String(value);
-}
-
-function refreshInverterStatusChips(invertersRaw) {
-  const { total, gen, off, noComm } = computeInverterChipsByTelemetry(invertersRaw);
-
-  setChipCount("countGen", gen);
-  setChipCount("countNoComm", noComm);
-  setChipCount("countOff", off);
-
-  console.log("[INV CHIPS]", { plantId: PLANT_ID, total, gen, off, noComm });
-}
-
-function getInverterRealId(inv) {
-  return inv?.device_id ?? inv?.inverter_id ?? inv?.deviceId ?? inv?.id ?? null;
-}
-
-function getInverterDisplayName(inv, fallbackIndex = 0) {
-  return (
-    inv?.device_name ??
-    inv?.inverter_name ??
-    inv?.name ??
-    `Inversor ${fallbackIndex + 1}`
+.unif-vbus::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2.5px;
+  transform: translateX(-50%);
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(127,208,85,.9) 10%,
+    rgba(127,208,85,.9) 90%,
+    transparent
   );
+  box-shadow: 0 0 10px rgba(127,208,85,.5);
+}
+.unif-vbus::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -8px;
+  width: 6px;
+  height: 8px;
+  border-radius: 3px;
+  transform: translateX(-50%);
+  background: rgba(127,208,85,.95);
+  box-shadow: 0 0 12px rgba(127,208,85,.9);
+  animation: vbusFlow 2.8s linear infinite;
+}
+@keyframes vbusFlow {
+  0%   { top: -8px; opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
 }
 
-function getInverterSvgModern() {
-  return `
-    <svg class="inv-icon" viewBox="0 0 140 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <defs>
-        <linearGradient id="invS" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="rgba(255,255,255,0.35)"/>
-          <stop offset="1" stop-color="rgba(255,255,255,0.10)"/>
-        </linearGradient>
-        <filter id="invSoft" x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="rgba(0,0,0,0.55)"/>
-        </filter>
-      </defs>
-
-      <g filter="url(#invSoft)">
-        <rect x="18" y="18" width="104" height="104" rx="18"
-              fill="rgba(0,0,0,0)"
-              stroke="url(#invS)" stroke-width="3"/>
-      </g>
-
-      <path d="M42 88 H78" stroke="rgba(233,255,243,0.62)" stroke-width="4" stroke-linecap="round"/>
-      <path d="M42 98 H78" stroke="rgba(233,255,243,0.35)" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 7"/>
-
-      <path d="M74 56
-               C80 42, 88 42, 94 56
-               C100 70, 108 70, 114 56"
-            fill="none" stroke="rgba(233,255,243,0.62)" stroke-width="4"
-            stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>
-  `;
+/* Cabine box */
+.unif-cabin-box {
+  --unif-cabin-card-height: 118px;
+  background: rgba(6,14,22,.9);
+  border: 1px solid rgba(127,208,85,.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color .25s, box-shadow .25s;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  box-sizing: border-box;
+  width: var(--unif-cabin-min, 156px);
+  min-width: var(--unif-cabin-min, 156px);
+  max-width: var(--unif-cabin-min, 156px);
+  height: var(--unif-cabin-card-height);
+  min-height: var(--unif-cabin-card-height);
+  max-height: var(--unif-cabin-card-height);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 var(--unif-cabin-min, 156px);
+  z-index: 2;
+}
+.unif-cabin-box:hover {
+  border-color: rgba(127,208,85,.5);
+  box-shadow: 0 0 16px rgba(127,208,85,.2);
+}
+.unif-cabin-box.is-focused {
+  border-color: rgba(127,208,85,.75);
+  box-shadow: 0 0 20px rgba(127,208,85,.3);
+}
+.unif-cabin-box.has-alarm {
+  border-color: rgba(239,159,39,.4);
+}
+.unif-cabin-box.has-alarm.is-focused {
+  border-color: rgba(239,159,39,.7);
+  box-shadow: 0 0 16px rgba(239,159,39,.2);
 }
 
-function ensureInverterRowsFromRealtime(inverters) {
-  const container = document.getElementById("invertersContainer");
-  if (!container) return;
-
-  const preservedOpenId = OPEN_INVERTER_REAL_ID;
-  const uniq = dedupInvertersById(Array.isArray(inverters) ? inverters : []);
-
-  const sortByName = (a, b) => {
-    const an = String(getInverterDisplayName(a, 0) || "");
-    const bn = String(getInverterDisplayName(b, 0) || "");
-    if (an && bn) return an.localeCompare(bn, "pt-BR", { numeric: true, sensitivity: "base" });
-    return Number(getInverterRealId(a) || 0) - Number(getInverterRealId(b) || 0);
-  };
-
-  uniq.sort(sortByName);
-
-  const nextIds = uniq
-    .map(inv => getInverterRealId(inv))
-    .filter(id => id != null)
-    .map(id => String(id));
-
-  // Signature includes cabin assignment so regrouping triggers re-render
-  const nextSignature = uniq
-    .map(inv => `${getInverterRealId(inv)}:${inv.cabin_id ?? ""}`)
-    .join("|");
-
-  if (LAST_INVERTER_ROWS_SIGNATURE === nextSignature && container.children.length > 0) {
-    if (preservedOpenId != null && !nextIds.includes(String(preservedOpenId))) {
-      OPEN_INVERTER_REAL_ID = null;
-    }
-    return;
-  }
-
-  LAST_INVERTER_ROWS_SIGNATURE = nextSignature;
-  container.innerHTML = "";
-
-  // Helper: create and append a single inverter row+panel into a parent element
-  const appendInverterRowAndPanel = (parent, inv, idx) => {
-    const realId = getInverterRealId(inv);
-    if (realId == null) return;
-
-    const title = getInverterDisplayName(inv, idx);
-
-    const row = document.createElement("div");
-    row.className = "inverter-toggle inverter-row";
-    row.dataset.inverterRealId = String(realId);
-    row.innerHTML = `
-      <span class="status-dot"></span>
-      <span class="inverter-name">${title}<i class="arrow fa-solid fa-chevron-down"></i></span>
-      <div class="inv-metrics-grid">
-        <span class="inv-metric" data-label="Power">—</span>
-        <span class="inv-metric" data-label="Efficiency">—</span>
-        <span class="inv-metric" data-label="Temp">—</span>
-        <span class="inv-metric" data-label="Freq">—</span>
-        <span class="inv-metric" data-label="PR">—</span>
-        <span class="inv-metric inv-metric--wide" data-label="Leitura">—</span>
-      </div>
-      <span class="device-command-cell">
-        ${_canSendCommand() ? renderDeviceCommandControl("inverter", realId, isOnlineByFreshness(inv) && !isZeroSnapshot(inv) ? "on" : "off") : ""}
-      </span>
-    `;
-
-    const panel = document.createElement("div");
-    panel.className = "inverter-strings";
-    panel.id = `strings-${realId}`;
-    panel.innerHTML = `
-      <div class="inv-flow" data-inverter-real-id="${realId}">
-        <svg class="inv-flow-arrows" viewBox="0 0 1000 260" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <filter id="arrowGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="3.8" result="b"/>
-              <feMerge>
-                <feMergeNode in="b"/>
-                <feMergeNode in="SourceGraphic"/>
-              </feMerge>
-            </filter>
-
-            <marker id="arrowHead" viewBox="0 0 10 10" refX="9" refY="5"
-                    markerWidth="9" markerHeight="9" orient="auto">
-              <path d="M0,0 L10,5 L0,10 Z" fill="rgba(57,229,140,0.95)"/>
-            </marker>
-          </defs>
-
-          <path class="arrow-path arrow-path--ac"
-                d="M 500 88
-                   C 390 66, 250 66, 128 90
-                   C 92 98, 62 112, 46 136
-                   C 34 154, 34 176, 50 192"
-                marker-end="url(#arrowHead)"/>
-
-          <path class="arrow-path arrow-path--dc"
-                d="M 520 108
-                   C 630 86, 770 86, 892 110
-                   C 928 118, 958 132, 974 156
-                   C 986 174, 986 196, 970 212"
-                marker-end="url(#arrowHead)"/>
-        </svg>
-
-        <div class="inv-center">
-          ${getInverterSvgModern()}
-          <div class="inv-center-tags">
-            <span class="inv-tag">AC</span>
-            <span class="inv-tag">DC</span>
-          </div>
-        </div>
-
-        <div class="inv-side inv-side--ac">
-          <div class="inv-side-title">AC</div>
-          <div class="inv-side-row" data-row="ac"></div>
-        </div>
-
-        <div class="inv-side inv-side--dc">
-          <div class="inv-side-title">DC</div>
-          <div class="inv-side-row" data-row="dc"></div>
-        </div>
-      </div>
-
-      <div class="strings-grid" data-inverter-real-id="${realId}"></div>
-    `;
-
-    parent.appendChild(row);
-    parent.appendChild(panel);
-    wireDeviceCommandButtons(row);
-    const inferredState = isOnlineByFreshness(inv) && !isZeroSnapshot(inv) ? "on" : "off";
-    applyDeviceVisualState("inverter", String(realId), getDevicePersistentState("inverter", String(realId), inferredState));
-  };
-
-  const hasCabins = uniq.some(inv => inv.cabin_id != null);
-
-  if (!hasCabins) {
-    // Flat rendering — comportamento original
-    uniq.forEach((inv, idx) => appendInverterRowAndPanel(container, inv, idx));
-  } else {
-    // Agrupar por cabin_id
-    const groupMap = new Map();
-    const noCabin = [];
-
-    uniq.forEach(inv => {
-      const cabinId = inv.cabin_id;
-      if (cabinId == null) {
-        noCabin.push(inv);
-      } else {
-        if (!groupMap.has(cabinId)) {
-          groupMap.set(cabinId, {
-            name: inv.section_name ?? inv.cabin_name ?? inv.cabin_code ?? `Cabine ${cabinId}`,
-            displayOrder: inv.cabin_display_order ?? 999,
-            inverters: []
-          });
-        }
-        groupMap.get(cabinId).inverters.push(inv);
-      }
-    });
-
-    const sortedGroups = Array.from(groupMap.values())
-      .sort((a, b) => a.displayOrder - b.displayOrder);
-
-    if (noCabin.length > 0) {
-      sortedGroups.push({ name: "Sem cabine", displayOrder: 9999, inverters: noCabin });
-    }
-
-    let globalIdx = 0;
-    sortedGroups.forEach(group => {
-      const groupEl = document.createElement("div");
-      groupEl.className = "cabin-group";
-      groupEl.dataset.cabinCollapsed = "false";
-
-      const header = document.createElement("div");
-      header.className = "cabin-group-header";
-      header.innerHTML = `
-        <svg class="cabin-group-header__icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="7" width="20" height="13" rx="1"/>
-          <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
-          <line x1="12" y1="12" x2="12" y2="16"/>
-          <line x1="10" y1="14" x2="14" y2="14"/>
-        </svg>
-        <span class="cabin-group-header__name">${group.name}</span>
-        <span class="cabin-group-header__count">${group.inverters.length} inversor${group.inverters.length !== 1 ? "es" : ""}</span>
-        <svg class="cabin-group-header__chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      `;
-
-      const body = document.createElement("div");
-      body.className = "cabin-group-body";
-
-      header.addEventListener("click", () => {
-        const collapsed = groupEl.dataset.cabinCollapsed === "true";
-        groupEl.dataset.cabinCollapsed = collapsed ? "false" : "true";
-        body.classList.toggle("is-collapsed", !collapsed);
-      });
-
-      groupEl.appendChild(header);
-      groupEl.appendChild(body);
-
-      group.inverters.forEach(inv => {
-        appendInverterRowAndPanel(body, inv, globalIdx++);
-      });
-
-      container.appendChild(groupEl);
-    });
-  }
-
-  if (preservedOpenId != null) {
-    const row = container.querySelector(`.inverter-toggle[data-inverter-real-id="${preservedOpenId}"]`);
-    const panel = document.getElementById(`strings-${preservedOpenId}`);
-    if (row && panel) {
-      row.classList.add("open");
-      panel.classList.add("open");
-      panel.style.opacity = "1";
-      panel.style.maxHeight = panel.scrollHeight + "px";
-    } else {
-      OPEN_INVERTER_REAL_ID = null;
-    }
-  }
+/* Stub from cabin to vertical collector */
+.unif-cabin-box::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 2px;
+  height: 10px;
+  background: rgba(127,208,85,.75);
+  transform: translateX(-50%);
+}
+/* Dot at junction with vertical collector */
+.unif-cabin-box::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -13px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(127,208,85,.85);
+  box-shadow: 0 0 6px rgba(127,208,85,.7);
+  transform: translateX(-50%);
+  z-index: 2;
 }
 
-// ======================================================
-// MODO UNIFILAR — SINGLE LINE DIAGRAM
-// ======================================================
-let _plantChartsPlaceholder = null;
-
-// Estado do modo unifilar
-let UNIF_MODE = "overview"; // "overview" | "cabin"
-let UNIF_CABIN_IDX = 0;
-let UNIF_GROUPS = [];
-let UNIF_SIDE_COLLAPSED = false;
-let UNIF_ACTIVE_CABIN_FILTER = null;
-let UNIF_SEARCH_TEXT = "";
-let UNIF_TRANSITION_RUNNING = false;
-let UNIF_MODAL_SEQ = 0;
-
-function cabinMapEscape(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+.unif-cabin-hdr {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.unif-cabin-hdr svg { color: rgba(127,208,85,.7); flex-shrink: 0; }
+.unif-cabin-name {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--neon);
+  letter-spacing: .04em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.unif-cabin-stats {
+  font-size: 10px;
+  color: rgba(205,238,221,.5);
+  flex-shrink: 0;
 }
 
-function cabinMapFormat(value, digits = 1, unit = "") {
-  const n = Number(typeof value === "string" ? value.replace(",", ".") : value);
-  if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(digits)}${unit ? ` ${unit}` : ""}`;
+.unif-cabin-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127,208,85,.2) transparent;
+  flex: 1;
+  min-height: 0;
 }
 
-function cabinMapReadInvMetric(inv, keys) {
-  for (const key of keys) {
-    const value = inv?.[key];
-    if (value !== null && value !== undefined && value !== "") return value;
-  }
-  return null;
+/* Inverter chip in overview cabin */
+.unif-inv-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  cursor: default;
+}
+.unif-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.unif-inv-chip.chip-online .unif-chip-dot  { background:#7fd055; box-shadow:0 0 4px rgba(127,208,85,.8); }
+.unif-inv-chip.chip-alarm  .unif-chip-dot  { background:#ef9f27; box-shadow:0 0 4px rgba(239,159,39,.8); }
+.unif-inv-chip.chip-offline .unif-chip-dot { background:rgba(100,120,110,.5); }
+
+.unif-chip-name {
+  font-size: 10px;
+  color: rgba(205,238,221,.7);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.unif-chip-bar {
+  width: 36px;
+  height: 3px;
+  background: rgba(127,208,85,.12);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.unif-chip-bar-fill {
+  height: 100%;
+  background: rgba(127,208,85,.7);
+  border-radius: 2px;
+  transition: width .6s ease;
+}
+.unif-inv-chip.chip-alarm  .unif-chip-bar-fill { background: rgba(239,159,39,.7); }
+.unif-inv-chip.chip-offline .unif-chip-bar-fill { background: rgba(80,100,90,.4); }
+.unif-chip-val {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: rgba(205,238,221,.5);
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
 }
 
-function isCabineMapVisible() {
-  const mapView = document.getElementById("cabineMapView");
-  return !!mapView && getComputedStyle(mapView).display !== "none";
-}
-function isUnifilarVisible() { return isCabineMapVisible(); }
-
-function resizePlantChartsSoon() {
-  const resize = () => {
-    try { dailyChartInstance?.resize?.(); } catch (err) { console.warn("[dailyChart] resize erro:", err); }
-    try { monthlyChartInstance?.resize?.(); } catch (err) { console.warn("[monthlyChart] resize erro:", err); }
-  };
-  requestAnimationFrame(() => {
-    resize();
-    setTimeout(resize, 80);
-  });
-}
-
-function getPlantChartsGrid() {
-  return document.querySelector(".plant-charts-grid");
-}
-
-function ensurePlantChartsPlaceholder(chartsGrid) {
-  if (!chartsGrid || _plantChartsPlaceholder) return;
-  _plantChartsPlaceholder = document.createComment("plant-charts-home");
-  chartsGrid.parentNode.insertBefore(_plantChartsPlaceholder, chartsGrid.nextSibling);
-}
-
-function movePlantChartsIntoCabineMap() {
-  const dock = document.getElementById("cabineMapChartDock");
-  const chartsGrid = getPlantChartsGrid();
-  if (!dock || !chartsGrid || dock.contains(chartsGrid)) return;
-  ensurePlantChartsPlaceholder(chartsGrid);
-  // Move para o dock que fica ABAIXO das cabines (no stage), não sobreposto
-  dock.appendChild(chartsGrid);
-  chartsGrid.classList.add("plant-charts-grid--cabine-map");
-  resizePlantChartsSoon();
-}
-
-function autoFitCabineMap() { /* substituído pelo modo unifilar */ }
-
-function movePlantChartsToList() {
-  const chartsGrid = getPlantChartsGrid();
-  if (!chartsGrid || !_plantChartsPlaceholder?.parentNode) return;
-  _plantChartsPlaceholder.parentNode.insertBefore(chartsGrid, _plantChartsPlaceholder);
-  chartsGrid.classList.remove("plant-charts-grid--cabine-map");
-  resizePlantChartsSoon();
-}
-
-function initCabineMapDragZoom() { /* substituído pelo modo unifilar */ }
-
-const CABINE_STRINGS_CACHE_TTL_MS = 60 * 1000;
-const CABINE_STRINGS_CACHE = new Map();
-const CABINE_STRINGS_PENDING = new Map();
-let CABINE_STRINGS_BALLOON_SEQ = 0;
-let CABINE_MAP_STRUCTURE_SIGNATURE = "";
-let CABINE_STRINGS_ESC_HANDLER = null;
-
-async function loadCabineStringsPayload(inverterRealId, { force = false } = {}) {
-  const id = String(inverterRealId ?? "");
-  if (!id || !PLANT_ID) return null;
-
-  const cached = CABINE_STRINGS_CACHE.get(id);
-  if (!force && cached && Date.now() - cached.ts < CABINE_STRINGS_CACHE_TTL_MS) {
-    return cached.payload;
-  }
-
-  if (!force && CABINE_STRINGS_PENDING.has(id)) {
-    return CABINE_STRINGS_PENDING.get(id);
-  }
-
-  const req = Promise.all([
-    fetchInverterStrings(PLANT_ID, id),
-    fetchInverterStringsRealtime(PLANT_ID, id)
-  ])
-    .then(([cfg, rt]) => {
-      const payload = mergeStringsPayload(cfg, rt, id);
-      CABINE_STRINGS_CACHE.set(id, { ts: Date.now(), payload });
-      return payload;
-    })
-    .catch(err => {
-      console.warn("[cabine strings] erro ao carregar strings:", err);
-      return null;
-    })
-    .finally(() => CABINE_STRINGS_PENDING.delete(id));
-
-  CABINE_STRINGS_PENDING.set(id, req);
-  return req;
-}
-
-function renderCabineStringsBalloonRows(payload, inverterRealId) {
-  const strings = Array.isArray(payload?.strings) ? payload.strings : [];
-  const inverterOnline = getInverterOnlineStateById(inverterRealId);
-
-  const visible = strings.filter(s =>
-    s.exists_in_api === true &&
-    s.effective_enabled !== false
+/* Wire vertical between sections */
+.unif-hwire {
+  align-self: center;
+  width: 2.5px;
+  height: 30px;
+  background: linear-gradient(
+    to bottom,
+    rgba(127,208,85,.9),
+    rgba(127,208,85,.7)
   );
-
-  if (!visible.length) {
-    return {
-      count: 0,
-      html: `<div class="csb-empty">Nenhuma string monitorada</div>`
-    };
-  }
-
-  const maxAmp = visible.reduce((m, s) => Math.max(m, asNumber(s.current_a, 0)), 0) || 10;
-
-  const html = visible
-    .slice()
-    .sort((a, b) => Number(a.string_index) - Number(b.string_index))
-    .map(s => {
-      const amp = s.current_a != null ? asNumber(s.current_a, 0) : null;
-      const pct = amp != null ? Math.min(100, (amp / maxAmp) * 100) : 0;
-      const inAlarm = isStringInAlarm(s, inverterOnline);
-      const noData = s.has_data !== true;
-      const disabled = s.effective_enabled === false;
-
-      const stClass = disabled ? "csb-str--disabled"
-        : inAlarm ? "csb-str--alarm"
-        : noData ? "csb-str--nodata"
-        : "csb-str--ok";
-
-      const statusTxt = disabled ? "Desabilitada"
-        : inAlarm ? (s.alarm_reason || s.alarm_state || "Alarme")
-        : noData ? "Sem dados"
-        : "OK";
-
-      const ampTxt = amp != null ? `${amp.toFixed(2)} A` : "—";
-
-      return `
-        <div class="csb-str-row ${stClass}">
-          <span class="csb-str-idx">S${s.string_index}</span>
-          <div class="csb-str-bar-wrap" title="${ampTxt}">
-            <div class="csb-str-bar" style="width:${pct.toFixed(1)}%"></div>
-          </div>
-          <span class="csb-str-amp">${ampTxt}</span>
-          <span class="csb-str-status">${statusTxt}</span>
-        </div>`;
-    }).join("");
-
-  return { count: visible.length, html };
+  box-shadow: 0 0 8px rgba(127,208,85,.45);
+  flex-shrink: 0;
+  position: relative;
+  overflow: visible;
+}
+.unif-hwire::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -1px;
+  width: 4px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(127,208,85,.95);
+  box-shadow: 0 0 10px rgba(127,208,85,.9);
+  animation: wireFlow 2.4s linear infinite;
+}
+@keyframes wireFlow {
+  0%   { top: -10px; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.unif-hwire--main {
+  width: 2.5px;
+  height: 30px;
 }
 
-// ======================================================
-// BALLOON DE STRINGS (popup ao clicar no card do inversor)
-// ======================================================
-
-function closeCabineStringsBalloon(immediate = false) {
-  CABINE_STRINGS_BALLOON_SEQ++;
-  if (CABINE_STRINGS_ESC_HANDLER) {
-    document.removeEventListener("keydown", CABINE_STRINGS_ESC_HANDLER);
-    CABINE_STRINGS_ESC_HANDLER = null;
-  }
-  const el = document.getElementById("cabineStringsBalloon");
-  if (!el) return;
-  if (immediate) {
-    el.remove();
-    return;
-  }
-  el.classList.remove("csb-backdrop--visible");
-  setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 220);
+/* Equipment node wrapper */
+.unif-node-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
 }
 
-async function openCabineStringsBalloon(anchorEl, inv, invName) {
-  closeCabineStringsBalloon(true);
-
-  const realId = getInverterRealId(inv);
-  if (realId == null) return;
-
-  const seq = ++CABINE_STRINGS_BALLOON_SEQ;
-
-  const rect = anchorEl.getBoundingClientRect();
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  const BALLOON_W = 370;
-  const MARGIN = 14;
-  const preferRight = rect.right + MARGIN + BALLOON_W <= vw;
-  const rawBx = preferRight ? rect.right + MARGIN : rect.left - MARGIN - BALLOON_W;
-  const bx = Math.max(12, Math.min(rawBx, vw - BALLOON_W - 12));
-  const BALLOON_EST_H = 260;
-  let by = rect.top + rect.height / 2 - BALLOON_EST_H / 2;
-  by = Math.max(12, Math.min(by, vh - BALLOON_EST_H - 12));
-  const tailY = Math.max(16, Math.min(BALLOON_EST_H - 32, rect.top + rect.height / 2 - by));
-
-  const tailSide = preferRight ? "tail-left" : "tail-right";
-
-  const backdrop = document.createElement("div");
-  backdrop.id = "cabineStringsBalloon";
-  backdrop.className = "csb-backdrop";
-  backdrop.innerHTML = `
-    <div class="csb-balloon csb-balloon--${tailSide}"
-         style="top:${by.toFixed(0)}px; left:${bx.toFixed(0)}px; --csb-tail-y:${tailY.toFixed(0)}px; width:${BALLOON_W}px">
-      <div class="csb-header">
-        <div class="csb-header-icon">
-          <svg viewBox="0 0 56 56" fill="none" width="16" height="16">
-            <rect x="3" y="10" width="50" height="34" rx="5"
-                  stroke="rgba(57,229,140,.8)" stroke-width="2" fill="rgba(57,229,140,.07)"/>
-            <path d="M30 14 L26 25 H30 L25 42 L35 23 H31 L35 14 Z"
-                  fill="rgba(57,229,140,.9)"/>
-          </svg>
-        </div>
-        <span class="csb-inv-name">${cabinMapEscape(invName)}</span>
-        <div class="csb-header-pills">
-          <span class="csb-pill" id="csbStringCount">Carregando...</span>
-        </div>
-        <button class="csb-close" aria-label="Fechar">&times;</button>
-      </div>
-      <div class="csb-body">
-        <div class="csb-col-labels">
-          <span></span><span>Corrente</span><span>Amp</span><span>Status</span>
-        </div>
-        <div class="csb-strings-grid" id="csbStringsGrid">
-          <div class="csb-empty">Carregando strings...</div>
-        </div>
-      </div>
-    </div>`;
-
-  backdrop.addEventListener("pointerdown", (e) => {
-    if (!e.target.closest(".csb-balloon") || e.target.closest(".csb-close")) {
-      closeCabineStringsBalloon();
-    }
-  });
-
-  CABINE_STRINGS_ESC_HANDLER = function escHandler(e) {
-    if (e.key === "Escape") {
-      closeCabineStringsBalloon();
-    }
-  };
-  document.addEventListener("keydown", CABINE_STRINGS_ESC_HANDLER);
-
-  document.body.appendChild(backdrop);
-  requestAnimationFrame(() => backdrop.classList.add("csb-backdrop--visible"));
-
-  const payload = await loadCabineStringsPayload(realId);
-  if (seq !== CABINE_STRINGS_BALLOON_SEQ) return;
-
-  const grid = document.getElementById("csbStringsGrid");
-  const count = document.getElementById("csbStringCount");
-  const rendered = renderCabineStringsBalloonRows(payload, realId);
-
-  if (grid) grid.innerHTML = rendered.html;
-  if (count) count.textContent = `${rendered.count} string${rendered.count !== 1 ? "s" : ""}`;
+/* Generic equipment node */
+.unif-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 20px;
+  background: rgba(6,14,22,.94);
+  border: 1px solid rgba(127,208,85,.25);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  flex: 0 0 auto;
+  text-align: center;
+  backdrop-filter: blur(6px);
+  min-width: 130px;
+  min-height: 160px;
+  box-shadow:
+    0 4px 16px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(127,208,85,.07),
+    0 0 0 1px rgba(127,208,85,.04) inset;
+  transition: border-color .22s, box-shadow .22s, transform .18s;
+  position: relative;
+  overflow: hidden;
+}
+.unif-node::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(127,208,85,.04) 0%, transparent 60%);
+  pointer-events: none;
+}
+.unif-node:hover {
+  border-color: rgba(127,208,85,.55);
+  box-shadow:
+    0 6px 24px rgba(0,0,0,.42),
+    0 0 18px rgba(127,208,85,.18),
+    inset 0 1px 0 rgba(127,208,85,.12);
+  transform: translateY(-1px);
+}
+.unif-node.is-online {
+  border-color: rgba(127,208,85,.38);
+  box-shadow:
+    0 4px 16px rgba(0,0,0,.38),
+    0 0 12px rgba(127,208,85,.14),
+    inset 0 1px 0 rgba(127,208,85,.1);
+}
+.unif-node.is-offline {
+  border-color: rgba(255,80,80,.3);
+  opacity: .78;
+}
+.unif-node-name {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--neon);
+  letter-spacing: .05em;
+}
+.unif-node-val {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: rgba(205,238,221,.65);
+}
+.unif-node-pct {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: rgba(127,208,85,.8);
+}
+.unif-trafo-temp {
+  font-size: 9px;
+  color: rgba(245,200,66,.75);
+  font-family: var(--font-mono);
 }
 
-function buildAcdcChip(label, value, digits, unit) {
-  const n = Number(typeof value === "string" ? value.replace(",", ".") : value);
-  const txt = Number.isFinite(n) ? `${n.toFixed(digits)}${unit ? " " + unit : ""}` : "—";
-  return `<div class="cabine-acdc-chip">
-    <span class="cabine-acdc-chip__lbl">${label}</span>
-    <span class="cabine-acdc-chip__val">${txt}</span>
-  </div>`;
+/* Node-specific colors */
+.unif-node--trafo {
+  border-color: rgba(245,200,66,.3);
+  min-width: 110px;
+  background: rgba(8,12,4,.95);
+}
+.unif-node--trafo:hover {
+  border-color: rgba(245,200,66,.65);
+  box-shadow: 0 0 22px rgba(245,200,66,.2), 0 6px 20px rgba(0,0,0,.4);
+}
+.unif-node--cc   { min-width: 96px; }
+.unif-node--qgbt { min-width: 96px; }
+.unif-node--sa   {
+  border-style: dashed;
+  opacity: .82;
+  min-width: 80px;
+  background: rgba(4,12,8,.9);
 }
 
-function buildCabineCard(inv, idx = 0) {
-  const realId = getInverterRealId(inv);
-  const safeRealId = realId == null ? "" : String(realId);
-  const name = getInverterDisplayName(inv, idx);
-  const isOnline = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-  const hasAlarm = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-
-  const powerKw = cabinMapReadInvMetric(inv, ["active_power_kw", "power_kw", "power", "active_power"]);
-  const effPct = cabinMapReadInvMetric(inv, ["efficiency_pct", "efficiency", "eff_pct"]);
-  const tempC = cabinMapReadInvMetric(inv, ["temperature_internal_c", "temperature_c", "temp_c", "temperature_current", "temperature"]);
-  const freqHz = cabinMapReadInvMetric(inv, ["frequency_hz", "freq_hz", "frequency"]);
-  const prRaw = cabinMapReadInvMetric(inv, ["performance_ratio", "pr", "pr_ratio", "performance"]);
-  const lastTs = cabinMapReadInvMetric(inv, ["last_reading_at", "last_reading_ts", "last_ts", "timestamp", "event_ts"]);
-  const ratedKw = cabinMapReadInvMetric(inv, ["rated_power_kw", "capacity_kw", "rated_kw", "nominal_power_kw", "rated_power"]);
-
-  const maxKw = Math.max(1, asNumber(ratedKw, 100));
-  const powerNum = asNumber(powerKw, 0);
-  const barPct = powerKw != null ? Math.min(100, Math.max(0, (powerNum / maxKw) * 100)) : 0;
-  const prPct = prRaw != null ? normalizePercentMaybe(prRaw) : null;
-  const loadPct = powerKw != null ? barPct : null;
-  const boltOpacity = isOnline ? Math.max(0.25, barPct / 100) : 0.12;
-  const boltColor = isOnline
-    ? `rgba(57,229,140,${boltOpacity.toFixed(2)})`
-    : "rgba(120,140,130,.2)";
-  const stateText = isOnline ? (hasAlarm ? "Alarme" : "Online") : "Offline";
-  const safeName = cabinMapEscape(name);
-  const safeTitle = cabinMapEscape(inv?.name || inv?.device_name || name);
-
-  const card = document.createElement("div");
-  card.className = `cabine-inv-card ${isOnline ? "is-online" : "is-offline"}${hasAlarm ? " has-alarm" : ""}`;
-  card.dataset.inverterRealId = safeRealId;
-  card.style.setProperty("--cabine-power-pct", `${barPct.toFixed(1)}%`);
-
-  card.innerHTML = `
-    <div class="cabine-inv-card__top">
-      <div class="cabine-inv-card__status ${isOnline ? "dot-online" : "dot-offline"}"></div>
-      <span class="cabine-inv-card__name" title="${safeTitle}">${safeName}</span>
-      <span class="cabine-inv-card__state">${stateText}</span>
-      ${_canSendCommand() && realId != null
-        ? `<div class="cabine-inv-card__cmd">${renderDeviceCommandControl("inverter", realId, isOnline ? "on" : "off")}</div>`
-        : ""}
-    </div>
-
-    <div class="cabine-inv-card__icon-row">
-      <svg viewBox="0 0 56 56" width="52" height="52" fill="none"
-           class="cabine-inv-svg" aria-hidden="true">
-        <defs>
-          <filter id="invGlow${safeRealId}" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur stdDeviation="${isOnline ? "2.2" : "0"}" result="b"/>
-            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <!-- Corpo do inversor -->
-        <rect x="3" y="10" width="50" height="34" rx="5"
-              stroke="${isOnline ? "rgba(57,229,140,.65)" : "rgba(90,110,100,.28)"}"
-              stroke-width="1.6"
-              fill="${isOnline ? "rgba(57,229,140,.05)" : "rgba(0,0,0,.25)"}"
-              filter="url(#invGlow${safeRealId})"/>
-        <!-- Painel solar DC -->
-        <rect x="7" y="15" width="14" height="10" rx="1.5"
-              fill="${isOnline ? "rgba(57,229,140,.16)" : "rgba(50,70,60,.08)"}"/>
-        <line x1="7" y1="20" x2="21" y2="20"
-              stroke="${isOnline ? "rgba(57,229,140,.35)" : "rgba(50,70,60,.12)"}" stroke-width=".7"/>
-        <line x1="14" y1="15" x2="14" y2="25"
-              stroke="${isOnline ? "rgba(57,229,140,.35)" : "rgba(50,70,60,.12)"}" stroke-width=".7"/>
-        <path d="M21 20 L26 20" stroke="${isOnline ? "rgba(57,229,140,.5)" : "rgba(70,90,80,.2)"}"
-              stroke-width="1" stroke-dasharray="2 1.5"/>
-        <text x="8" y="31" font-size="4.5" fill="${isOnline ? "rgba(57,229,140,.55)" : "rgba(100,120,110,.25)"}"
-              font-family="monospace" font-weight="700">DC IN</text>
-        <!-- Raio central -->
-        <path d="M30 14 L26 25 H30 L25 42 L35 23 H31 L35 14 Z"
-              fill="${boltColor}" class="cabine-bolt-path"
-              opacity="${isOnline ? "1" : "0.18"}"/>
-        <!-- Ondas AC -->
-        <path d="M40 20 Q42 16.5 44 20 Q46 23.5 48 20"
-              stroke="${isOnline ? "rgba(57,229,140,.6)" : "rgba(80,100,90,.2)"}"
-              stroke-width="1.4" fill="none" stroke-linecap="round"/>
-        <path d="M40 26 Q42 22.5 44 26 Q46 29.5 48 26"
-              stroke="${isOnline ? "rgba(57,229,140,.4)" : "rgba(80,100,90,.15)"}"
-              stroke-width="1.1" fill="none" stroke-linecap="round"/>
-        <path d="M40 23 L37 23" stroke="${isOnline ? "rgba(57,229,140,.5)" : "rgba(70,90,80,.2)"}"
-              stroke-width="1" stroke-dasharray="2 1.5"/>
-        <text x="39" y="35" font-size="4.5" fill="${isOnline ? "rgba(57,229,140,.55)" : "rgba(100,120,110,.25)"}"
-              font-family="monospace" font-weight="700">AC OUT</text>
-        <!-- LED de status -->
-        <circle cx="46" cy="40" r="2.5"
-                fill="${isOnline ? "#39e58c" : (hasAlarm ? "#ef9f27" : "#334433")}"
-                style="${isOnline ? "filter:drop-shadow(0 0 5px rgba(57,229,140,.95));" : hasAlarm ? "filter:drop-shadow(0 0 4px rgba(239,159,39,.8));" : ""}"/>
-      </svg>
-
-      <div class="cabine-inv-card__power-bar-wrap">
-        <div class="cabine-inv-card__power-readout">
-          <span class="cabine-inv-card__power-label">${powerKw != null ? cabinMapFormat(powerKw, 0, "kW") : "—"}</span>
-          <span class="cabine-inv-card__load-label">${loadPct != null ? `${cabinMapFormat(loadPct, 0)}%` : ""}</span>
-        </div>
-        <div class="cabine-inv-card__power-bar-track">
-          <div class="cabine-inv-card__power-bar" style="width:${barPct.toFixed(1)}%;"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="cabine-inv-card__metrics">
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">Efic.</span>
-        <span class="cabine-inv-metric__val">${effPct != null ? cabinMapFormat(effPct, 1, "%") : "—"}</span>
-      </div>
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">Temp</span>
-        <span class="cabine-inv-metric__val ${tempC != null && asNumber(tempC, 0) > 70 ? "val-warn" : ""}">
-          ${tempC != null ? `${cabinMapFormat(tempC, 1)}&deg;C` : "—"}
-        </span>
-      </div>
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">Freq</span>
-        <span class="cabine-inv-metric__val">${freqHz != null ? cabinMapFormat(freqHz, 2, "Hz") : "—"}</span>
-      </div>
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">PR</span>
-        <span class="cabine-inv-metric__val">${prPct != null ? cabinMapFormat(prPct, 1, "%") : "—"}</span>
-      </div>
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">Cap.</span>
-        <span class="cabine-inv-metric__val">${ratedKw != null ? cabinMapFormat(ratedKw, 0, "kW") : "—"}</span>
-      </div>
-      <div class="cabine-inv-metric">
-        <span class="cabine-inv-metric__lbl">Leit.</span>
-        <span class="cabine-inv-metric__val">${fmtDatePtBR(lastTs)}</span>
-      </div>
-    </div>
-
-    ${(inv?.strings_rt && Array.isArray(inv.strings_rt) && inv.strings_rt.length > 0) ? `
-    <div class="cabine-inv-card__strings">
-      <div class="cabine-inv-strings-head">
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-          <rect x="1" y="1" width="3" height="8" rx="0.8"
-                stroke="${isOnline ? "rgba(57,229,140,.7)" : "rgba(80,100,90,.3)"}" stroke-width=".8"/>
-          <rect x="6" y="1" width="3" height="8" rx="0.8"
-                stroke="${isOnline ? "rgba(57,229,140,.7)" : "rgba(80,100,90,.3)"}" stroke-width=".8"/>
-        </svg>
-        <span>Strings</span>
-      </div>
-      <div class="cabine-inv-strings-grid">
-        ${inv.strings_rt.slice(0, 20).map(s => {
-          const amp = s.current_a != null ? `${Number(s.current_a).toFixed(1)}A` : "—";
-          const inAlarm = (s.in_alarm || s.alarm) && isOnline;
-          const nodata = !s.has_data;
-          return `<div class="cabine-string-chip ${inAlarm ? "chip-alarm" : nodata ? "chip-nodata" : "chip-ok"}">
-            <span class="chip-idx">S${s.string_index}</span>
-            <span class="chip-amp">${amp}</span>
-          </div>`;
-        }).join("")}
-        ${inv.strings_rt.length > 20 ? `<div class="cabine-string-chip chip-nodata"><span class="chip-idx">+${inv.strings_rt.length - 20}</span></div>` : ""}
-      </div>
-    </div>` : ""}
-
-    <div class="cabine-inv-card__acdc">
-      <div class="cabine-acdc-section">
-        <span class="cabine-acdc-label">AC</span>
-        <div class="cabine-acdc-chips">
-          ${buildAcdcChip("V AB", inv?.line_voltage_ab_v ?? inv?.line_voltage_ab, 0, "V")}
-          ${buildAcdcChip("Ia",   inv?.current_phase_a_a ?? inv?.current_phase_a, 2, "A")}
-          ${buildAcdcChip("FP",   inv?.power_factor, 3, "")}
-        </div>
-      </div>
-      <div class="cabine-acdc-section">
-        <span class="cabine-acdc-label">DC</span>
-        <div class="cabine-acdc-chips">
-          ${buildAcdcChip("P DC",   inv?.power_dc_kw, 2, "kW")}
-          ${buildAcdcChip("V str",  inv?.string_voltage_v, 0, "V")}
-          ${buildAcdcChip("R isol", inv?.resistance_insulation_mohm, 1, "MΩ")}
-        </div>
-      </div>
-    </div>
-  `;
-
-  wireDeviceCommandButtons(card);
-  card.style.cursor = "pointer";
-
-  return card;
+/* Equipment SVGs */
+.unif-equip-svg {
+  display: block;
+  margin: 0 auto 6px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(127,208,85,.22));
+  transition: filter .3s ease;
+}
+.unif-equip-svg--trafo {
+  width: 72px;
+  height: 40px;
+  filter: drop-shadow(0 0 8px rgba(245,200,66,.28))
+          drop-shadow(0 0 14px rgba(127,208,85,.12));
+}
+.unif-node:hover .unif-equip-svg {
+  filter: drop-shadow(0 0 12px rgba(127,208,85,.55));
+}
+.unif-node--trafo:hover .unif-equip-svg--trafo {
+  filter: drop-shadow(0 0 14px rgba(245,200,66,.6))
+          drop-shadow(0 0 24px rgba(127,208,85,.2));
 }
 
-function initCabineMapCardClicks() {
-  /* Clicks em cards de inversores são tratados pelo Unifilar modal — sem ação aqui */
+/* Transformer column (trafo + vertical dashed + SA) */
+.unif-trafo-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
 }
 
-// ======================================================
-// MODO UNIFILAR — FUNÇÕES PRINCIPAIS
-// ======================================================
-
-function buildUnifGroups(invertersRaw) {
-  const uniq = dedupInvertersById(Array.isArray(invertersRaw) ? invertersRaw : []);
-  uniq.sort((a, b) => {
-    const an = String(getInverterDisplayName(a, 0) || "");
-    const bn = String(getInverterDisplayName(b, 0) || "");
-    return an.localeCompare(bn, "pt-BR", { numeric: true, sensitivity: "base" });
-  });
-  const hasCabins = uniq.some(inv => inv.cabin_id != null);
-  if (!hasCabins) return [{ id: "all", name: "Inversores", displayOrder: 0, inverters: uniq }];
-  const groupMap = new Map();
-  const noCabin = [];
-  uniq.forEach(inv => {
-    const cabinId = inv.cabin_id;
-    if (cabinId == null) { noCabin.push(inv); return; }
-    if (!groupMap.has(cabinId)) {
-      groupMap.set(cabinId, {
-        id: cabinId,
-        name: inv.section_name ?? inv.cabin_name ?? inv.cabin_code ?? `Cabine ${cabinId}`,
-        displayOrder: asNumber(inv.cabin_display_order, 999),
-        inverters: []
-      });
-    }
-    groupMap.get(cabinId).inverters.push(inv);
-  });
-  const groups = [...Array.from(groupMap.values()).sort((a, b) => a.displayOrder - b.displayOrder)];
-  if (noCabin.length) groups.push({ id: "none", name: "Sem cabine", displayOrder: 9999, inverters: noCabin });
-  return groups;
-}
-
-/* ── SVGs dos equipamentos ── */
-function unifSVGTransformer() {
-  return `<svg viewBox="0 0 72 40" fill="none" class="unif-equip-svg unif-equip-svg--trafo">
-    <defs>
-      <filter id="trafoGlwA" x="-40%" y="-40%" width="180%" height="180%">
-        <feGaussianBlur stdDeviation="2.5" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-      <filter id="trafoGlwB" x="-40%" y="-40%" width="180%" height="180%">
-        <feGaussianBlur stdDeviation="2" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs>
-    <!-- Núcleo magnético -->
-    <rect x="30" y="6" width="12" height="28" rx="2"
-          fill="rgba(200,180,60,.08)" stroke="rgba(200,180,60,.25)" stroke-width=".8"/>
-    <!-- Bobina BT (esquerda - verde) -->
-    <g filter="url(#trafoGlwA)">
-      <path d="M16 12 C16 8 22 8 22 12 C22 16 16 16 16 20 C16 24 22 24 22 28"
-            stroke="rgba(127,208,85,.9)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-      <path d="M10 12 C10 8 16 8 16 12 C16 16 10 16 10 20 C10 24 16 24 16 28"
-            stroke="rgba(127,208,85,.7)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-      <!-- Terminal BT -->
-      <line x1="4"  y1="20" x2="10" y2="20" stroke="rgba(127,208,85,.85)" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="4" cy="20" r="2" fill="rgba(127,208,85,.9)"/>
-    </g>
-    <!-- Bobina AT (direita - amarelo) -->
-    <g filter="url(#trafoGlwB)">
-      <path d="M50 12 C50 8 56 8 56 12 C56 16 50 16 50 20 C50 24 56 24 56 28"
-            stroke="rgba(245,200,66,.9)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-      <path d="M56 12 C56 8 62 8 62 12 C62 16 56 16 56 20 C56 24 62 24 62 28"
-            stroke="rgba(245,200,66,.7)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
-      <!-- Terminal AT -->
-      <line x1="62" y1="20" x2="68" y2="20" stroke="rgba(245,200,66,.85)" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="68" cy="20" r="2" fill="rgba(245,200,66,.9)"/>
-    </g>
-    <!-- Ligação ao núcleo -->
-    <line x1="22" y1="20" x2="30" y2="20" stroke="rgba(127,208,85,.5)" stroke-width="1.2" stroke-linecap="round"/>
-    <line x1="42" y1="20" x2="50" y2="20" stroke="rgba(245,200,66,.5)" stroke-width="1.2" stroke-linecap="round"/>
-  </svg>`;
-}
-
-function unifSVGCC() {
-  return `<svg viewBox="0 0 40 40" fill="none" class="unif-equip-svg" width="36" height="36">
-    <defs>
-      <filter id="ccGlw" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="1.8" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs>
-    <g filter="url(#ccGlw)">
-      <!-- Caixa exterior -->
-      <rect x="2" y="2" width="36" height="36" rx="4"
-            stroke="rgba(127,208,85,.7)" stroke-width="1.5" fill="rgba(127,208,85,.04)"/>
-      <!-- Barras condutoras verticais -->
-      <line x1="10" y1="8"  x2="10" y2="32" stroke="rgba(127,208,85,.75)" stroke-width="1.6" stroke-linecap="round"/>
-      <line x1="16" y1="8"  x2="16" y2="32" stroke="rgba(127,208,85,.6)"  stroke-width="1.4" stroke-linecap="round"/>
-      <line x1="22" y1="8"  x2="22" y2="32" stroke="rgba(127,208,85,.45)" stroke-width="1.2" stroke-linecap="round"/>
-      <line x1="28" y1="8"  x2="28" y2="32" stroke="rgba(127,208,85,.32)" stroke-width="1.1" stroke-linecap="round"/>
-      <!-- Barra de barramento horizontal -->
-      <line x1="8" y1="14" x2="32" y2="14" stroke="rgba(127,208,85,.5)" stroke-width=".9" stroke-linecap="round" stroke-dasharray="2 2"/>
-      <line x1="8" y1="26" x2="32" y2="26" stroke="rgba(127,208,85,.5)" stroke-width=".9" stroke-linecap="round" stroke-dasharray="2 2"/>
-      <!-- Ponto de entrada -->
-      <circle cx="36" cy="20" r="2.5" fill="rgba(127,208,85,.85)"/>
-    </g>
-  </svg>`;
-}
-
-function unifSVGQGBT(isOnline) {
-  const cMain = isOnline === true  ? "rgba(127,208,85,.88)"
-              : isOnline === false ? "rgba(255,80,80,.72)"
-              :                     "rgba(127,208,85,.45)";
-  const cDot  = isOnline === true  ? "#7fd055"
-              : isOnline === false ? "#ff4444"
-              :                     "#334433";
-  const glow  = isOnline === true  ? "filter:drop-shadow(0 0 5px rgba(127,208,85,.95));"
-              : isOnline === false ? "filter:drop-shadow(0 0 5px rgba(255,80,80,.8));"
-              :                     "";
-  return `<svg viewBox="0 0 40 40" fill="none" class="unif-equip-svg" width="36" height="36">
-    <defs>
-      <filter id="qgbtGlw" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="1.6" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs>
-    <g filter="url(#qgbtGlw)">
-      <rect x="2" y="2" width="36" height="36" rx="4"
-            stroke="${cMain}" stroke-width="1.5" fill="rgba(127,208,85,.03)"/>
-      <!-- Chave seccionadora (linha de força) -->
-      <line x1="12" y1="30" x2="26" y2="30" stroke="${cMain}" stroke-width="2" stroke-linecap="round"/>
-      <!-- Contato móvel inclinado -->
-      <line x1="12" y1="30" x2="18" y2="18" stroke="${cMain}" stroke-width="2" stroke-linecap="round"/>
-      <!-- Contato fixo superior -->
-      <line x1="18" y1="16" x2="26" y2="16" stroke="${cMain}" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 2" opacity=".5"/>
-      <!-- Ponto de articulação -->
-      <circle cx="12" cy="30" r="2" fill="${cMain}"/>
-      <!-- Ponto de entrada saída -->
-      <circle cx="26" cy="30" r="2" fill="${cMain}"/>
-      <!-- LED de status (canto superior direito) -->
-      <circle cx="32" cy="8" r="3.5" fill="${cDot}" style="${glow}"/>
-    </g>
-  </svg>`;
-}
-
-function unifSVGSA() {
-  return `<svg viewBox="0 0 34 34" fill="none" class="unif-equip-svg" width="30" height="30">
-    <defs>
-      <filter id="saGlw" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="1.4" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs>
-    <g filter="url(#saGlw)">
-      <circle cx="17" cy="17" r="14"
-              stroke="rgba(127,208,85,.6)" stroke-width="1.4"
-              fill="rgba(127,208,85,.04)" stroke-dasharray="4 3"/>
-      <!-- Raio (serviços auxiliares) -->
-      <path d="M17 7 L14 16 H18 L13 27 L23 16 H19 L22 7 Z"
-            fill="rgba(127,208,85,.72)"/>
-    </g>
-  </svg>`;
-}
-
-/* ── Overview: constrói HTML do diagrama completo ── */
-function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
-  const relayItem  = Array.isArray(relayData)      ? relayData[0]      : relayData;
-  const meterItem  = Array.isArray(multimeterData)  ? multimeterData[0] : multimeterData;
-  const relayOnline  = relayItem  ? relayOnlineFromPayload(relayItem)        : null;
-  const meterOnline  = meterItem  ? multimeterOnlineFromPayload(meterItem)   : null;
-
-  const relayPowerRaw  = relayItem  ? pickDeviceMetricValue(relayItem,  relayItem?.analog  ?? {}, ["active_power_kw","power_kw","active_power","power"]) : null;
-  const meterPowerRaw  = meterItem  ? pickDeviceMetricValue(meterItem,  meterItem?.analog  ?? meterItem?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
-  const relayPowerStr  = relayPowerRaw  != null ? `${cabinMapFormat(relayPowerRaw, 1)} kW`  : "—";
-  const meterPowerStr  = meterPowerRaw  != null ? `${cabinMapFormat(meterPowerRaw, 1)} kW`  : "—";
-  const redePowerStr   = relayPowerRaw  != null ? relayPowerStr : asNumber(PLANT_STATE.active_power_kw, 0) > 0 ? `${asNumber(PLANT_STATE.active_power_kw, 0).toFixed(1)} kW` : "—";
-  const redeCapStr     = asNumber(PLANT_STATE.capacity_percent, 0) > 0 ? `${asNumber(PLANT_STATE.capacity_percent, 0).toFixed(1)}%` : "—";
-
-  /* Chips de inversores em cada cabine */
-  const cabinesHTML = groups.map((g, idx) => {
-    const online = g.inverters.filter(inv => isOnlineByFreshness(inv) && !isZeroSnapshot(inv)).length;
-    const alarm  = g.inverters.filter(inv => !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active)).length;
-    const total  = g.inverters.reduce((s, inv) => s + asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0), 0);
-    const sc     = alarm > 0 ? "has-alarm" : online === g.inverters.length && online > 0 ? "all-online" : online > 0 ? "partial-online" : "all-offline";
-
-    const chips = g.inverters.map(inv => {
-      const id = getInverterRealId(inv);
-      const isOn = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-      const isAl = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-      const pKw  = asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0);
-      const rat  = asNumber(inv.rated_power_kw ?? 100, 100);
-      const pct  = Math.min(100, (pKw / Math.max(1, rat)) * 100);
-      const cls  = isAl ? "chip-alarm" : isOn ? "chip-online" : "chip-offline";
-      const nm   = cabinMapEscape(getInverterDisplayName(inv, 0));
-      return `<div class="unif-inv-chip ${cls}" title="${nm}: ${pKw.toFixed(0)} kW">
-        <span class="unif-chip-dot"></span>
-        <span class="unif-chip-name">${nm}</span>
-        <div class="unif-chip-bar"><div class="unif-chip-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
-        <span class="unif-chip-val">${pKw > 0 ? pKw.toFixed(0) + " kW" : "—"}</span>
-      </div>`;
-    }).join("");
-
-    return `<div class="unif-cabin-box ${sc}" data-cabin-id="${cabinMapEscape(String(g.id))}" data-cabin-idx="${idx}" title="Duplo clique para detalhar">
-      <div class="unif-cabin-hdr">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x=".5" y="2.5" width="11" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.1"/><path d="M3.5 2.5V2a2.5 2.5 0 015 0v.5" stroke="currentColor" stroke-width="1.1"/></svg>
-        <span class="unif-cabin-name">${cabinMapEscape(g.name)}</span>
-        <span class="unif-cabin-stats">${online}/${g.inverters.length} · ${total.toFixed(0)} kW</span>
-      </div>
-      <div class="unif-cabin-body">${chips}</div>
-    </div>`;
-  }).join("");
-
-  const meterName  = meterItem?.device_name || meterItem?.name || "Medidor";
-  const relayName  = relayItem?.device_name  || relayItem?.name  || "Relé";
-  const cabinMinPx = groups.length >= 18 ? 136 : groups.length >= 10 ? 148 : 160;
-
-  const meterBadge = meterOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
-                   : meterOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
-                   :                        `<span class="unif-badge">—</span>`;
-  const relayBadge = relayOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
-                   : relayOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
-                   :                        `<span class="unif-badge">—</span>`;
-
-  const meterNode = meterItem ? `
-      <div class="unif-hwire unif-hwire--main"></div>
-      <div class="unif-node-wrap">
-        <div class="unif-node unif-node--cc ${meterOnline === true ? "is-online" : meterOnline === false ? "is-offline" : ""}"
-             id="unifNodeMeter" data-unif-device="multimeter">
-          ${unifSVGCC()}
-          <span class="unif-node-name">${cabinMapEscape(meterName)}</span>
-          <span class="unif-node-val" id="unifMeterPower">${meterPowerStr}</span>
-          ${meterBadge}
-        </div>
-      </div>` : "";
-
-  const relayNode = relayItem ? `
-      <div class="unif-hwire unif-hwire--main"></div>
-      <div class="unif-node-wrap">
-        <div class="unif-node unif-node--qgbt ${relayOnline === true ? "is-online" : relayOnline === false ? "is-offline" : ""}"
-             id="unifNodeRelay" data-unif-device="relay">
-          ${unifSVGQGBT(relayOnline)}
-          <span class="unif-node-name">${cabinMapEscape(relayName)}</span>
-          <span class="unif-node-val" id="unifRelayPower">${relayPowerStr}</span>
-          ${relayBadge}
-        </div>
-      </div>` : "";
-
-  const meterLbl = meterItem ? `<div class="unif-sec-lbl unif-sec-lbl--cc">${cabinMapEscape(meterName)}</div>` : "";
-  const relayLbl = relayItem ? `<div class="unif-sec-lbl unif-sec-lbl--qgbt">${cabinMapEscape(relayName)}</div>` : "";
-
-  return `<div class="unif-diagram">
-    <div class="unif-sec-strip">
-      <div class="unif-sec-lbl unif-sec-lbl--gen">GERAÇÃO FV</div>
-      ${meterLbl}
-      ${relayLbl}
-    </div>
-
-    <div class="unif-flow">
-      <!-- Geração: cabines em linhas horizontais + bus coletor -->
-      <div class="unif-gen-section">
-        <div class="unif-cabins" style="--unif-cabin-min:${cabinMinPx}px">${cabinesHTML}</div>
-        <div class="unif-vbus"></div>
-      </div>
-      ${meterNode}
-      ${relayNode}
-    </div>
-  </div>`;
-}
-
-/* ── Inicialização: toggle Lista / Unifilar ── */
-function initInvViewToggle() {
-  const btnList    = document.getElementById("invBtnList");
-  const btnMap     = document.getElementById("invBtnMap");
-  const listSection = document.getElementById("invertersListSection");
-  const unifView   = document.getElementById("cabineMapView");
-  if (!btnList || !btnMap || !listSection || !unifView) return;
-  if (btnList.dataset.unifReady === "true") return;
-  btnList.dataset.unifReady = "true";
-
-  const switchView = (toMap) => {
-    document.body.classList.toggle("plant-map-mode", toMap);
-    btnList.classList.toggle("is-active", !toMap);
-    btnMap.classList.toggle("is-active", toMap);
-    listSection.style.display = toMap ? "none" : "";
-    unifView.style.display    = toMap ? "flex" : "none";
-
-    if (!toMap) { movePlantChartsToList(); return; }
-
-    movePlantChartsToList();
-    initUnifilarControls();
-    buildUnifilarOverview();
-    renderUnifilarSidePanel();
-    renderUnifilarStatsBar();
-  };
-
-  btnList.addEventListener("click", () => switchView(false));
-  btnMap.addEventListener("click",  () => switchView(true));
-  switchView(false);
-}
-
-function initUnifilarControls() {
-  const btn = document.getElementById("unifilarBtnOverview");
-  if (!btn || btn.dataset.unifCtrl) return;
-  btn.dataset.unifCtrl = "1";
-
-  document.getElementById("unifilarBtnOverview")?.addEventListener("click", () => setUnifMode("overview"));
-  document.getElementById("unifilarBtnCabin")?.addEventListener("click",   () => setUnifMode("cabin"));
-  document.getElementById("unifilarPrev")?.addEventListener("click",        () => navigateUnifCabin(-1));
-  document.getElementById("unifilarNext")?.addEventListener("click",        () => navigateUnifCabin(1));
-  document.getElementById("unifilarCollapseBtn")?.addEventListener("click", toggleUnifSidePanel);
-
-  const searchEl = document.getElementById("unifilarSearch");
-  if (searchEl) {
-    searchEl.addEventListener("input", () => {
-      UNIF_SEARCH_TEXT = searchEl.value.toLowerCase().trim();
-      renderUnifilarSidePanel();
-    });
-  }
-}
-
-function setUnifMode(mode, cabinIdx) {
-  if (UNIF_TRANSITION_RUNNING) return;
-  UNIF_MODE = mode;
-
-  const btnOv    = document.getElementById("unifilarBtnOverview");
-  const btnCab   = document.getElementById("unifilarBtnCabin");
-  const cabNav   = document.getElementById("unifilarCabinNav");
-  const overview = document.getElementById("unifilarOverview");
-  const detail   = document.getElementById("unifilarCabinDetail");
-
-  btnOv?.classList.toggle("is-active", mode === "overview");
-  btnCab?.classList.toggle("is-active", mode === "cabin");
-
-  if (mode === "overview") {
-    if (cabNav) cabNav.style.display = "none";
-    if (detail) detail.style.display = "none";
-    if (overview) overview.style.display = "";
-    buildUnifilarOverview();
-    UNIF_ACTIVE_CABIN_FILTER = null;
-    renderUnifilarSidePanel();
-  } else {
-    if (cabinIdx != null) UNIF_CABIN_IDX = cabinIdx;
-    if (cabNav) cabNav.style.display = "flex";
-    if (overview) overview.style.display = "none";
-    if (detail) detail.style.display = "";
-    renderUnifCabinDetail(UNIF_CABIN_IDX, null);
-  }
-}
-
-function navigateUnifCabin(dir) {
-  if (UNIF_TRANSITION_RUNNING || !UNIF_GROUPS.length) return;
-  UNIF_CABIN_IDX = ((UNIF_CABIN_IDX + dir) + UNIF_GROUPS.length) % UNIF_GROUPS.length;
-  renderUnifCabinDetail(UNIF_CABIN_IDX, dir > 0 ? "left" : "right");
-  UNIF_ACTIVE_CABIN_FILTER = String(UNIF_GROUPS[UNIF_CABIN_IDX]?.id ?? "");
-  renderUnifilarSidePanel();
-}
-
-function renderUnifCabinDetail(idx, direction) {
-  const detail = document.getElementById("unifilarCabinDetail");
-  const label  = document.getElementById("unifilarCabinLabel");
-  if (!detail || !UNIF_GROUPS.length) return;
-
-  const group = UNIF_GROUPS[idx] || UNIF_GROUPS[0];
-  if (!group) return;
-
-  if (label) label.textContent = `${group.name} (${group.inverters.length} inv.)`;
-
-  const container = document.createElement("div");
-  container.className = "unif-cabin-cards";
-  const idxRef = { value: 0 };
-  group.inverters.forEach(inv => container.appendChild(buildCabineCard(inv, idxRef.value++)));
-
-  /* Wires click -> modal */
-  container.querySelectorAll(".cabine-inv-card[data-inverter-real-id]").forEach(card => {
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("button,a,.device-command-control")) return;
-      const id  = card.dataset.inverterRealId;
-      const inv = INVERTER_EXTRAS_BY_ID.get(String(id)) ||
-        dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
-      if (inv) openUnifDeviceModal(inv, "inverter");
-    });
-  });
-
-  if (direction && detail.firstElementChild) {
-    UNIF_TRANSITION_RUNNING = true;
-    const outClass = direction === "left" ? "unif-slide-out-left" : "unif-slide-out-right";
-    const inClass  = direction === "left" ? "unif-slide-in-right" : "unif-slide-in-left";
-    detail.firstElementChild.classList.add(outClass);
-    container.classList.add(inClass);
-    detail.appendChild(container);
-    setTimeout(() => {
-      detail.querySelector("." + outClass)?.remove();
-      container.classList.remove(inClass);
-      UNIF_TRANSITION_RUNNING = false;
-    }, 380);
-  } else {
-    detail.innerHTML = "";
-    detail.appendChild(container);
-  }
-}
-
-function buildUnifilarOverview() {
-  const el = document.getElementById("unifilarOverview");
-  if (!el) return;
-  UNIF_GROUPS = buildUnifGroups(INVERTERS_REALTIME);
-  el.innerHTML = buildUnifilarOverviewHTML(UNIF_GROUPS, RELAY_REALTIME, MULTIMETER_REALTIME);
-
-  /* Click na cabine -> filtrar painel lateral */
-  el.querySelectorAll(".unif-cabin-box").forEach(box => {
-    box.addEventListener("click", () => {
-      el.querySelectorAll(".unif-cabin-box").forEach(b => b.classList.remove("is-focused"));
-      box.classList.add("is-focused");
-      UNIF_ACTIVE_CABIN_FILTER = box.dataset.cabinId || null;
-      renderUnifilarSidePanel();
-    });
-    box.addEventListener("dblclick", (e) => {
-      e.preventDefault();
-      setUnifMode("cabin", Number(box.dataset.cabinIdx) || 0);
-    });
-  });
-
-  /* Click em nós de equipamento -> modal */
-  el.querySelectorAll("[data-unif-device]").forEach(node => {
-    node.addEventListener("click", () => openUnifDeviceModalById(node.dataset.unifDevice, null));
-  });
-}
-
-function refreshCabineMapCards(invertersRaw) {
-  if (!isUnifilarVisible()) return;
-  UNIF_GROUPS = buildUnifGroups(invertersRaw);
-  if (UNIF_MODE === "overview") {
-    buildUnifilarOverview();
-  } else {
-    UNIF_CABIN_IDX = Math.min(UNIF_CABIN_IDX, Math.max(0, UNIF_GROUPS.length - 1));
-    renderUnifCabinDetail(UNIF_CABIN_IDX, null);
-  }
-  renderUnifilarSidePanel();
-  renderUnifilarStatsBar();
-}
-
-function updateCabineRelayNode(relayData) {
-  if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
-  const item  = Array.isArray(relayData) ? relayData[0] : relayData;
-  const qgbt  = document.getElementById("unifNodeQGBT");
-  const val   = document.getElementById("unifQGBTVal");
-  const badge = document.getElementById("unifQGBTBadge");
-  if (!qgbt) return;
-  const online = item ? relayOnlineFromPayload(item) : false;
-  const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? {}, ["active_power_kw","power_kw","active_power","power"]) : null;
-  qgbt.classList.toggle("is-online",  online);
-  qgbt.classList.toggle("is-offline", !online && item != null);
-  if (val)   val.textContent   = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
-  if (badge) badge.textContent = online ? "Online" : "Offline";
-}
-
-function updateCabineMeterNode(multimeterData) {
-  if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
-  const item = Array.isArray(multimeterData) ? multimeterData[0] : multimeterData;
-  const cc   = document.getElementById("unifNodeCC");
-  const val  = document.getElementById("unifCCPower");
-  if (!cc) return;
-  const online = item ? multimeterOnlineFromPayload(item) : false;
-  const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? item?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
-  cc.classList.toggle("is-online",  online);
-  cc.classList.toggle("is-offline", !online && item != null);
-  if (val) val.textContent = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
-}
-
-/* ── Painel lateral de dispositivos ── */
-function renderUnifilarSidePanel() {
-  const listEl   = document.getElementById("unifilarSideList");
-  const footerEl = document.getElementById("unifilarSideFooter");
-  if (!listEl) return;
-
-  const devices = buildUnifDeviceList(UNIF_ACTIVE_CABIN_FILTER, UNIF_SEARCH_TEXT);
-  listEl.innerHTML = devices.map(d => buildUnifSideRow(d)).join("") ||
-    `<div class="unif-side-empty">Nenhum dispositivo encontrado</div>`;
-
-  listEl.querySelectorAll("[data-unif-side-type]").forEach(row => {
-    row.addEventListener("click", () => openUnifDeviceModalById(row.dataset.unifSideType, row.dataset.unifSideId));
-  });
-
-  if (footerEl) {
-    const all     = buildUnifDeviceList(null, "");
-    const online  = all.filter(d => d.status === "online").length;
-    const alarm   = all.filter(d => d.status === "alarm").length;
-    const offline = all.filter(d => d.status === "offline").length;
-    footerEl.innerHTML = `
-      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--online"></span>Online ${online}</span>
-      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--alarm"></span>Alerta ${alarm}</span>
-      <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--offline"></span>Offline ${offline}</span>`;
-  }
-}
-
-function buildUnifDeviceList(cabinFilter, search) {
-  const devices = [];
-  const q = (search || "").toLowerCase();
-
-  UNIF_GROUPS.forEach(group => {
-    if (cabinFilter && String(group.id) !== String(cabinFilter)) return;
-    group.inverters.forEach(inv => {
-      const id     = String(getInverterRealId(inv) ?? "");
-      const name   = getInverterDisplayName(inv, 0);
-      const online = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-      const alarm  = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-      const rated  = asNumber(inv.rated_power_kw ?? 0, 0);
-      if (q && !name.toLowerCase().includes(q)) return;
-      devices.push({ id, type: "inverter", name, sub: "Inversor", power: rated > 0 ? `${rated.toFixed(0)} kW` : "—",
-        status: alarm ? "alarm" : online ? "online" : "offline", data: inv });
-    });
-  });
-
-  if (!cabinFilter) {
-    const meterItem = Array.isArray(MULTIMETER_REALTIME) ? MULTIMETER_REALTIME[0] : MULTIMETER_REALTIME;
-    if (meterItem) {
-      const mName = meterItem.device_name || meterItem.name || "Medidor";
-      const mPow  = pickDeviceMetricValue(meterItem, meterItem?.analog ?? meterItem?.data ?? {}, ["active_power_kw","p_kw","power_kw"]);
-      if (!q || mName.toLowerCase().includes(q) || "medidor meter multímetro".includes(q))
-        devices.push({ id: String(meterItem.device_id ?? meterItem.multimeter_id ?? "meter"), type: "multimeter",
-          name: mName, sub: "Medidor", power: mPow != null ? `${mPow.toFixed(1)} kW` : "—",
-          status: multimeterOnlineFromPayload(meterItem) ? "online" : "offline", data: meterItem });
-    }
-
-    const relayItem = Array.isArray(RELAY_REALTIME) ? RELAY_REALTIME[0] : RELAY_REALTIME;
-    if (relayItem) {
-      const rName = relayItem.device_name || relayItem.name || "Relé";
-      const rPow  = pickDeviceMetricValue(relayItem, relayItem?.analog ?? {}, ["active_power_kw","power_kw","active_power","power"]);
-      if (!q || rName.toLowerCase().includes(q) || "relé relay proteção".includes(q))
-        devices.push({ id: String(relayItem.device_id ?? relayItem.relay_id ?? "relay"), type: "relay",
-          name: rName, sub: "Relé", power: rPow != null ? `${rPow.toFixed(1)} kW` : "—",
-          status: relayOnlineFromPayload(relayItem) ? "online" : "offline", data: relayItem });
-    }
-  }
-  return devices;
-}
-
-function buildUnifSideRow(d) {
-  const sc = d.status === "online" ? "online" : d.status === "alarm" ? "alarm" : "offline";
-  const sl = d.status === "online" ? "Online" : d.status === "alarm" ? "Alerta" : "Offline";
-  const iconMap = {
-    inverter:    `<svg viewBox="0 0 20 20" fill="none"><rect x="1" y="3" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M10 5L8 10h3L7 15l9-7h-4l2-3z" fill="currentColor" opacity=".7"/></svg>`,
-    multimeter:  `<svg viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="9" y1="6" x2="9" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="12" y1="6" x2="12" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".5"/></svg>`,
-    transformer: `<svg viewBox="0 0 24 20" fill="none"><circle cx="7" cy="10" r="6" stroke="currentColor" stroke-width="1.3"/><circle cx="17" cy="10" r="6" stroke="currentColor" stroke-width="1.3" opacity=".6"/></svg>`,
-    relay:       `<svg viewBox="0 0 20 20" fill="none"><rect x="1" y="4" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="14" x2="14" y2="14" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="14" x2="9" y2="9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="6" y1="9" x2="14" y2="9" stroke="currentColor" stroke-width=".8" stroke-dasharray="2 1.5" opacity=".4" stroke-linecap="round"/></svg>`,
-    sa:          `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.2"/><path d="M10 3L8.5 8.5H11.5L8 17L14.5 10H11.5L13 3Z" fill="currentColor" opacity=".7"/></svg>`,
-    rede:        `<svg viewBox="0 0 20 20" fill="none"><line x1="10" y1="1" x2="10" y2="19" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="4" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="6" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><line x1="18" y1="5" x2="14" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><circle cx="2" cy="5" r="1.4" fill="currentColor"/><circle cx="18" cy="5" r="1.4" fill="currentColor"/></svg>`
-  };
-  return `<div class="unif-side-row" data-unif-side-type="${d.type}" data-unif-side-id="${d.id}">
-    <div class="unif-side-row-icon" style="color:rgba(127,208,85,.65)">${iconMap[d.type] || iconMap.inverter}</div>
-    <div class="unif-side-row-info">
-      <span class="unif-side-row-name">${cabinMapEscape(d.name)}</span>
-      <span class="unif-side-row-sub">${d.sub}</span>
-    </div>
-    <div class="unif-side-row-right">
-      <span class="unif-side-row-power">${d.power}</span>
-      <span class="unif-side-status unif-side-status--${sc}">${sl}</span>
-    </div>
-    <button class="unif-side-row-action" type="button" title="Ver detalhes">⋮</button>
-  </div>`;
-}
-
-/* ── Barra de estatísticas ── */
-function renderUnifilarStatsBar() {
-  const el = document.getElementById("unifilarStatsBar");
-  if (!el) return;
-  const total = UNIF_GROUPS.reduce((s, g) => s + g.inverters.length, 0);
-  const dcKwp = UNIF_GROUPS.reduce((s, g) => s + g.inverters.reduce((gs, inv) => gs + asNumber(inv.rated_power_kw ?? 0, 0), 0), 0);
-  const acKw  = asNumber(PLANT_STATE.active_power_kw, 0);
-  const rated = asNumber(PLANT_STATE.rated_power_kwp, 0);
-  el.innerHTML = `
-    <div class="unif-stat">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="1" y="3" width="16" height="12" rx="2" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/></svg>
-      <span class="unif-stat-lbl">TOTAL INVERSORES</span><strong class="unif-stat-val">${total}</strong>
-    </div>
-    <div class="unif-stat">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="2" y="4" width="14" height="8" rx="1.5" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/><line x1="5" y1="4" x2="4" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/><line x1="9" y1="4" x2="9" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/><line x1="13" y1="4" x2="14" y2="1" stroke="rgba(127,208,85,.5)" stroke-width="1.1"/></svg>
-      <span class="unif-stat-lbl">POTÊNCIA DC TOTAL</span><strong class="unif-stat-val">${dcKwp.toFixed(0)} kWp</strong>
-    </div>
-    <div class="unif-stat">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2L7 9h4L5 16l11-7h-4l2-7z" fill="rgba(127,208,85,.7)"/></svg>
-      <span class="unif-stat-lbl">POTÊNCIA AC TOTAL</span><strong class="unif-stat-val">${acKw.toFixed(1)} kW</strong>
-    </div>
-    <div class="unif-stat">
-      <svg width="20" height="18" viewBox="0 0 20 18" fill="none"><circle cx="7" cy="9" r="6" stroke="rgba(127,208,85,.6)" stroke-width="1.2"/><circle cx="13" cy="9" r="6" stroke="#f5c842" stroke-width="1.2" opacity=".75"/></svg>
-      <span class="unif-stat-lbl">TRANSFORMADOR</span><strong class="unif-stat-val">${rated > 0 ? rated.toFixed(0) + " kVA" : "—"}</strong>
-    </div>
-    <div class="unif-stat">
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 2L4 16h3l2-5 2 5h3L9 2z" stroke="rgba(127,208,85,.6)" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.5" cy="13" r="1" fill="rgba(127,208,85,.6)"/><circle cx="11.5" cy="13" r="1" fill="rgba(127,208,85,.6)"/></svg>
-      <span class="unif-stat-lbl">TENSÃO MT</span><strong class="unif-stat-val" id="unifStatMT">—</strong>
-    </div>`;
-}
-
-/* ── Colapsar painel lateral ── */
-function toggleUnifSidePanel() {
-  UNIF_SIDE_COLLAPSED = !UNIF_SIDE_COLLAPSED;
-  const side = document.getElementById("unifilarSide");
-  const svg  = document.getElementById("unifCollapseSVG");
-  if (side) side.classList.toggle("is-collapsed", UNIF_SIDE_COLLAPSED);
-  if (svg) {
-    svg.innerHTML = UNIF_SIDE_COLLAPSED
-      ? `<path d="M4 1L7 6L4 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-         <line x1="11" y1="6" x2="1" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>`
-      : `<path d="M8 1L11 6L8 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-         <line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity=".4"/>`;
-  }
-}
-
-/* ── Modal de dispositivo ── */
-function openUnifDeviceModalById(type, id) {
-  if (type === "inverter") {
-    const inv = INVERTER_EXTRAS_BY_ID.get(String(id)) ||
-      dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
-    if (inv) { openUnifDeviceModal(inv, "inverter"); return; }
-  }
-  if (type === "relay")      { openUnifDeviceModal(Array.isArray(RELAY_REALTIME)      ? RELAY_REALTIME[0]      : RELAY_REALTIME,      "relay");      return; }
-  if (type === "multimeter") { openUnifDeviceModal(Array.isArray(MULTIMETER_REALTIME) ? MULTIMETER_REALTIME[0] : MULTIMETER_REALTIME, "multimeter"); return; }
-  openUnifDeviceModal(null, type);
-}
-
-function openUnifDeviceModal(data, type) {
-  closeUnifDeviceModal(true);
-  const seq = ++UNIF_MODAL_SEQ;
-
-  const modal = document.createElement("div");
-  modal.id = "unifDeviceModal";
-  modal.className = "unif-modal-backdrop";
-
-  const typeLabels = { inverter:"Inversor", relay:"Relé / Proteção", multimeter:"Multimedidor",
-    transformer:"Transformador", sa:"Serviços Auxiliares", rede:"Rede", cc:"Caixa Combinadora",
-    qgbt:"QGBT MT", weather:"Estação Meteorológica" };
-  const typeLabel = typeLabels[type] || type;
-
-  let title = "Dispositivo";
-  if (type === "inverter" && data) title = cabinMapEscape(getInverterDisplayName(data, 0));
-  else if (type === "relay")       title = "QGBT MT / Relé";
-  else if (type === "multimeter")  title = "CC 01 / Multimedidor";
-  else if (type === "transformer") title = "T01 — Transformador";
-  else if (type === "sa")          title = "SA 01";
-  else if (type === "rede")        title = "REDE";
-
-  const bodyHTML = buildUnifModalBody(data, type);
-
-  modal.innerHTML = `<div class="unif-modal-card">
-    <div class="unif-modal-hdr">
-      <div class="unif-modal-title-group">
-        <span class="unif-modal-type-badge">${typeLabel}</span>
-        <h3 class="unif-modal-title">${title}</h3>
-      </div>
-      <button class="unif-modal-close" type="button" aria-label="Fechar">×</button>
-    </div>
-    <div class="unif-modal-body" id="unifModalBody">${bodyHTML}</div>
-  </div>`;
-
-  modal.querySelector(".unif-modal-close").addEventListener("click", closeUnifDeviceModal);
-  modal.addEventListener("pointerdown", e => { if (!e.target.closest(".unif-modal-card")) closeUnifDeviceModal(); });
-  const escFn = e => { if (e.key === "Escape") closeUnifDeviceModal(); };
-  document.addEventListener("keydown", escFn);
-  modal._escFn = escFn;
-
-  document.body.appendChild(modal);
-  requestAnimationFrame(() => modal.classList.add("unif-modal-visible"));
-
-  /* Carrega strings do inversor de forma assíncrona */
-  if (type === "inverter" && data) {
-    const realId = getInverterRealId(data);
-    if (realId != null) {
-      loadCabineStringsPayload(realId).then(payload => {
-        if (seq !== UNIF_MODAL_SEQ) return;
-        const grid  = document.getElementById("unifModalStrGrid");
-        const count = document.getElementById("unifModalStrCount");
-        if (!grid) return;
-        const rendered = renderCabineStringsBalloonRows(payload, realId);
-        grid.innerHTML = rendered.html;
-        if (count) count.textContent = `${rendered.count} string${rendered.count !== 1 ? "s" : ""}`;
-      });
-    }
-  }
-
-  /* Wires command buttons inside modal */
-  setTimeout(() => wireDeviceCommandButtons(modal), 50);
-}
-
-function closeUnifDeviceModal(immediate = false) {
-  UNIF_MODAL_SEQ++;
-  const modal = document.getElementById("unifDeviceModal");
-  if (!modal) return;
-  if (modal._escFn) document.removeEventListener("keydown", modal._escFn);
-  if (immediate) { modal.remove(); return; }
-  modal.classList.remove("unif-modal-visible");
-  setTimeout(() => modal.parentNode?.removeChild(modal), 230);
-}
-
-function buildUnifModalBody(data, type) {
-  if (type === "inverter"    && data) return buildUnifInverterBody(data);
-  if (type === "relay"       && data) return buildUnifRelayBody(data);
-  if (type === "multimeter"  && data) return buildUnifMeterBody(data);
-  if (type === "transformer")         return buildUnifTrafoBody();
-  return `<div class="unif-modal-empty">Sem dados disponíveis para este dispositivo.</div>`;
-}
-
-function buildUnifInverterBody(inv) {
-  const realId = getInverterRealId(inv);
-  const online  = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-  const alarm   = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-  const pKw     = cabinMapReadInvMetric(inv, ["active_power_kw","power_kw","power","active_power"]);
-  const eff     = cabinMapReadInvMetric(inv, ["efficiency_pct","efficiency","eff_pct"]);
-  const temp    = cabinMapReadInvMetric(inv, ["temperature_internal_c","temperature_c","temp_c","temperature"]);
-  const freq    = cabinMapReadInvMetric(inv, ["frequency_hz","freq_hz","frequency"]);
-  const prRaw   = cabinMapReadInvMetric(inv, ["performance_ratio","pr","pr_ratio"]);
-  const rated   = cabinMapReadInvMetric(inv, ["rated_power_kw","capacity_kw","rated_kw"]);
-  const lastTs  = cabinMapReadInvMetric(inv, ["last_reading_at","last_reading_ts","last_ts","timestamp","event_ts"]);
-  const prPct   = prRaw != null ? normalizePercentMaybe(prRaw) : null;
-  const sc      = alarm ? "alarm" : online ? "online" : "offline";
-  const sl      = alarm ? "Alerta" : online ? "Online" : "Offline";
-
-  const f0 = (v, u) => { const n = Number(typeof v === "string" ? v.replace(",", ".") : v); return Number.isFinite(n) ? `${n.toFixed(0)} ${u}` : "—"; };
-  const f2 = (v, u) => { const n = Number(typeof v === "string" ? v.replace(",", ".") : v); return Number.isFinite(n) ? `${n.toFixed(2)} ${u}` : "—"; };
-
-  const vab = inv?.line_voltage_ab_v ?? inv?.line_voltage_ab;
-  const vbc = inv?.line_voltage_bc_v ?? inv?.line_voltage_bc;
-  const vca = inv?.line_voltage_ca_v ?? inv?.line_voltage_ca;
-  const ia  = inv?.current_phase_a_a ?? inv?.current_phase_a;
-  const ib  = inv?.current_phase_b_a ?? inv?.current_phase_b;
-  const ic  = inv?.current_phase_c_a ?? inv?.current_phase_c;
-  const fp  = inv?.power_factor;
-  const kvar = inv?.power_reactive_kvar;
-  const kva  = inv?.apparent_power_kva;
-  const dcKw = inv?.power_dc_kw;
-  const strV = inv?.string_voltage_v;
-  const iso  = inv?.resistance_insulation_mohm;
-
-  return `<div class="unif-modal-status-bar">
-    <span class="unif-modal-state unif-modal-state--${sc}">${sl}</span>
-    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
-  </div>
-  <div class="unif-modal-kpis">
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência</span><strong class="unif-modal-kpi-val">${pKw != null ? cabinMapFormat(pKw, 1, "kW") : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Eficiência</span><strong class="unif-modal-kpi-val">${eff != null ? cabinMapFormat(eff, 1, "%") : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Temperatura</span><strong class="unif-modal-kpi-val ${temp != null && asNumber(temp, 0) > 70 ? "val-warn" : ""}">${temp != null ? `${cabinMapFormat(temp, 1)}°C` : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Frequência</span><strong class="unif-modal-kpi-val">${freq != null ? cabinMapFormat(freq, 2, "Hz") : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">PR</span><strong class="unif-modal-kpi-val">${prPct != null ? cabinMapFormat(prPct, 1, "%") : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Cap. Nominal</span><strong class="unif-modal-kpi-val">${rated != null ? cabinMapFormat(rated, 0, "kW") : "—"}</strong></div>
-  </div>
-  <div class="unif-modal-section">
-    <div class="unif-modal-section-hdr"><span>Strings</span><span class="unif-modal-count" id="unifModalStrCount">Carregando...</span></div>
-    <div class="unif-modal-str-grid" id="unifModalStrGrid"><div class="unif-modal-loading">Carregando strings...</div></div>
-  </div>
-  <div class="unif-modal-section">
-    <div class="unif-modal-section-hdr"><span>AC</span></div>
-    <div class="unif-modal-chips">
-      <div class="unif-chip"><span class="unif-chip-lbl">V AB</span><span class="unif-chip-val">${f0(vab,"V")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">V BC</span><span class="unif-chip-val">${f0(vbc,"V")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">V CA</span><span class="unif-chip-val">${f0(vca,"V")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">Ia</span><span class="unif-chip-val">${f2(ia,"A")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">Ib</span><span class="unif-chip-val">${f2(ib,"A")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">Ic</span><span class="unif-chip-val">${f2(ic,"A")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">FP</span><span class="unif-chip-val">${(()=>{const n=Number(typeof fp==="string"?fp.replace(",","."):fp);return Number.isFinite(n)?n.toFixed(3):"—"})()}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">Q reativa</span><span class="unif-chip-val">${f2(kvar,"kvar")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">S aparente</span><span class="unif-chip-val">${f2(kva,"kVA")}</span></div>
-    </div>
-  </div>
-  <div class="unif-modal-section">
-    <div class="unif-modal-section-hdr"><span>DC</span></div>
-    <div class="unif-modal-chips">
-      <div class="unif-chip"><span class="unif-chip-lbl">P DC</span><span class="unif-chip-val">${f2(dcKw,"kW")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">V string</span><span class="unif-chip-val">${f0(strV,"V")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">R isol.</span><span class="unif-chip-val">${(()=>{const n=Number(typeof iso==="string"?iso.replace(",","."):iso);return Number.isFinite(n)?`${n.toFixed(2)} MΩ`:"—"})()}</span></div>
-    </div>
-  </div>
-  ${_canSendCommand() && realId != null ? `
-  <div class="unif-modal-section">
-    <div class="unif-modal-section-hdr"><span>Comandos</span></div>
-    <div class="unif-modal-cmds">${renderDeviceCommandControl("inverter", realId, online ? "on" : "off")}</div>
-  </div>` : ""}`;
-}
-
-function buildUnifRelayBody(item) {
-  if (!item) return `<div class="unif-modal-empty">Sem dados do relé</div>`;
-  const analog  = item?.analog ?? {};
-  const online  = relayOnlineFromPayload(item);
-  const pKw     = pickDeviceMetricValue(item, analog, ["active_power_kw","power_kw","active_power","power"]);
-  const pApKva  = pickDeviceMetricValue(item, analog, ["apparent_power_kva","power_apparent_kva","apparent_power"]);
-  const pRkvar  = pickDeviceMetricValue(item, analog, ["reactive_power_kvar","power_reactive_kvar","reactive_power"]);
-  const lastTs  = item?.last_reading_at ?? item?.timestamp ?? item?.event_ts;
-  const sc = online ? "online" : "offline";
-  return `<div class="unif-modal-status-bar">
-    <span class="unif-modal-state unif-modal-state--${sc}">${online ? "Online" : "Offline"}</span>
-    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
-  </div>
-  <div class="unif-modal-kpis">
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Ativa</span><strong class="unif-modal-kpi-val">${pKw != null ? cabinMapFormat(pKw, 1) + " kW" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Aparente</span><strong class="unif-modal-kpi-val">${pApKva != null ? cabinMapFormat(pApKva, 1) + " kVA" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Reativa</span><strong class="unif-modal-kpi-val">${pRkvar != null ? cabinMapFormat(pRkvar, 2) + " kvar" : "—"}</strong></div>
-  </div>
-  ${_canSendCommand() ? `<div class="unif-modal-section"><div class="unif-modal-section-hdr"><span>Comandos</span></div><div class="unif-modal-cmds">${renderDeviceCommandControl("relay","main",online?"on":"off")}</div></div>` : ""}`;
-}
-
-function buildUnifMeterBody(item) {
-  if (!item) return `<div class="unif-modal-empty">Sem dados do multimedidor</div>`;
-  const analog   = item?.analog ?? item?.data ?? {};
-  const online   = multimeterOnlineFromPayload(item);
-  const act      = pickDeviceMetricValue(item, analog, ["active_power_kw","p_kw","power_kw","active_power"]);
-  const app      = pickDeviceMetricValue(item, analog, ["apparent_power_kva","power_apparent_kva","apparent_power"]);
-  const react    = pickDeviceMetricValue(item, analog, ["reactive_power_kvar","power_reactive_kvar","reactive_power"]);
-  const pf       = pickDeviceMetricValue(item, analog, ["power_factor","power_factor_pct","pf"]);
-  const lastTs   = item?.last_reading_at ?? item?.timestamp;
-  const sc = online ? "online" : "offline";
-  return `<div class="unif-modal-status-bar">
-    <span class="unif-modal-state unif-modal-state--${sc}">${online ? "Online" : "Offline"}</span>
-    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
-  </div>
-  <div class="unif-modal-kpis">
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Ativa</span><strong class="unif-modal-kpi-val">${act != null ? cabinMapFormat(act, 1) + " kW" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Aparente</span><strong class="unif-modal-kpi-val">${app != null ? cabinMapFormat(app, 1) + " kVA" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Potência Reativa</span><strong class="unif-modal-kpi-val">${react != null ? cabinMapFormat(react, 2) + " kvar" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Fator de Potência</span><strong class="unif-modal-kpi-val">${pf != null ? cabinMapFormat(pf, 3) : "—"}</strong></div>
-  </div>`;
-}
-
-function buildUnifTrafoBody() {
-  const rated = asNumber(PLANT_STATE.rated_power_kwp, 0);
-  return `<div class="unif-modal-kpis">
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Capacidade</span><strong class="unif-modal-kpi-val">${rated > 0 ? rated.toFixed(0) + " kVA" : "—"}</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Status</span><strong class="unif-modal-kpi-val">Online</strong></div>
-    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Temperatura</span><strong class="unif-modal-kpi-val" id="unifModalTrafoTemp">—</strong></div>
-  </div>`;
-}
-
-function countOnlineInverters(invertersRaw) {
-  const inverters = dedupInvertersById(invertersRaw);
-  let online = 0;
-  inverters.forEach(inv => {
-    if (isOnlineByFreshness(inv) && !isZeroSnapshot(inv)) online++;
-  });
-  return online;
-}
-
-// ======================================================
-// RENDER — HEADER DA USINA
-// ======================================================
-function renderHeaderSummary() {
-  const elRated = document.getElementById("headerRatedPower");
-  const elActive = document.getElementById("headerActivePower");
-  const elCapacity = document.getElementById("headerCapacity");
-  if (!elRated || !elActive || !elCapacity) return;
-
-  elRated.textContent = `${asNumber(PLANT_STATE.rated_power_kwp).toFixed(1)} kWp`;
-  elActive.textContent = `${asNumber(PLANT_STATE.active_power_kw).toFixed(1)} kW`;
-  elCapacity.textContent = `${asNumber(PLANT_STATE.capacity_percent).toFixed(1)} %`;
-}
-
-// ======================================================
-// RENDER — WEATHER
-// ======================================================
-function renderWeather(data) {
-  const hasWeather = !!(data && typeof data === "object");
-  const d = hasWeather ? data : {};
-
-  const elIrr = document.getElementById("weatherIrradiance");
-  const elAir = document.getElementById("weatherAirTemp");
-  const elModule = document.getElementById("weatherModuleTemp");
-
-  if (elIrr) {
-    const value = d.irradiance_poa_wm2 ?? d.POA_irradiance ?? null;
-    elIrr.textContent = value != null ? `${Number(value).toFixed(0)} W/m²` : "—";
-  }
-  if (elAir) {
-    const value = d.air_temperature_c ?? d.temp_ambiente ?? null;
-    elAir.textContent = value != null ? `${Number(value).toFixed(1)} °C` : "—";
-  }
-  if (elModule) {
-    const value = d.module_temperature_c ?? d.temp_modulo ?? null;
-    elModule.textContent = value != null ? `${Number(value).toFixed(1)} °C` : "—";
-  }
-
-  // Painel expandido
-  const wxWind = document.getElementById("wxWindSpeed");
-  if (wxWind) {
-    const v = d.wind_speed_ms ?? d.vel_vento ?? null;
-    wxWind.textContent = v != null ? `${Number(v).toFixed(1)} m/s` : "—";
-  }
-
-  const wxDir = document.getElementById("wxWindDir");
-  if (wxDir) {
-    const v = d.wind_direction_deg ?? d.wind_direction ?? null;
-    wxDir.textContent = v != null ? `${Number(v).toFixed(0)}°` : "—";
-  }
-
-  const wxGhi = document.getElementById("wxGhi");
-  if (wxGhi) {
-    const v = d.irradiance_ghi_wm2 ?? d.GHI_irradiance ?? null;
-    wxGhi.textContent = v != null ? `${Number(v).toFixed(0)} W/m²` : "—";
-  }
-
-  const wxRain = document.getElementById("wxRain");
-  if (wxRain) {
-    const hour = d.rainfall_hour_mm ?? d.acumulador_pluv_hour ?? null;
-    const month = d.rainfall_month_mm ?? d.acumulador_pluv_month ?? null;
-    const hStr = hour != null ? `${Number(hour).toFixed(1)}` : "—";
-    const mStr = month != null ? `${Number(month).toFixed(1)}` : "—";
-    wxRain.textContent = `${hStr} / ${mStr} mm`;
-  }
-
-  const wxBatt = document.getElementById("wxBattery");
-  if (wxBatt) {
-    const v = d.battery_voltage_v ?? d.volt_battery ?? null;
-    wxBatt.textContent = v != null ? `${Number(v).toFixed(2)} V` : "—";
-  }
-
-  const wxSensor = document.getElementById("wxRainSensor");
-  if (wxSensor) {
-    const v = d.rain_sensor ?? d.sensor_chuva ?? null;
-    wxSensor.textContent = v != null ? (Number(v) === 1 ? "Chuva" : "Seco") : "—";
-  }
-}
-
-function setupWeatherExpand() {
-  const btn = document.getElementById("weatherExpandBtn");
-  const panel = document.getElementById("weatherExpandPanel");
-  if (!btn || !panel) return;
-  btn.addEventListener("click", () => {
-    const open = panel.classList.toggle("is-open");
-    btn.classList.toggle("is-open", open);
-  });
-}
-
-// ======================================================
-// RENDER — ALARMES ATIVOS
-// ======================================================
-function renderAlarms(alarms) {
-  const container = document.getElementById("plantActiveAlarms");
-  if (!container) return;
-
-  const sublineEl = document.getElementById("plantSubline");
-  container.innerHTML = "";
-  const filtered = sortPlantAlarmsDesc(
-    dedupePlantAlarms(
-      (Array.isArray(alarms) ? alarms : []).filter(
-        (alarm) => normalizeAlarmState(alarm?.state ?? alarm?.alarm_state ?? alarm?.status) === "ACTIVE" && alarm?.acknowledged !== true
-      )
-    )
+/* Vertical dashed wire from transformer to SA */
+.unif-vwire-dashed {
+  width: 2px;
+  height: 28px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(127,208,85,.6) 0, rgba(127,208,85,.6) 4px,
+    transparent 4px, transparent 8px
   );
-
-  if (!filtered.length) {
-    container.innerHTML = "";
-    if (sublineEl) {
-      sublineEl.textContent = "Nenhum alarme ativo";
-      sublineEl.classList.remove("plant-subline--alarm");
-    }
-    renderAlarmMenuButton();
-    return;
-  }
-
-  if (sublineEl) {
-    sublineEl.textContent = `${filtered.length} alarme(s) ativo(s)`;
-    sublineEl.classList.add("plant-subline--alarm");
-  }
-
-  filtered.forEach(a => {
-    const row = document.createElement("div");
-    row.className = `alarm-row ${normalizeAlarmSeverity(a.severity) || ""}`.trim();
-    const deviceType =
-      a.device_type ??
-      a.device_type_name ??
-      a.event_source ??
-      "—";
-    const when =
-      a.started_at ??
-      a.timestamp ??
-      null;
-
-    row.innerHTML = `
-      <span class="alarm-device">${deviceType} • ${a.device_name || "—"}</span>
-      <span class="alarm-desc">${a.event_name || (a.event_code != null ? `Evento ${a.event_code}` : "—")}</span>
-      <span class="alarm-time">${when ? new Date(when).toLocaleString("pt-BR") : "—"}</span>
-    `;
-    row.title = "Duplo clique para reconhecer alarme";
-    row.addEventListener("dblclick", async () => {
-      row.style.opacity = "0.6";
-      try {
-        await acknowledgePlantAlarm(a);
-        ACTIVE_ALARMS = ACTIVE_ALARMS.filter((alarm) => String(alarm?.event_row_id ?? alarm?.alarm_id ?? alarm?.id) !== String(a?.event_row_id ?? a?.alarm_id ?? a?.id));
-        renderAlarms(ACTIVE_ALARMS);
-        renderAlarmMenuButton();
-        if (!ACTIVE_ALARMS.length) {
-          setPlantAlarmMenuOpen(false);
-        }
-      } catch (err) {
-        row.style.opacity = "";
-        console.error("[alarms][ack] erro", err);
-        alert("Não foi possível reconhecer o alarme. Tente novamente.");
-      }
-    });
-
-    container.appendChild(row);
-  });
-  renderAlarmMenuButton();
+  flex-shrink: 0;
 }
 
-// ======================================================
-// ✅ RENDER — RELÉ (NOVO SHAPE DO ENDPOINT /relay/realtime)
-// item: { is_online, relay_on, last_update, analog:{active_power_kw} }
-// ======================================================
-function ensureRelayUiScaffold() {
-  const relayRow = document.getElementById("relayRow");
-  if (!relayRow) return null;
+/* Badges inline */
+.unif-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  letter-spacing: .05em;
+  background: rgba(80,100,90,.35);
+  color: rgba(205,238,221,.6);
+}
+.unif-badge--online { background: rgba(127,208,85,.2); color: rgba(127,208,85,.95); }
+.unif-badge--offline { background: rgba(255,80,80,.18); color: rgba(255,120,100,.9); }
 
-  const nameEl = relayRow.querySelector(".relay-left");
-  const dotEl = document.getElementById("relayDot") || relayRow.querySelector(".status-dot");
-  const commandBarWrap = document.getElementById("relayCommandBarWrap");
-  const legacyRight = relayRow.querySelector(".relay-right");
-  const detailsPanel = document.getElementById("relayDetailsPanel");
-
-  // Remove “extras antigos” visualmente (não remove do DOM, só não usa)
-  const oldOnline = document.getElementById("relayOnlineText");
-  const oldAvail = document.getElementById("relayAvailabilityText");
-  const oldLast = document.getElementById("relayLastUpdateText");
-
-  if (oldOnline) oldOnline.textContent = "—";
-  if (oldAvail) oldAvail.textContent = "";
-  if (oldLast) oldLast.textContent = "";
-  if (legacyRight) legacyRight.style.display = "none";
-
-  // cria badge ONLINE/OFFLINE ao lado do nome
-  let badgeOnline = relayRow.querySelector("#relayOnlineBadge");
-  if (!badgeOnline) {
-    badgeOnline = document.createElement("span");
-    badgeOnline.id = "relayOnlineBadge";
-    badgeOnline.style.display = "inline-flex";
-    badgeOnline.style.alignItems = "center";
-    badgeOnline.style.justifyContent = "center";
-    badgeOnline.style.padding = "6px 10px";
-    badgeOnline.style.borderRadius = "999px";
-    badgeOnline.style.fontSize = "11px";
-    badgeOnline.style.letterSpacing = "0.06em";
-    badgeOnline.style.textTransform = "uppercase";
-    badgeOnline.style.border = "1px solid rgba(255,255,255,0.10)";
-    badgeOnline.style.background = "rgba(255,255,255,0.04)";
-    badgeOnline.style.color = "rgba(233,255,243,0.88)";
-    badgeOnline.style.marginLeft = "10px";
-    badgeOnline.style.whiteSpace = "nowrap";
-
-    if (nameEl) nameEl.appendChild(badgeOnline);
-  }
-
-  const legacyStateEl = relayRow.querySelector("#relayStateBadge");
-  if (legacyStateEl) legacyStateEl.remove();
-
-  if (commandBarWrap && commandBarWrap.parentElement !== relayRow) {
-    relayRow.appendChild(commandBarWrap);
-  }
-
-  relayRow.classList.add("relay-row--table");
-  relayRow.style.gridTemplateColumns = "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px";
-
-  let expandIcon = relayRow.querySelector("#relayExpandIcon");
-  if (!expandIcon) {
-    expandIcon = document.createElement("i");
-    expandIcon.id = "relayExpandIcon";
-    expandIcon.className = "fa-solid fa-chevron-down relay-expand-icon";
-    if (nameEl) nameEl.appendChild(expandIcon);
-  }
-
-  const ensureMetricCell = (id, gridColumn) => {
-    let el = relayRow.querySelector(`#${id}`);
-    if (!el) {
-      el = document.createElement("div");
-      el.id = id;
-      el.className = "device-metric-cell";
-      relayRow.appendChild(el);
-    }
-    el.style.gridColumn = String(gridColumn);
-    el.style.gridRow = "1";
-    return el;
-  };
-
-  const activePowerEl = ensureMetricCell("relayActivePowerValue", 3);
-  const apparentPowerEl = ensureMetricCell("relayApparentPowerValue", 4);
-  const reactivePowerEl = ensureMetricCell("relayReactivePowerValue", 5);
-  const tsEl = ensureMetricCell("relayTsText", 6);
-  tsEl.classList.add("relay-timestamp-cell");
-  activePowerEl.dataset.label = "ACTIVE POWER";
-  apparentPowerEl.dataset.label = "APPARENT POWER";
-  reactivePowerEl.dataset.label = "REACTIVE POWER";
-  tsEl.dataset.label = "ÚLTIMA LEITURA";
-
-  if (commandBarWrap) {
-    commandBarWrap.style.gridColumn = "7";
-    commandBarWrap.style.gridRow = "1";
-    commandBarWrap.style.justifySelf = "center";
-    commandBarWrap.dataset.label = _canSendCommand() ? "COMANDOS" : "";
-    if (!_canSendCommand()) commandBarWrap.style.visibility = "hidden";
-  }
-
-  if (detailsPanel) {
-    detailsPanel.style.maxHeight = detailsPanel.classList.contains("open") ? "1200px" : "0px";
-  }
-
-  if (!relayRow.dataset.toggleBound) {
-    relayRow.dataset.toggleBound = "true";
-    relayRow.addEventListener("click", (event) => {
-      if (
-        event.target.closest("#relayCommandBarWrap") ||
-        event.target.closest(".device-command-control") ||
-        event.target.closest(".device-command-popover")
-      ) return;
-
-      const nextOpen = !detailsPanel?.classList.contains("open");
-      relayRow.classList.toggle("open", nextOpen);
-      detailsPanel?.classList.toggle("open", nextOpen);
-      if (detailsPanel) {
-        detailsPanel.style.maxHeight = nextOpen ? "1200px" : "0px";
-      }
-    });
-  }
-
-  return {
-    relayRow,
-    nameEl,
-    dotEl,
-    badgeOnline,
-    activePowerEl,
-    apparentPowerEl,
-    reactivePowerEl,
-    tsEl,
-    detailsPanel
-  };
+/* ── Cabin detail view ── */
+.unif-cabin-detail {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
-function ensureDeviceMiniHeaders() {
-  const relayHeader = document.querySelector("#relaySection .device-mini-header");
-  const multimeterHeader = document.querySelector("#multimeterSection .device-mini-header");
-
-  const applyHeader = (headerEl) => {
-    if (!headerEl) return;
-    let spans = headerEl.querySelectorAll("span");
-
-    if (spans.length < 7) {
-      headerEl.innerHTML = `
-        <span></span>
-        <span></span>
-        <span>ACTIVE POWER</span>
-        <span>APPARENT POWER</span>
-        <span>REACTIVE POWER</span>
-        <span>ÚLTIMA LEITURA</span>
-        <span>${_canSendCommand() ? "COMANDOS" : ""}</span>
-      `;
-      spans = headerEl.querySelectorAll("span");
-    } else {
-      spans[0].textContent = "";
-      spans[1].textContent = "";
-      spans[2].textContent = "ACTIVE POWER";
-      spans[3].textContent = "APPARENT POWER";
-      spans[4].textContent = "REACTIVE POWER";
-      spans[5].textContent = "ÚLTIMA LEITURA";
-      spans[6].textContent = _canSendCommand() ? "COMANDOS" : "";
-    }
-  };
-
-  applyHeader(relayHeader);
-  applyHeader(multimeterHeader);
+.unif-cabin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  animation: unif-fade-in .3s ease;
 }
 
-function pickDeviceMetricValue(primary, secondary, keys) {
-  for (const key of keys) {
-    const secondaryValue = secondary?.[key];
-    if (secondaryValue !== null && secondaryValue !== undefined && secondaryValue !== "") return secondaryValue;
-    const primaryValue = primary?.[key];
-    if (primaryValue !== null && primaryValue !== undefined && primaryValue !== "") return primaryValue;
-  }
-  return null;
+/* Slide animations for cabin navigation */
+@keyframes unif-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes unif-slide-from-right {
+  from { opacity: 0; transform: translateX(60px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes unif-slide-from-left {
+  from { opacity: 0; transform: translateX(-60px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes unif-slide-out-left {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-60px); }
+}
+@keyframes unif-slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(60px); }
 }
 
-function formatMetricValue(value, unit, digits = 1) {
-  const n = Number(typeof value === "string" ? value.replace(",", ".") : value);
-  if (!Number.isFinite(n)) return "—";
-  return `${n.toFixed(digits)} ${unit}`;
+.unif-cabin-cards.unif-slide-in-right  { animation: unif-slide-from-right .35s cubic-bezier(.3,0,.2,1); }
+.unif-cabin-cards.unif-slide-in-left   { animation: unif-slide-from-left  .35s cubic-bezier(.3,0,.2,1); }
+.unif-cabin-cards.unif-slide-out-left  { animation: unif-slide-out-left   .35s cubic-bezier(.3,0,.2,1) forwards; }
+.unif-cabin-cards.unif-slide-out-right { animation: unif-slide-out-right  .35s cubic-bezier(.3,0,.2,1) forwards; }
+
+/* ── Painel lateral (side panel) ── */
+.unif-side {
+  width: 280px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgba(127,208,85,.1);
+  background: rgba(3,7,12,.85);
+  transition: width .3s cubic-bezier(.3,0,.2,1), min-width .3s cubic-bezier(.3,0,.2,1);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.unif-side.is-collapsed {
+  width: 40px;
+  min-width: 40px;
+}
+.unif-side.is-collapsed .unif-side-search-wrap,
+.unif-side.is-collapsed .unif-side-list,
+.unif-side.is-collapsed .unif-side-footer,
+.unif-side.is-collapsed .unif-side-title {
+  display: none;
 }
 
-function renderRelayDetailsPanel(relayItem) {
-  const panel = document.getElementById("relayDetailsPanel");
-  if (!panel) return;
+.unif-side-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(127,208,85,.08);
+  flex-shrink: 0;
+}
+.unif-side-title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  color: rgba(127,208,85,.75);
+  font-family: var(--font-display);
+}
+.unif-side-actions { display: flex; align-items: center; gap: 6px; }
+.unif-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(127,208,85,.08);
+  border: 1px solid rgba(127,208,85,.18);
+  color: rgba(127,208,85,.7);
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.unif-collapse-btn:hover { background: rgba(127,208,85,.18); color: var(--neon); }
 
-  if (!relayItem) {
-    panel.innerHTML = `<div class="relay-details-empty">Sem dados detalhados do relé.</div>`;
-    return;
-  }
+.unif-side-search-wrap {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(127,208,85,.06);
+  flex-shrink: 0;
+}
+.unif-side-search {
+  width: 100%;
+  background: rgba(0,0,0,.4);
+  border: 1px solid rgba(127,208,85,.18);
+  border-radius: 6px;
+  color: rgba(205,238,221,.85);
+  font-size: 11px;
+  padding: 5px 9px;
+  font-family: var(--font-body);
+  outline: none;
+  transition: border-color .2s;
+}
+.unif-side-search:focus { border-color: rgba(127,208,85,.45); }
+.unif-side-search::placeholder { color: rgba(205,238,221,.3); }
 
-  const analog = relayItem?.analog ?? {};
-  const metric = (keys, unit, digits = 1) => formatMetricValue(pickDeviceMetricValue(relayItem, analog, keys), unit, digits);
-  const raw = (keys) => {
-    const value = pickDeviceMetricValue(relayItem, analog, keys);
-    return value === null || value === undefined || value === "" ? "—" : String(value);
-  };
+.unif-side-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127,208,85,.2) transparent;
+}
+.unif-side-list::-webkit-scrollbar { width: 4px; }
+.unif-side-list::-webkit-scrollbar-thumb { background: rgba(127,208,85,.2); border-radius: 2px; }
 
-  const electricalItems = [
-    ["V AB", metric(["voltage_ab_v", "voltage_ab", "line_voltage_ab_v", "line_voltage_ab", "vab"], "V", 1)],
-    ["V BC", metric(["voltage_bc_v", "voltage_bc", "line_voltage_bc_v", "line_voltage_bc", "vbc"], "V", 1)],
-    ["V CA", metric(["voltage_ca_v", "voltage_ca", "line_voltage_ca_v", "line_voltage_ca", "vca"], "V", 1)],
-    ["Ia", metric(["current_a_a", "current_a", "ia"], "A", 1)],
-    ["Ib", metric(["current_b_a", "current_b", "ib"], "A", 1)],
-    ["Ic", metric(["current_c_a", "current_c", "ic"], "A", 1)],
-    ["Status Relay", raw(["status_relay"])]
-  ];
+/* Side device row */
+.unif-side-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(127,208,85,.05);
+  transition: background .15s;
+}
+.unif-side-row:hover { background: rgba(127,208,85,.06); }
+.unif-side-row:last-child { border-bottom: none; }
 
-  const flagItems = [
-    ["46", raw(["flag_46"])], ["50", raw(["flag_50"])], ["51-1", raw(["flag_51_1"])],
-    ["50N", raw(["flag_50N"])], ["51GS", raw(["flag_51GS"])], ["51N", raw(["flag_51N"])],
-    ["27", raw(["flag_27"])], ["59", raw(["flag_59"])], ["47", raw(["flag_47"])],
-    ["81 O", raw(["flag_81_O"])], ["81 U", raw(["flag_81_U"])], ["51-2", raw(["flag_51_2"])]
-  ];
+.unif-side-row-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: rgba(127,208,85,.65);
+}
+.unif-side-row-icon svg { width: 20px; height: 20px; }
 
-  panel.innerHTML = `
-    <div class="relay-details-card">
-      <div class="relay-details-title">Leituras elétricas</div>
-      <div class="relay-details-grid">
-        ${electricalItems.map(([label, value]) => `
-          <div class="relay-detail-chip">
-            <span>${label}</span>
-            <strong>${value}</strong>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-    <div class="relay-details-card">
-      <div class="relay-details-title">Proteções</div>
-      <div class="relay-flag-grid">
-        ${flagItems.map(([label, value]) => `
-          <div class="relay-flag-pill ${String(value) === "1" ? "is-on" : "is-off"}">
-            <span>${label}</span>
-            <strong>${value}</strong>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
+.unif-side-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.unif-side-row-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(205,238,221,.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.unif-side-row-sub {
+  font-size: 9px;
+  color: rgba(205,238,221,.38);
+  font-family: var(--font-mono);
 }
 
-function ensureMultimeterUiScaffold() {
-  const row = document.getElementById("multimeterRow");
-  if (!row) return null;
+.unif-side-row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.unif-side-row-power {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: rgba(205,238,221,.55);
+}
+.unif-side-status {
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--font-display);
+  letter-spacing: .05em;
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+.unif-side-status--online  { color: rgba(127,208,85,.95); background: rgba(127,208,85,.12); }
+.unif-side-status--alarm   { color: rgba(239,159,39,.95); background: rgba(239,159,39,.12); }
+.unif-side-status--offline { color: rgba(205,238,221,.45); background: rgba(80,100,90,.2); }
+.unif-side-row-action {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: rgba(127,208,85,.4);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color .15s, background .15s;
+}
+.unif-side-row:hover .unif-side-row-action { color: rgba(127,208,85,.8); background: rgba(127,208,85,.1); }
 
-  const onlineBadge = document.getElementById("multimeterOnlineBadge");
-  const commandBarWrap = document.getElementById("multimeterCommandBarWrap");
-  const legacyRight = document.getElementById("multimeterRight");
-  const leftBlock =
-    row?.querySelector(".relay-left") ||
-    row?.querySelector(".multimeter-left") ||
-    row?.children?.[1] ||
-    null;
+/* Side panel footer */
+.unif-side-footer {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(127,208,85,.08);
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.unif-foot-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(205,238,221,.5);
+}
+.unif-foot-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.unif-foot-dot--online  { background: rgba(127,208,85,.9); }
+.unif-foot-dot--alarm   { background: rgba(239,159,39,.9); }
+.unif-foot-dot--offline { background: rgba(80,100,90,.6); }
 
-  if (legacyRight) legacyRight.style.display = "none";
-
-  if (leftBlock && onlineBadge && onlineBadge.parentElement !== leftBlock) {
-    leftBlock.appendChild(onlineBadge);
-  }
-  if (commandBarWrap && commandBarWrap.parentElement !== row) {
-    row.appendChild(commandBarWrap);
-  }
-
-  row.classList.add("relay-row--table");
-  row.style.gridTemplateColumns = "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px";
-
-  const ensureMetricCell = (id, gridColumn) => {
-    let el = row.querySelector(`#${id}`);
-    if (!el) {
-      el = document.createElement("div");
-      el.id = id;
-      el.className = "device-metric-cell";
-      row.appendChild(el);
-    }
-    el.style.gridColumn = String(gridColumn);
-    el.style.gridRow = "1";
-    return el;
-  };
-
-  const activePowerEl = ensureMetricCell("multimeterActivePowerValue", 3);
-  const apparentPowerEl = ensureMetricCell("multimeterApparentPowerValue", 4);
-  const reactivePowerEl = ensureMetricCell("multimeterReactivePowerValue", 5);
-  const tsEl = ensureMetricCell("multimeterLastReadingValue", 6);
-  tsEl.classList.add("relay-timestamp-cell");
-  activePowerEl.dataset.label = "ACTIVE POWER";
-  apparentPowerEl.dataset.label = "APPARENT POWER";
-  reactivePowerEl.dataset.label = "REACTIVE POWER";
-  tsEl.dataset.label = "ÚLTIMA LEITURA";
-
-  if (commandBarWrap) {
-    commandBarWrap.style.gridColumn = "7";
-    commandBarWrap.style.gridRow = "1";
-    commandBarWrap.style.justifySelf = "center";
-    commandBarWrap.dataset.label = _canSendCommand() ? "COMANDOS" : "";
-    if (!_canSendCommand()) commandBarWrap.style.visibility = "hidden";
-  }
-
-  return {
-    row,
-    onlineBadge,
-    activePowerEl,
-    apparentPowerEl,
-    reactivePowerEl,
-    tsEl
-  };
+.unif-side-empty {
+  padding: 20px;
+  text-align: center;
+  color: rgba(205,238,221,.35);
+  font-size: 12px;
 }
 
-function renderRelayCommandBar(deviceId, currentState = "off") {
-  const wrap = document.getElementById("relayCommandBarWrap");
-  if (!wrap) return;
-  if (deviceId == null || !/^\d+$/.test(String(deviceId))) {
-    wrap.innerHTML = "";
-    wrap.style.display = "none";
-    return;
-  }
-  const safeId = String(deviceId);
-  const normalizedState = currentState === "on" ? "on" : "off";
-  setDevicePersistentState("relay", safeId, normalizedState);
-  if (!_canSendCommand()) {
-    wrap.innerHTML = "";
-    wrap.style.display = "none";
-    return;
-  }
-  wrap.innerHTML = renderDeviceCommandControl("relay", safeId, normalizedState);
-  wrap.style.display = "flex";
-  wrap.style.alignItems = "center";
-  wrap.style.justifyContent = "center";
-  wireDeviceCommandButtons(wrap);
-  applyDeviceVisualState("relay", safeId, normalizedState);
+/* ── Barra de estatísticas inferior ── */
+.unif-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 10px 20px;
+  background: rgba(4,8,16,.8);
+  border-top: 1px solid rgba(127,208,85,.09);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.unif-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 24px 0 0;
+  border-right: 1px solid rgba(127,208,85,.1);
+  margin-right: 24px;
+  flex-shrink: 0;
+}
+.unif-stat:last-child { border-right: none; margin-right: 0; }
+.unif-stat svg { color: rgba(127,208,85,.6); flex-shrink: 0; }
+.unif-stat-lbl {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: rgba(205,238,221,.4);
+  font-family: var(--font-display);
+  white-space: nowrap;
+}
+.unif-stat-val {
+  font-size: 15px;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: var(--neon);
+  white-space: nowrap;
 }
 
-function renderMultimeterCommandBar(deviceId) {
-  const wrap = document.getElementById("multimeterCommandBarWrap");
-  if (!wrap) return;
-  if (deviceId == null || !/^\d+$/.test(String(deviceId))) {
-    wrap.innerHTML = "";
-    wrap.style.display = "none";
-    return;
-  }
-  const safeId = String(deviceId);
-  if (!_canSendCommand()) {
-    wrap.innerHTML = "";
-    wrap.style.display = "none";
-    return;
-  }
-  wrap.innerHTML = renderDeviceCommandControl("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
-  wrap.style.display = "flex";
-  wrap.style.alignItems = "center";
-  wrap.style.justifyContent = "center";
-  wireDeviceCommandButtons(wrap);
-  applyDeviceVisualState("multimeter", safeId, getDevicePersistentState("multimeter", safeId, "off"));
+/* ── MODAL DE DISPOSITIVO ── */
+.unif-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  opacity: 0;
+  transition: opacity .22s ease;
+}
+.unif-modal-backdrop.unif-modal-visible { opacity: 1; }
+
+.unif-modal-card {
+  background: linear-gradient(160deg, #0e1a14 0%, #0a120f 100%);
+  border: 1px solid rgba(57,229,140,.25);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(57,229,140,.08),
+    0 0 32px rgba(57,229,140,.10),
+    0 8px 40px rgba(0,0,0,.6);
+  width: 540px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(12px) scale(.97);
+  transition: transform .22s cubic-bezier(.22,1,.36,1), opacity .22s;
+}
+.unif-modal-backdrop.unif-modal-visible .unif-modal-card {
+  transform: none;
 }
 
-function renderRelayCard(relayItem) {
-  const ui = ensureRelayUiScaffold();
-  if (!ui) return;
-
-  const { relayRow, badgeOnline, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl, detailsPanel } = ui;
-  ensureDeviceMiniHeaders();
-
-  // sem dados ainda
-  if (!relayItem) {
-    relayRow.classList.remove("online", "offline", "open");
-    relayRow.classList.add("offline");
-    badgeOnline.textContent = "OFFLINE";
-    activePowerEl.textContent = "—";
-    apparentPowerEl.textContent = "—";
-    reactivePowerEl.textContent = "—";
-    tsEl.textContent = "—";
-    if (detailsPanel) {
-      detailsPanel.classList.remove("open");
-      detailsPanel.style.maxHeight = "0px";
-    }
-    renderRelayDetailsPanel(null);
-    renderRelayCommandBar(null, "off");
-    return;
-  }
-
-  const analog = relayItem?.analog ?? {};
-  const isOnline = relayOnlineFromPayload(relayItem);
-  const relayState = relayStateFromPayload(relayItem);
-  const activePower = pickDeviceMetricValue(relayItem, analog, ["active_power_kw", "power_kw", "active_power"]);
-  const apparentPower = pickDeviceMetricValue(relayItem, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
-  const reactivePower = pickDeviceMetricValue(relayItem, analog, ["reactive_power_kvar", "power_reactive_kvar", "reactive_power", "reactive_power_var"]);
-  const lastUpdate =
-    relayItem?.last_update ??
-    relayItem?.timestamp ??
-    relayItem?.analog?.timestamp ??
-    relayItem?.event?.timestamp ??
-    null;
-  const deviceId = relayItem?.device_id ?? relayItem?.relay_id ?? null;
-
-  // classes do row (para a bolinha)
-  relayRow.classList.remove("online", "offline");
-  relayRow.classList.add(isOnline ? "online" : "offline");
-
-  // badge online/offline
-  badgeOnline.textContent = isOnline ? "ONLINE" : "OFFLINE";
-  badgeOnline.style.borderColor = isOnline ? "rgba(57,229,140,0.26)" : "rgba(255,92,92,0.25)";
-  badgeOnline.style.background = isOnline ? "rgba(57,229,140,0.08)" : "rgba(255,92,92,0.08)";
-  badgeOnline.style.color = isOnline ? "rgba(233,255,243,0.92)" : "rgba(255,255,255,0.92)";
-  badgeOnline.style.marginLeft = "8px";
-  badgeOnline.style.whiteSpace = "nowrap";
-
-  activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
-  apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
-  reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
-  tsEl.textContent = fmtDatePtBR(lastUpdate);
-
-  renderRelayDetailsPanel(relayItem);
-  if (detailsPanel?.classList.contains("open")) {
-    detailsPanel.style.maxHeight = "1200px";
-  }
-  renderRelayCommandBar(deviceId, relayState);
+.unif-modal-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(57,229,140,.10);
+  background: rgba(57,229,140,.03);
+  flex-shrink: 0;
+}
+.unif-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.unif-modal-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: rgba(57,229,140,.7);
+  background: rgba(57,229,140,.08);
+  border: 1px solid rgba(57,229,140,.18);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+.unif-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255,255,255,.92);
+  margin: 0;
+}
+.unif-modal-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,.4);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: color .15s, background .15s;
+  flex-shrink: 0;
+}
+.unif-modal-close:hover {
+  color: rgba(255,255,255,.85);
+  background: rgba(255,255,255,.06);
 }
 
-function renderMultimeterCard(item) {
-  const ui = ensureMultimeterUiScaffold();
-  if (!ui) return;
-
-  const { row, onlineBadge, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl } = ui;
-  const dot = document.getElementById("multimeterDot");
-  ensureDeviceMiniHeaders();
-
-  if (!item) {
-    row.classList.remove("online", "offline");
-    row.classList.add("offline");
-    if (onlineBadge) onlineBadge.textContent = "OFFLINE";
-    activePowerEl.textContent = "—";
-    apparentPowerEl.textContent = "—";
-    reactivePowerEl.textContent = "—";
-    tsEl.textContent = "—";
-    if (dot) dot.style.opacity = "0.65";
-    renderMultimeterCommandBar(null);
-    return;
-  }
-
-  const analog = item?.analog ?? item?.data ?? {};
-  const isOnline = multimeterOnlineFromPayload(item);
-  const activePower = pickDeviceMetricValue(item, analog, ["active_power_kw", "p_kw", "power_kw", "active_power"]);
-  const apparentPower = pickDeviceMetricValue(item, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
-  const reactivePower = pickDeviceMetricValue(item, analog, ["reactive_power_kvar", "power_reactive_kvar", "reactive_power", "reactive_power_var"]);
-  const lastUpdate = item.last_update ?? item.timestamp ?? null;
-
-  renderMultimeterCommandBar(item?.device_id ?? item?.multimeter_id ?? null);
-
-  row.classList.remove("online", "offline");
-  row.classList.add(isOnline ? "online" : "offline");
-
-  if (onlineBadge) {
-    onlineBadge.textContent = isOnline ? "ONLINE" : "OFFLINE";
-    onlineBadge.classList.remove("relay-state--on", "relay-state--off", "relay-state--unknown");
-    onlineBadge.classList.add(isOnline ? "relay-state--on" : "relay-state--off");
-    onlineBadge.style.marginLeft = "8px";
-  }
-
-  activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
-  apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
-  reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
-  tsEl.textContent = fmtDatePtBR(lastUpdate);
+.unif-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(57,229,140,.2) transparent;
 }
 
-// ======================================================
-// ✅ RENDER — INVERTERS (KPIs por inversor) ✅
-// ======================================================
-function fillInverterRowSpans(rowEl, values) {
-  const metrics = rowEl.querySelectorAll(".inv-metric");
-  if (metrics.length >= 6) {
-    setInverterMetricCell(metrics[0], values.power);
-    setInverterMetricCell(metrics[1], values.eff);
-    setInverterMetricCell(metrics[2], values.temp);
-    setInverterMetricCell(metrics[3], values.freq);
-    setInverterMetricCell(metrics[4], values.pr);
-    metrics[5].textContent = values.last;
-    return true;
-  }
-  // fallback: layout antigo
-  const spans = rowEl.querySelectorAll(":scope > span");
-  if (!spans || spans.length < 8) return false;
-  setInverterMetricCell(spans[2], values.power);
-  setInverterMetricCell(spans[3], values.eff);
-  setInverterMetricCell(spans[4], values.temp);
-  setInverterMetricCell(spans[5], values.freq);
-  setInverterMetricCell(spans[6], values.pr);
-  spans[7].textContent = values.last;
-  return true;
+.unif-modal-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: rgba(57,229,140,.04);
+  border-bottom: 1px solid rgba(57,229,140,.08);
+  gap: 12px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.unif-modal-state {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+}
+.unif-modal-state--online  {
+  background: rgba(57,229,140,.14);
+  color: #39e58c;
+  box-shadow: 0 0 8px rgba(57,229,140,.25);
+}
+.unif-modal-state--alarm   { background: rgba(255,180,0,.14); color: #ffb800; }
+.unif-modal-state--offline { background: rgba(255,80,80,.12);  color: #ff5a5a; }
+.unif-modal-last { font-size: 11px; color: rgba(255,255,255,.35); }
+
+.unif-modal-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 1px;
+  background: rgba(57,229,140,.06);
+  border-bottom: 1px solid rgba(57,229,140,.08);
+}
+.unif-modal-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  background: #0a1310;
+}
+.unif-modal-kpi-lbl {
+  font-size: 10px;
+  color: rgba(255,255,255,.38);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.unif-modal-kpi-val {
+  font-size: 18px;
+  font-weight: 600;
+  color: #39e58c;
+  text-shadow: 0 0 10px rgba(57,229,140,.4);
+  line-height: 1.1;
+}
+.unif-modal-kpi-val.val-warn { color: #ffb800; text-shadow: 0 0 10px rgba(255,184,0,.4); }
+
+.unif-modal-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(57,229,140,.07);
+}
+.unif-modal-section-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,.4);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.unif-modal-count { font-size: 11px; font-weight: 400; color: rgba(57,229,140,.55); }
+
+/* Strings in modal */
+.unif-modal-str-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+.unif-modal-loading { font-size: 12px; color: rgba(255,255,255,.25); padding: 8px 0; }
+.unif-modal-empty   { font-size: 13px; color: rgba(255,255,255,.30); text-align: center; padding: 32px 20px; }
+
+/* AC/DC chips in modal */
+.unif-modal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.unif-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(57,229,140,.05);
+  border: 1px solid rgba(57,229,140,.12);
+  border-radius: 7px;
+  padding: 7px 11px;
+  min-width: 68px;
+}
+.unif-chip-lbl { font-size: 9px; color: rgba(255,255,255,.35); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; }
+.unif-chip-val { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.85); }
+
+/* Commands area in modal */
+.unif-modal-cmds { padding: 4px 0; }
+
+/* ── Responsivo ── */
+@media (max-width: 900px) {
+  .unifilar-view { min-height: 400px; }
+  .unif-side { width: 220px; min-width: 220px; }
+  .unif-modal-kpis { grid-template-columns: repeat(2,1fr); }
+  .unif-stat { padding-right: 16px; margin-right: 16px; }
+  .unif-stat-val { font-size: 13px; }
+}
+@media (max-width: 680px) {
+  .unif-content { flex-direction: column; }
+  .unif-side { width: 100%; min-width: 100%; height: 200px; border-left: none; border-top: 1px solid rgba(127,208,85,.1); }
+  .unif-sec-lbl { display: none; }
+  .unif-stats-bar { flex-wrap: wrap; gap: 8px; }
+  .unif-stat { border-right: none; margin-right: 0; padding-right: 0; }
 }
 
-function setInverterMetricCell(cellEl, metricText) {
-  if (!cellEl) return;
-
-  if (!metricText || metricText === "—") {
-    cellEl.textContent = "—";
-    return;
-  }
-
-  const parts = String(metricText).trim().split(/\s+/);
-  const numberPart = parts.shift();
-  const unitPart = parts.join(" ");
-
-  if (!numberPart) {
-    cellEl.textContent = metricText;
-    return;
-  }
-
-  const unitHtml = unitPart
-    ? `<span class="metric-unit"> ${unitPart}</span>`
-    : "";
-
-  cellEl.innerHTML = `<span class="metric-number">${numberPart}</span>${unitHtml}`;
+/* Chart layout fix: keeps axes, legends and monthly KPIs from clipping the canvas. */
+body:not(.plant-map-mode) .plant-charts-grid {
+  align-items: stretch;
 }
 
-function setRowOnlineUi(rowEl, online) {
-  rowEl.classList.remove("online", "offline");
-  rowEl.classList.add(online ? "online" : "offline");
-
-  const dot = rowEl.querySelector(".status-dot, [data-role='status-dot']");
-  if (dot) {
-    dot.classList.remove("online", "offline");
-    dot.classList.add(online ? "online" : "offline");
-  }
+body:not(.plant-map-mode) .plant-chart-card,
+body:not(.plant-map-mode) .plant-chart-card--monthly {
+  height: 390px;
+  min-height: 390px;
+  padding: 18px 20px 16px;
+  overflow: visible;
 }
 
-function isOnlineByFreshness(inv) {
-  const lastMs = getInvTsMs(inv);
-  if (!lastMs) return false;
-  const ageMs = Date.now() - lastMs;
-  return ageMs <= INVERTER_ONLINE_AFTER_MS;
+body:not(.plant-map-mode) .plant-chart-card .chart-wrapper,
+body:not(.plant-map-mode) .plant-chart-card--monthly .chart-wrapper {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  padding: 8px 0 0;
+  overflow: visible;
 }
 
-function isZeroSnapshot(inv) {
-  const powerKw = asNumber(inv.active_power_kw ?? inv.power_kw ?? inv.power ?? inv.active_power, 0);
-  const freqHz = asNumber(inv.frequency_hz ?? inv.freq_hz ?? inv.frequency, 0);
-  const tempC = asNumber(inv.temperature_internal_c ?? inv.temperature_c ?? inv.temp_c ?? inv.temperature_current ?? inv.temperature, 0);
-
-  // pacote "morto": 0 kW + 0 Hz + 0°C
-  return powerKw === 0 && freqHz === 0 && tempC === 0;
+body:not(.plant-map-mode) .plant-chart-card:not(.plant-chart-card--monthly) .chart-wrapper {
+  min-height: 255px;
 }
 
-function renderInverterRowKpis(rowEl, inv) {
-  const powerKw = inv.active_power_kw ?? inv.power_kw ?? inv.power ?? inv.active_power;
-  const effPct  = inv.efficiency_pct ?? inv.efficiency ?? inv.eff_pct;
-  const tempC   = inv.temperature_internal_c ?? inv.temperature_c ?? inv.temp_c ?? inv.temperature_current ?? inv.temperature;
-  const freqHz  = inv.frequency_hz ?? inv.freq_hz ?? inv.frequency;
-
-  const prRaw = inv.performance_ratio ?? inv.pr ?? inv.pr_ratio ?? inv.performance;
-  const lastTs =
-    inv.last_reading_at ??
-    inv.last_reading_ts ??
-    inv.last_ts ??
-    inv.timestamp ??
-    inv.event_ts ??
-    null;
-
-  const prPct = normalizePercentMaybe(prRaw);
-
-  const powerText = powerKw != null ? `${numFixedOrDash(powerKw, 0)} kW` : "—";
-  const effText   = effPct  != null ? `${numFixedOrDash(effPct, 1)} %` : "—";
-  const tempText  = tempC   != null ? `${numFixedOrDash(tempC, 1)} °C` : "—";
-  const freqText  = freqHz  != null ? `${numFixedOrDash(freqHz, 2)} Hz` : "—";
-  const prText    = prPct   != null ? `${numFixedOrDash(prPct, 2)} %` : "—";
-  const lastText  = fmtDatePtBR(lastTs);
-
-  fillInverterRowSpans(rowEl, {
-    power: powerText,
-    eff: effText,
-    temp: tempText,
-    freq: freqText,
-    pr: prText,
-    last: lastText
-  });
-
-  const freshOnline = isOnlineByFreshness(inv);
-  const online = freshOnline && !isZeroSnapshot(inv);
-  setRowOnlineUi(rowEl, online);
+body:not(.plant-map-mode) .plant-chart-card--monthly .chart-wrapper {
+  min-height: 210px;
+  padding-top: 6px;
 }
 
-function renderInvertersRows(inverters) {
-  const map = new Map();
-
-  dedupInvertersById(Array.isArray(inverters) ? inverters : []).forEach(inv => {
-    const id = getInverterRealId(inv);
-    if (id != null) map.set(String(id), inv);
-  });
-
-  const rows = document.querySelectorAll(".inverter-toggle[data-inverter-real-id]");
-  if (!rows || !rows.length) return;
-
-  rows.forEach(row => {
-    const id = row.dataset.inverterRealId;
-    const inv = map.get(String(id));
-
-    if (!inv) {
-      fillInverterRowSpans(row, {
-        power: "—",
-        eff: "—",
-        temp: "—",
-        freq: "—",
-        pr: "—",
-        last: "—"
-      });
-      setRowOnlineUi(row, false);
-      return;
-    }
-
-    renderInverterRowKpis(row, inv);
-  });
+body:not(.plant-map-mode) .plant-chart-card canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
-// ======================================================
-// ✅ MERGE: config(/strings) + realtime(/strings/realtime)
-// ======================================================
-function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
-  const maxStrings = 30;
-
-  const cfgList = configPayload?.strings ?? [];
-  const rtList = realtimePayload?.items ?? realtimePayload?.strings ?? [];
-
-  const cfgMap = new Map(cfgList.map(s => [Number(s.string_index), s]));
-  const rtMap = new Map(rtList.map(s => [Number(s.string_index), s]));
-
-  const strings = [];
-  for (let i = 1; i <= maxStrings; i++) {
-    const cfg = cfgMap.get(i);
-    const rt = rtMap.get(i);
-
-    const enabled = cfg ? !!cfg.enabled : true;
-    const disabledByPref = isDisabledPref(inverterRealId, i);
-    const effective_enabled = disabledByPref ? false : !!enabled;
-    const has_data = (rt?.has_data ?? cfg?.has_data ?? false) === true;
-    const exists_in_config = !!cfg;
-    const exists_in_realtime = !!rt;
-    const exists_in_api = exists_in_config || exists_in_realtime;
-
-    const monitorable = exists_in_api && effective_enabled;
-
-    strings.push({
-      string_index: i,
-      exists_in_config,
-      exists_in_realtime,
-      exists_in_api,
-      enabled,
-      effective_enabled,
-      has_data,
-      current_a: rt?.current_a ?? null,
-      is_online: rt?.is_online ?? false,
-      last_ts: rt?.last_ts ?? null,
-      monitorable,
-      alarm_active: rt?.alarm_active ?? cfg?.alarm_active ?? null,
-      alarm_state: rt?.alarm_state ?? cfg?.alarm_state ?? null,
-      alarm_reason: rt?.alarm_reason ?? cfg?.alarm_reason ?? null,
-      alarm_code: rt?.alarm_code ?? cfg?.alarm_code ?? null
-    });
-  }
-
-  return {
-    inverter_id: Number(inverterRealId),
-    max_strings: maxStrings,
-    strings
-  };
+.monthly-title-copy {
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-function isStringMonitorable(str) {
-  if (!str) return false;
-  if (str.effective_enabled === false) return false;
-  if (str.exists_in_api !== true) return false;
-  return str.monitorable === true;
+.monthly-title-copy .monthly-subtitle-note {
+  order: 3;
 }
 
-function getInverterOnlineStateById(inverterRealId) {
-  const inv = INVERTER_EXTRAS_BY_ID.get(String(inverterRealId));
-  if (!inv) return null;
-  return isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+.monthly-head-wrap {
+  align-items: flex-start;
+  gap: 12px 16px;
 }
 
-function isStringInAlarm(str, inverterOnline) {
-  if (!isStringMonitorable(str)) return false;
-  if (!inverterOnline) return false;
+.monthly-subtitle-note {
+  flex: none;
+  margin-top: 2px;
+  max-width: 390px;
+}
 
-  // futura integração backend: quando alarm_active vier pronto, ele manda na regra local.
-  if (str.alarm_active === true) return true;
-  if (str.alarm_active === false) return false;
+.monthly-kpis {
+  row-gap: 8px;
+}
 
-  const noData = str.has_data !== true;
-  const nullCurrent = str.current_a === null || str.current_a === undefined || str.current_a === "";
-
-  let stale = false;
-  if (str.last_ts) {
-    const ts = new Date(str.last_ts);
-    if (!Number.isNaN(ts.getTime())) {
-      stale = (Date.now() - ts.getTime()) > STRING_STALE_AFTER_MS;
-    }
+@media (max-width: 1100px) {
+  body:not(.plant-map-mode) .plant-charts-grid {
+    grid-template-columns: 1fr;
   }
 
-  return noData || nullCurrent || stale;
-}
+  body:not(.plant-map-mode) .plant-chart-card,
+  body:not(.plant-map-mode) .plant-chart-card--monthly {
+    height: auto;
+    min-height: 380px;
+  }
 
-function setInverterStringAlarmBadge(inverterRealId, show) {
-  const row = document.querySelector(`.inverter-toggle[data-inverter-real-id="${inverterRealId}"]`);
-  if (!row) return;
-  row.classList.toggle("has-string-alarm", !!show);
-
-  let badge = row.querySelector(".string-alarm-badge");
-  if (show) {
-    if (!badge) {
-      badge = document.createElement("span");
-      badge.className = "string-alarm-badge";
-      badge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
-      row.appendChild(badge);
-    }
-  } else if (badge) {
-    badge.remove();
+  body:not(.plant-map-mode) .plant-chart-card:not(.plant-chart-card--monthly) .chart-wrapper {
+    min-height: 250px;
   }
 }
 
-// ======================================================
-// RENDER — STRINGS (COM PERSISTÊNCIA LOCAL + VALOR REAL)
-// ======================================================
-function renderStringsGrid(gridEl, payload) {
-  if (!gridEl) return;
-
-  const strings = Array.isArray(payload?.strings) ? payload.strings : [];
-  const inverterRealId = payload?.inverter_id;
-
-  gridEl.innerHTML = "";
-
-  if (!strings.length || inverterRealId == null) {
-    if (inverterRealId != null) setInverterStringAlarmBadge(inverterRealId, false);
-    gridEl.innerHTML = `<div style="color:#9adbb8; opacity:.7; padding:6px 2px;">Sem dados de strings</div>`;
-    return;
+@media (max-width: 760px) {
+  body:not(.plant-map-mode) .plant-chart-card,
+  body:not(.plant-map-mode) .plant-chart-card--monthly {
+    height: auto;
+    min-height: 390px;
+    padding: 14px;
   }
 
-  const isEffectiveEnabled = (str) => {
-    const disabledByPref = isDisabledPref(inverterRealId, str.string_index);
-    return disabledByPref ? false : !!str.enabled;
-  };
-
-  const rerender = () => {
-    renderStringsGrid(gridEl, {
-      ...payload,
-      strings
-    });
-  };
-
-  const visibleStrings = strings.filter(isEffectiveEnabled);
-  const hiddenStrings = strings.filter(s => !isEffectiveEnabled(s));
-
-  const inverterOnline = getInverterOnlineStateById(inverterRealId);
-  let hasAlarmOnAnyMonitorable = false;
-
-  visibleStrings.forEach(str => {
-    const el = document.createElement("div");
-    el.className = "string-card";
-    el.dataset.string = str.string_index;
-    const inAlarm = isStringInAlarm(str, inverterOnline);
-    if (inAlarm) {
-      el.classList.add("string-alarm");
-      hasAlarmOnAnyMonitorable = true;
-    } else if (!str.has_data) {
-      el.classList.add("nodata");
-    } else {
-      el.classList.add("active");
-    }
-
-    const ampText = (str.has_data && inverterOnline !== false) ? fmtAmp(str.current_a) : "—";
-
-    el.innerHTML = `
-      S${str.string_index}
-      <strong>${ampText}</strong>
-    `;
-
-    el.addEventListener("click", async (e) => {
-      e.stopPropagation();
-
-      el.classList.add("removing");
-
-      setTimeout(async () => {
-        setDisabledPref(inverterRealId, str.string_index, true);
-        rerender();
-
-        try {
-          await patchInverterString(PLANT_ID, inverterRealId, str.string_index, false);
-          str.enabled = false;
-        } catch (error) {
-          console.warn("PATCH falhou ao desativar string (rollback local):", error?.message || error);
-          setDisabledPref(inverterRealId, str.string_index, false);
-          rerender();
-        }
-      }, 180);
-    });
-
-    gridEl.appendChild(el);
-  });
-
-  if (hiddenStrings.length > 0) {
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "string-card string-card-add";
-
-    const next = hiddenStrings
-      .slice()
-      .sort((a, b) => Number(a.string_index) - Number(b.string_index))[0];
-
-    addBtn.title = `Reativar ${next ? `S${next.string_index}` : "string"}`;
-    addBtn.innerHTML = `
-      <span class="plus">+</span>
-      <strong>${next ? `S${next.string_index}` : `${hiddenStrings.length} off`}</strong>
-    `;
-
-    addBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-
-      if (!next) return;
-
-      setDisabledPref(inverterRealId, next.string_index, false);
-      next.enabled = true;
-      rerender();
-
-      try {
-        await patchInverterString(PLANT_ID, inverterRealId, next.string_index, true);
-      } catch (error) {
-        console.warn("PATCH falhou ao reativar string (rollback local):", error?.message || error);
-        setDisabledPref(inverterRealId, next.string_index, true);
-        next.enabled = false;
-        rerender();
-      }
-    });
-
-    gridEl.appendChild(addBtn);
+  body:not(.plant-map-mode) .plant-chart-card:not(.plant-chart-card--monthly) .chart-wrapper {
+    min-height: 235px;
   }
 
-  setInverterStringAlarmBadge(inverterRealId, hasAlarmOnAnyMonitorable);
-}
+  body:not(.plant-map-mode) .plant-chart-card--monthly {
+    min-height: 540px;
+  }
 
-// ======================================================
-// ✅ EXTRAS DO INVERSOR (chips agrupados abaixo das strings)
-// ======================================================
-function ensureInverterExtrasContainer(inverterRealId) {
-  const panel = document.getElementById(`strings-${inverterRealId}`);
-  if (!panel) return null;
-  return panel;
-}
+  body:not(.plant-map-mode) .plant-chart-card--monthly .chart-wrapper {
+    min-height: 235px;
+  }
 
-function makeChip(label, value) {
-  const el = document.createElement("div");
-  el.className = "inv-chip";
-  el.innerHTML = `
-    <span class="inv-chip__label">${label}</span>
-    <strong class="inv-chip__value">${value ?? "—"}</strong>
-  `;
-  return el;
-}
+  .monthly-head-wrap {
+    flex-direction: column;
+  }
 
-function renderInverterExtras(inverterRealId, inv) {
-  const wrap = ensureInverterExtrasContainer(inverterRealId);
-  if (!wrap) return;
+  .monthly-kpis {
+    width: 100%;
+    justify-content: stretch;
+    margin-left: 0;
+  }
 
-  const rowAc = wrap.querySelector(`.inv-side-row[data-row="ac"]`);
-  const rowDc = wrap.querySelector(`.inv-side-row[data-row="dc"]`);
-  if (!rowAc || !rowDc) return;
-
-  rowAc.innerHTML = "";
-  rowDc.innerHTML = "";
-
-  const get = (k) => (inv && typeof inv === "object") ? inv[k] : null;
-
-  // helpers de format (NÃO escondem zero)
-  const f = (v, digits, unit) => {
-    const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-    if (!Number.isFinite(n)) return "—";
-    return `${n.toFixed(digits)} ${unit}`;
-  };
-
-  const f0 = (v, unit) => {
-    const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-    if (!Number.isFinite(n)) return "—";
-    return `${n.toFixed(0)} ${unit}`;
-  };
-
-  // ===== AC: Potências / FP + Tensões / Correntes =====
-  rowAc.appendChild(makeChip("S aparente", f(get("apparent_power_kva"), 2, "kVA")));
-  rowAc.appendChild(makeChip("FP", (() => {
-    const v = get("power_factor");
-    const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-    if (!Number.isFinite(n)) return "—";
-    return n.toFixed(3);
-  })()));
-  rowAc.appendChild(makeChip("Q reativa", f(get("power_reactive_kvar"), 2, "kvar")));
-  rowAc.appendChild(makeChip("Energia dia", f(get("daily_active_energy_kwh"), 1, "kWh")));
-  rowAc.appendChild(makeChip("Energia total", f(get("cumulative_active_energy_kwh"), 1, "kWh")));
-
-  // ===== AC: Tensões / Correntes (usar nomes reais do backend + aliases) =====
-  const vab = get("line_voltage_ab_v") ?? get("line_voltage_ab");
-  const vbc = get("line_voltage_bc_v") ?? get("line_voltage_bc");
-  const vca = get("line_voltage_ca_v") ?? get("line_voltage_ca");
-
-  rowAc.appendChild(makeChip("V AB", f0(vab, "V")));
-  rowAc.appendChild(makeChip("V BC", f0(vbc, "V")));
-  rowAc.appendChild(makeChip("V CA", f0(vca, "V")));
-
-  const ia = get("current_phase_a_a") ?? get("current_phase_a");
-  const ib = get("current_phase_b_a") ?? get("current_phase_b");
-  const ic = get("current_phase_c_a") ?? get("current_phase_c");
-
-  rowAc.appendChild(makeChip("Ia", (() => {
-    const n = Number(typeof ia === "string" ? ia.replace(",", ".") : ia);
-    return Number.isFinite(n) ? `${n.toFixed(2)} A` : "—";
-  })()));
-  rowAc.appendChild(makeChip("Ib", (() => {
-    const n = Number(typeof ib === "string" ? ib.replace(",", ".") : ib);
-    return Number.isFinite(n) ? `${n.toFixed(2)} A` : "—";
-  })()));
-  rowAc.appendChild(makeChip("Ic", (() => {
-    const n = Number(typeof ic === "string" ? ic.replace(",", ".") : ic);
-    return Number.isFinite(n) ? `${n.toFixed(2)} A` : "—";
-  })()));
-
-  // ===== DC: Energia / DC / Isolação =====
-  rowDc.appendChild(makeChip("P DC", f(get("power_dc_kw"), 2, "kW")));
-  rowDc.appendChild(makeChip("V string", f0(get("string_voltage_v"), "V")));
-  rowDc.appendChild(makeChip("R isol.", (() => {
-    const v = get("resistance_insulation_mohm");
-    const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
-    return Number.isFinite(n) ? `${n.toFixed(2)} MΩ` : "—";
-  })()));
-}
-
-// ======================================================
-// RENDER — FAIXA OPERACIONAL (se existir no HTML)
-// ======================================================
-function renderSummaryStrip() {
-  const elActive = document.getElementById("summaryActivePower");
-  const elRated = document.getElementById("summaryRatedPower");
-  const elInv = document.getElementById("summaryInverters");
-  const elPR = document.getElementById("summaryPR");
-
-  if (!elActive || !elRated || !elInv || !elPR) return;
-
-  elActive.textContent = `${asNumber(PLANT_STATE.active_power_kw).toFixed(1)} kW`;
-  elRated.textContent = `${asNumber(PLANT_STATE.rated_power_kwp).toFixed(1)} kWp`;
-  elInv.textContent = `${PLANT_STATE.inverter_online} / ${PLANT_STATE.inverter_total} Online`;
-  elPR.textContent = `${asNumber(PLANT_STATE.pr_percent).toFixed(1)} %`;
-}
-
-// ======================================================
-// CHART INSTANCES
-// ======================================================
-let dailyChartInstance = null;
-let monthlyChartInstance = null;
-let LAST_INVERTER_ROWS_SIGNATURE = "";
-let DAILY_CHART_ZOOM_WIRED = false;
-
-function resetDailyChartZoom() {
-  if (!dailyChartInstance || typeof dailyChartInstance.resetZoom !== "function") return;
-  try {
-    dailyChartInstance.resetZoom();
-  } catch (err) {
-    console.warn("[dailyChart] erro ao resetar zoom:", err);
+  .monthly-kpi-pill {
+    flex: 1 1 150px;
+    min-width: min(100%, 150px);
   }
 }
 
-function wireDailyChartZoomControlsOnce() {
-  if (DAILY_CHART_ZOOM_WIRED) return;
-  DAILY_CHART_ZOOM_WIRED = true;
-
-  document.getElementById("dailyZoomInBtn")?.addEventListener("click", () => {
-    if (!dailyChartInstance || typeof dailyChartInstance.zoom !== "function") return;
-    dailyChartInstance.zoom({ x: 1.2 });
-  });
-
-  document.getElementById("dailyZoomOutBtn")?.addEventListener("click", () => {
-    if (!dailyChartInstance || typeof dailyChartInstance.zoom !== "function") return;
-    dailyChartInstance.zoom({ x: 0.8 });
-  });
-
-  document.getElementById("dailyZoomResetBtn")?.addEventListener("click", resetDailyChartZoom);
-}
-
-// ======================================================
-// GRÁFICO DIÁRIO
-// ======================================================
-function renderDailyChart() {
-  const canvas = document.getElementById("plantMainChart");
-  if (!canvas || !DAILY?.labels?.length) return;
-  const ratedPower = asNumber(PLANT_STATE.rated_power_kwp, 0);
-  const powerAxisMax = ratedPower > 0 ? Math.ceil(ratedPower) : 1250;
-
-  const ctx = canvas.getContext("2d");
-
-  if (dailyChartInstance) {
-    dailyChartInstance.destroy();
-    dailyChartInstance = null;
+@media (max-width: 430px) {
+  body:not(.plant-map-mode) .plant-chart-card--monthly {
+    min-height: 540px;
   }
 
-  const greenGradient = ctx.createLinearGradient(0, 0, 0, 320);
-  greenGradient.addColorStop(0, "rgba(57,229,140,0.36)");
-  greenGradient.addColorStop(0.6, "rgba(57,229,140,0.20)");
-  greenGradient.addColorStop(1, "rgba(57,229,140,0.03)");
-
-  const yellowGradient = ctx.createLinearGradient(0, 0, 0, 320);
-  yellowGradient.addColorStop(0, "rgba(255,216,77,0.24)");
-  yellowGradient.addColorStop(1, "rgba(255,216,77,0.02)");
-
-  dailyChartInstance = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: DAILY.labels,
-      datasets: [
-        {
-          label: "Esperado",
-          data: Array.isArray(DAILY.expectedPower) ? DAILY.expectedPower : [],
-          borderColor: "rgba(205, 213, 225, 0.70)",
-          fill: false,
-          tension: 0.28,
-          pointRadius: 0,
-          borderWidth: 1.5,
-          borderDash: [6, 6],
-          yAxisID: "yPower",
-          spanGaps: true,
-          order: 0
-        },
-        {
-          label: "Potência Ativa",
-          data: DAILY.activePower,
-          borderColor: "#39e58c",
-          backgroundColor: greenGradient,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 0,
-          borderWidth: 2,
-          yAxisID: "yPower",
-          spanGaps: true,
-          order: 1
-        },
-        {
-          label: "Irradiância POA",
-          data: DAILY.irradiance,
-          borderColor: "#ffd84d",
-          backgroundColor: yellowGradient,
-          fill: true,
-          tension: 0.3,
-          pointRadius: 0,
-          borderWidth: 2,
-          yAxisID: "yIrr",
-          spanGaps: true,
-          order: 2
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: "rgba(6,18,14,0.96)",
-          borderColor: "rgba(57,229,140,0.18)",
-          borderWidth: 1,
-          titleColor: "#dbe7ef",
-          bodyColor: "#dbe7ef",
-          padding: 10,
-          displayColors: true,
-          usePointStyle: true,
-          callbacks: {
-            label: (item) => {
-              const label = item?.dataset?.label || "";
-              const value = Number(item?.raw ?? 0);
-
-              if (label === "Esperado") {
-                return `Esperado: ${formatKwPtBR(value)}`;
-              }
-              if (label === "Potência Ativa") {
-                return `Potência Ativa: ${formatKwPtBR(value)}`;
-              }
-              if (label === "Irradiância POA") {
-                return `Irradiância POA: ${formatWm2PtBR(value)}`;
-              }
-
-              return `${label}: ${formatNumberPtBR(value)}`;
-            }
-          }
-        },
-        zoom: {
-          pan: {
-            enabled: true,
-            mode: "x"
-          },
-          zoom: {
-            wheel: {
-              enabled: true
-            },
-            pinch: {
-              enabled: true
-            },
-            drag: {
-              enabled: false
-            },
-            mode: "x"
-          },
-          limits: {
-            x: { minRange: 6 }
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: { color: "#9adbb8", maxTicksLimit: 12 },
-          grid: { color: "rgba(255,255,255,0.04)" }
-        },
-        yPower: {
-          position: "left",
-          min: 0,
-          suggestedMax: powerAxisMax,
-          ticks: { color: "#39e58c", callback: v => `${v} kW` },
-          grid: { color: "rgba(255,255,255,0.05)" }
-        },
-        yIrr: {
-          position: "right",
-          min: 0,
-          max: 1200,
-          ticks: { color: "#ffd84d", callback: v => `${v} W/m²` },
-          grid: { drawOnChartArea: false }
-        }
-      }
-    }
-  });
-}
-
-// ======================================================
-// ✅ NORMALIZA PAYLOAD MENSAL (unidade + outlier + labels)
-// ======================================================
-function normalizeMonthlyPayload(payload) {
-  if (!payload) return payload;
-
-  const labels = Array.isArray(payload.labels) ? payload.labels.slice() : [];
-
-  const dailyNew = Array.isArray(payload.daily_kwh) ? payload.daily_kwh.slice() : null;
-  const mtdNew = Array.isArray(payload.mtd_kwh) ? payload.mtd_kwh.slice() : null;
-  const irrDailyNew = Array.isArray(payload.irradiation_daily_kwh_m2)
-    ? payload.irradiation_daily_kwh_m2.slice()
-    : null;
-  const expectedDailyNew = Array.isArray(payload.expected_daily_kwh)
-    ? payload.expected_daily_kwh.slice()
-    : (Array.isArray(payload.expectedDailyKwh) ? payload.expectedDailyKwh.slice() : null);
-  const energyLegacy = Array.isArray(payload.energy_kwh) ? payload.energy_kwh.slice() : null;
-
-  let daily = (dailyNew ?? energyLegacy ?? []).map(v => Number(v) || 0);
-
-  const n = Math.min(labels.length || daily.length, daily.length || labels.length);
-  const cutLabels = labels.slice(0, n);
-  daily = daily.slice(0, n);
-
-  const allLookDayOnly = cutLabels.length > 0 && cutLabels.every(looksLikeDayOnlyLabel);
-  const duplicated = hasDuplicateLabels(cutLabels);
-
-  const finalLabels =
-    allLookDayOnly && duplicated ? buildLastNDaysLabels(daily.length) : cutLabels;
-
-  let mtd = [];
-  if (mtdNew && mtdNew.length >= daily.length) {
-    mtd = mtdNew.slice(0, daily.length).map(v => Number(v) || 0);
-  } else {
-    let acc = 0;
-    mtd = daily.map(v => (acc += (Number(v) || 0)));
+  .monthly-kpis {
+    flex-direction: column;
   }
 
-  const converted = maybeConvertWhToKwh(daily, mtd);
-  daily = converted.daily;
-  mtd = converted.mtd;
-  const dailyForTotals = daily.slice();
-  const mtdForTotals = mtd.slice();
-
-  const capped = capMonthlyOutliers(daily);
-  daily = capped.daily;
-
-  let acc = 0;
-  mtd = daily.map(v => (acc += (Number(v) || 0)));
-  const irradiationDaily = (irrDailyNew ?? []).slice(0, daily.length).map(v => Number(v) || 0);
-  while (irradiationDaily.length < daily.length) irradiationDaily.push(0);
-
-  let expectedDaily = (expectedDailyNew ?? []).slice(0, daily.length).map(v => Number(v) || 0);
-  while (expectedDaily.length < daily.length) expectedDaily.push(0);
-
-  const expectedMtdFromPayload =
-    Array.isArray(payload.expected_mtd_kwh) ? payload.expected_mtd_kwh.slice() :
-    Array.isArray(payload.expectedMtdKwh) ? payload.expectedMtdKwh.slice() :
-    null;
-
-  let expectedMtd = [];
-  if (expectedMtdFromPayload && expectedMtdFromPayload.length >= expectedDaily.length) {
-    expectedMtd = expectedMtdFromPayload.slice(0, expectedDaily.length).map(v => Number(v) || 0);
-  } else {
-    let accExpected = 0;
-    expectedMtd = expectedDaily.map(v => (accExpected += (Number(v) || 0)));
-  }
-
-  return {
-    ...payload,
-    labels: finalLabels,
-    daily_kwh: daily,
-    mtd_kwh: mtd,
-    daily_kwh_for_totals: dailyForTotals,
-    mtd_kwh_for_totals: mtdForTotals,
-    expected_daily_kwh: expectedDaily,
-    expected_mtd_kwh: expectedMtd,
-    irradiation_daily_kwh_m2: irradiationDaily,
-    energy_kwh: daily
-  };
-}
-
-function getMonthlyCurrentIndex(labels, daily) {
-  const list = Array.isArray(labels) ? labels : [];
-  if (!list.length) return -1;
-
-  const today = new Date();
-  const dd = String(today.getDate()).padStart(2, "0");
-  const mm = String(today.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(today.getFullYear());
-  const todayKeys = new Set([
-    String(today.getDate()),
-    dd,
-    `${dd}/${mm}`,
-    `${dd}-${mm}`,
-    `${yyyy}-${mm}-${dd}`
-  ]);
-
-  const indexFromToday = list.findIndex(label => todayKeys.has(String(label ?? "").trim()));
-  if (indexFromToday >= 0) return indexFromToday;
-
-  const real = Array.isArray(daily) ? daily : [];
-  for (let i = Math.min(real.length, list.length) - 1; i >= 0; i--) {
-    if (Number(real[i]) > 0) return i;
-  }
-
-  return list.length - 1;
-}
-
-// ======================================================
-// GRÁFICO MENSAL — SÓ BARRAS (SEM LINHA)
-// ======================================================
-function renderMonthlyChart() {
-  const canvas = document.getElementById("plantMonthlyChart");
-  if (!canvas) return;
-
-  const labels = Array.isArray(MONTHLY?.labels) ? MONTHLY.labels : [];
-  const daily = Array.isArray(MONTHLY?.daily_kwh)
-    ? MONTHLY.daily_kwh.map(v => Number(v) || 0)
-    : (Array.isArray(MONTHLY?.energy_kwh) ? MONTHLY.energy_kwh.map(v => Number(v) || 0) : []);
-  const dailyForTotals = Array.isArray(MONTHLY?.daily_kwh_for_totals)
-    ? MONTHLY.daily_kwh_for_totals.map(v => Number(v) || 0)
-    : daily;
-  const realMtd = Array.isArray(MONTHLY?.mtd_kwh_for_totals)
-    ? MONTHLY.mtd_kwh_for_totals.map(v => Number(v) || 0)
-    : [];
-  const expectedDaily = Array.isArray(MONTHLY?.expected_daily_kwh)
-    ? MONTHLY.expected_daily_kwh.map(v => Number(v) || 0)
-    : [];
-  const expectedMtd = Array.isArray(MONTHLY?.expected_mtd_kwh)
-    ? MONTHLY.expected_mtd_kwh.map(v => Number(v) || 0)
-    : [];
-
-  if (!labels.length || !daily.length) return;
-
-  const expectedPadded = expectedDaily.slice(0, daily.length);
-  while (expectedPadded.length < daily.length) expectedPadded.push(0);
-
-  const currentIndex = Math.max(0, Math.min(getMonthlyCurrentIndex(labels, dailyForTotals), daily.length - 1));
-  const currentLabel = String(labels[currentIndex] ?? "").trim() || "hoje";
-  const dailyToDate = dailyForTotals.slice(0, currentIndex + 1);
-  const expectedToDate = expectedPadded.slice(0, currentIndex + 1);
-
-  const totalReal = Number(realMtd[currentIndex]) ||
-    dailyToDate.reduce((a, b) => a + (Number(b) || 0), 0);
-  const totalExpectedToDate = Number(expectedMtd[currentIndex]) ||
-    expectedToDate.reduce((a, b) => a + (Number(b) || 0), 0);
-  const totalExpectedMonth = expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0);
-  const deviation = totalExpectedToDate > 0 ? ((totalReal - totalExpectedToDate) / totalExpectedToDate) * 100 : 0;
-  const elapsedDays = currentIndex + 1;
-
-  const kpiRealEl = document.getElementById("monthlyKpiReal");
-  const kpiExpectedMtdEl = document.getElementById("monthlyKpiExpectedMtd");
-  const kpiExpEl = document.getElementById("monthlyKpiExp");
-  const kpiDevEl = document.getElementById("monthlyKpiDev");
-  const progressEl = document.getElementById("monthlyProgressFill");
-  const bottomLeftEl = document.getElementById("monthlyBottomLeft");
-  const bottomRightEl = document.getElementById("monthlyBottomRight");
-
-  if (kpiRealEl) kpiRealEl.textContent = formatKwhPtBR(totalReal);
-  if (kpiExpectedMtdEl) kpiExpectedMtdEl.textContent = formatKwhPtBR(totalExpectedToDate);
-  if (kpiExpEl) kpiExpEl.textContent = formatKwhPtBR(totalExpectedMonth);
-  if (kpiDevEl) {
-    kpiDevEl.textContent = `${deviation >= 0 ? "+" : ""}${deviation.toFixed(1)}%`;
-    kpiDevEl.style.color = deviation >= 0 ? "#7FD055" : "#ff6b6b";
-  }
-  if (progressEl) progressEl.style.width = `${((elapsedDays / daily.length) * 100).toFixed(1)}%`;
-  if (bottomLeftEl) bottomLeftEl.textContent = `Ate ${currentLabel}: real produzido x esperado acumulado`;
-  if (bottomRightEl) bottomRightEl.textContent = `Expectativa mensal: ${formatKwhPtBR(totalExpectedMonth)}`;
-
-  const ctx = canvas.getContext("2d");
-
-  if (monthlyChartInstance) {
-    monthlyChartInstance.destroy();
-    monthlyChartInstance = null;
-  }
-
-  const maxDaily = Math.max(...daily, 0);
-  const suggestedMaxDaily = maxDaily > 0 ? Math.ceil(maxDaily * 1.25) : undefined;
-  const realColors = daily.map((v, idx) => {
-    const exp = Number(expectedPadded[idx] ?? 0);
-    if (v === 0) return "rgba(255,255,255,.06)";
-    return v >= exp ? "rgba(127,208,85,.92)" : "rgba(127,208,85,.50)";
-  });
-  const realBorders = daily.map((v, idx) => {
-    const exp = Number(expectedPadded[idx] ?? 0);
-    if (v === 0) return "rgba(255,255,255,.06)";
-    return v >= exp ? "#7FD055" : "rgba(127,208,85,.70)";
-  });
-
-  const isMobile = window.innerWidth <= 768;
-  const barThickExp     = isMobile ? 6  : 14;
-  const barThickReal    = isMobile ? 4  : 9;
-  const maxBarThickExp  = isMobile ? 10 : 20;
-  const maxBarThickReal = isMobile ? 8  : 16;
-  const catPerc         = isMobile ? 0.88 : 0.78;
-  const yTicksLimit     = isMobile ? 5 : 6;
-  const xTicksLimit     = isMobile ? 8 : 6;
-  const tickFontSize    = isMobile ? 10 : 12;
-
-  monthlyChartInstance = new Chart(ctx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Esperado",
-          data: expectedPadded,
-          backgroundColor: "rgba(190,200,210,.28)",
-          borderColor: "rgba(190,200,210,.38)",
-          borderWidth: 1,
-          borderRadius: { topLeft: 5, topRight: 5 },
-          borderSkipped: "bottom",
-          barThickness: barThickExp,
-          maxBarThickness: maxBarThickExp,
-          categoryPercentage: catPerc,
-          barPercentage: 0.92,
-          order: 0,
-          hoverBackgroundColor: "rgba(190,200,210,.46)"
-        },
-        {
-          label: "Real",
-          data: daily,
-          backgroundColor: realColors,
-          borderColor: realBorders,
-          borderWidth: 1,
-          borderRadius: { topLeft: 4, topRight: 4 },
-          borderSkipped: "bottom",
-          barThickness: barThickReal,
-          maxBarThickness: maxBarThickReal,
-          categoryPercentage: catPerc,
-          barPercentage: 0.70,
-          order: 1
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: "rgba(6,18,14,0.96)",
-          borderColor: "rgba(57,229,140,0.18)",
-          borderWidth: 1,
-          titleColor: "#dbe7ef",
-          bodyColor: "#dbe7ef",
-          padding: 10,
-          displayColors: false,
-          callbacks: {
-            title: (items) => items?.[0]?.label ? `Dia ${items[0].label}` : "",
-            label: (item) => {
-              const idx = item?.dataIndex ?? 0;
-              const real = Number(daily[idx] ?? 0);
-              const expected = Number(expectedPadded[idx] ?? 0);
-              if (item?.dataset?.label === "Esperado") return `Esperado: ${formatKwhPtBR(expected)}`;
-              if (item?.dataset?.label === "Real") return `Real: ${formatKwhPtBR(real)}`;
-              return "";
-            },
-            afterBody: (items) => {
-              const idx = items?.[0]?.dataIndex ?? 0;
-              const real = Number(daily[idx] ?? 0);
-              const expected = Number(expectedPadded[idx] ?? 0);
-              const deviation = expected > 0 ? ((real - expected) / expected) * 100 : 0;
-              const sign = deviation > 0 ? "+" : "";
-              const expectedAccum = expectedPadded
-                .slice(0, idx + 1)
-                .reduce((a, b) => a + (Number(b) || 0), 0);
-              return [
-                `Desvio diario: ${sign}${deviation.toFixed(1)}%`,
-                `Esperado acumulado: ${formatKwhPtBR(expectedAccum)}`
-              ];
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          offset: true,
-          ticks: {
-            color: "#9adbb8",
-            maxTicksLimit: xTicksLimit,
-            autoSkip: true,
-            maxRotation: 0,
-            minRotation: 0,
-            padding: 8,
-            font: { size: tickFontSize }
-          },
-          grid: { display: false }
-        },
-        y: {
-          beginAtZero: true,
-          suggestedMax: suggestedMaxDaily,
-          grace: "12%",
-          ticks: {
-            color: "#9adbb8",
-            maxTicksLimit: yTicksLimit,
-            padding: 8,
-            font: { size: tickFontSize },
-            callback: (v) => formatNumberPtBR(v)
-          },
-          grid: {
-            color: "rgba(255,255,255,0.04)",
-            drawBorder: false
-          }
-        }
-      }
-    }
-  });
-}
-
-// ======================================================
-// TOGGLE — abre/fecha o painel
-// ======================================================
-function setupInverterToggles() {
-  const container = document.querySelector(".inverters-section");
-  if (!container) return;
-
-  container.addEventListener("click", async (e) => {
-    if (e.target.closest(".string-card")) return;
-
-    const row = e.target.closest(".inverter-toggle");
-    if (!row) return;
-
-    const inverterRealId = row.dataset.inverterRealId;
-    const panel = document.getElementById(`strings-${inverterRealId}`);
-    if (!panel) return;
-
-    const willOpen = !row.classList.contains("open");
-
-    document.querySelectorAll(".inverter-toggle.open").forEach(r => r.classList.remove("open"));
-    document.querySelectorAll(".inverter-strings.open").forEach(p => {
-      p.classList.remove("open");
-      p.style.maxHeight = "0px";
-      p.style.opacity = "0";
-    });
-
-    if (!willOpen) {
-      OPEN_INVERTER_REAL_ID = null;
-      return;
-    }
-
-    OPEN_INVERTER_REAL_ID = inverterRealId;
-    row.classList.add("open");
-    panel.classList.add("open");
-    panel.style.opacity = "1";
-
-    // Mostra spinner enquanto carrega
-    const stringsGrid = panel.querySelector(".strings-grid");
-    if (stringsGrid) {
-      const loader = document.createElement("div");
-      loader.className = "inv-panel-loader";
-      loader.innerHTML = `<div class="inv-panel-spinner"></div><span>Carregando dados…</span>`;
-      stringsGrid.innerHTML = "";
-      stringsGrid.appendChild(loader);
-    }
-
-    panel.style.maxHeight = panel.scrollHeight + "px";
-
-    refreshStringsForRealInverter(inverterRealId).finally(() => {
-      // ✅ renderiza extras (chips amarelos) abaixo das strings
-      const inv = INVERTER_EXTRAS_BY_ID.get(String(inverterRealId));
-      renderInverterExtras(inverterRealId, inv);
-
-      const samePanel = document.getElementById(`strings-${inverterRealId}`);
-      if (samePanel && samePanel.classList.contains("open")) {
-        samePanel.style.maxHeight = samePanel.scrollHeight + "px";
-      }
-    });
-  });
-}
-
-async function refreshStringsForRealInverter(inverterRealId) {
-  const grid = document.querySelector(`.strings-grid[data-inverter-real-id="${inverterRealId}"]`);
-  if (!grid) return;
-
-  const prev = STRINGS_REFRESH_SEQ_MAP.get(String(inverterRealId)) ?? 0;
-  const reqSeq = prev + 1;
-  STRINGS_REFRESH_SEQ_MAP.set(String(inverterRealId), reqSeq);
-
-  const [cfg, rt] = await Promise.all([
-    fetchInverterStrings(PLANT_ID, inverterRealId),
-    fetchInverterStringsRealtime(PLANT_ID, inverterRealId)
-  ]);
-
-  if (reqSeq !== STRINGS_REFRESH_SEQ_MAP.get(String(inverterRealId))) return;
-
-  const merged = mergeStringsPayload(cfg, rt, inverterRealId);
-  renderStringsGrid(grid, merged);
-
-  const panel = document.getElementById(`strings-${inverterRealId}`);
-  if (panel && panel.classList.contains("open")) {
-    panel.style.maxHeight = panel.scrollHeight + "px";
+  .monthly-kpi-pill {
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 0;
   }
 }
-
-async function refreshOpenStringsPanels() {
-  const trackedId = OPEN_INVERTER_REAL_ID;
-  if (trackedId != null) {
-    await refreshStringsForRealInverter(trackedId);
-    // Garante que o painel continue visualmente aberto após eventual DOM rebuild
-    const panel = document.getElementById(`strings-${trackedId}`);
-    const row = document.querySelector(`.inverter-toggle[data-inverter-real-id="${trackedId}"]`);
-    if (panel && row && !panel.classList.contains("open")) {
-      row.classList.add("open");
-      panel.classList.add("open");
-      panel.style.opacity = "1";
-      panel.style.maxHeight = panel.scrollHeight + "px";
-    }
-    return;
-  }
-
-  const openRow = document.querySelector(".inverter-toggle.open[data-inverter-real-id]");
-  if (!openRow) return;
-  OPEN_INVERTER_REAL_ID = openRow.dataset.inverterRealId;
-  await refreshStringsForRealInverter(openRow.dataset.inverterRealId);
-}
-
-function renderPlantName(realtime) {
-  const name =
-    realtime?.power_plant_name ??
-    realtime?.powerPlantName ??
-    realtime?.name ??
-    "—";
-
-  PLANT_STATE = { ...PLANT_STATE, name };
-
-  const el = document.getElementById("plantName") || document.querySelector(".plant-name");
-  if (el) el.textContent = name;
-}
-
-// ======================================================
-// ✅ REFRESH (realtime + alarms + inverters rows + strings abertas + relay)
-// ======================================================
-async function refreshRealtimeEverything() {
-  if (IS_REFRESHING_PLANT) return;
-  IS_REFRESHING_PLANT = true;
-
-  let realtime = null;
-  try {
-    try {
-      realtime = await fetchPlantRealtime(PLANT_ID);
-      renderPlantName(realtime);
-      if (realtime) {
-        const rated = asNumber(
-          realtime.rated_power_kw ?? realtime.rated_power_ac_kw ?? realtime.rated_power_kwp,
-          PLANT_STATE.rated_power_kwp
-        );
-        const active = asNumber(
-          realtime.active_power_kw ?? realtime.active_power_inverter_kw ?? realtime.active_power_meter_kw,
-          PLANT_STATE.active_power_kw
-        );
-        const prPct = normalizePercentMaybe(
-          realtime.performance_ratio ?? realtime.pr_daily_pct ?? realtime.pr_percent
-        );
-        PLANT_STATE = {
-          ...PLANT_STATE,
-          rated_power_kwp: rated,
-          active_power_kw: active,
-          capacity_percent: rated > 0 ? (active / rated) * 100 : PLANT_STATE.capacity_percent,
-          pr_percent: prPct != null ? prPct : PLANT_STATE.pr_percent
-        };
-      }
-    } catch (e) {
-      console.error("[refreshRealtimeEverything][realtime] erro", e);
-    }
-
-    const [alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes] = await Promise.allSettled([
-      fetchActiveAlarms(PLANT_ID),
-      fetchInvertersRealtime(PLANT_ID),
-      safeFetchRelayIfSupported(PLANT_ID),
-      safeFetchMultimeterIfSupported(PLANT_ID),
-      fetchTrackersRealtime(PLANT_ID)
-    ]);
-
-    if (alarmsRes.status === "fulfilled") {
-      ACTIVE_ALARMS = Array.isArray(alarmsRes.value) ? alarmsRes.value : [];
-      renderAlarms(ACTIVE_ALARMS);
-      renderAlarmMenuButton();
-    } else {
-      ACTIVE_ALARMS = [];
-      renderAlarms(ACTIVE_ALARMS);
-      renderAlarmMenuButton();
-      console.error("[refreshRealtimeEverything][alarms] erro", alarmsRes.reason);
-    }
-
-    if (invertersRes.status === "fulfilled") {
-      INVERTERS_REALTIME = invertersRes.value;
-      window.INVERTERS_REALTIME = INVERTERS_REALTIME;
-      INVERTER_EXTRAS_BY_ID = new Map();
-      dedupInvertersById(INVERTERS_REALTIME).forEach(inv => {
-        const id = getInverterRealId(inv);
-        if (id != null) INVERTER_EXTRAS_BY_ID.set(String(id), inv);
-      });
-
-      const dedup = dedupInvertersById(INVERTERS_REALTIME);
-      PLANT_CATALOG.inverters = dedup;
-      PLANT_STATE = {
-        ...PLANT_STATE,
-        inverter_total: dedup.length,
-        inverter_online: countOnlineInverters(dedup)
-      };
-
-      ensureInverterRowsFromRealtime(INVERTERS_REALTIME);
-      renderInvertersRows(INVERTERS_REALTIME);
-      refreshInverterStatusChips(INVERTERS_REALTIME);
-      refreshCabineMapCards(INVERTERS_REALTIME);
-    } else {
-      console.error("[refreshRealtimeEverything][inverters] erro", invertersRes.reason);
-    }
-
-    if (relayRes.status === "fulfilled") {
-      const relayItem = relayRes.value;
-      RELAY_REALTIME = relayItem;
-      window.RELAY_REALTIME = RELAY_REALTIME;
-      PLANT_CATALOG.hasRelay = !!relayItem;
-      setRelaySectionVisible(RELAY_SUPPORTED !== false);
-      if (RELAY_SUPPORTED !== false) renderRelayCard(relayItem);
-      updateCabineRelayNode(relayItem);
-    } else {
-      console.error("[refreshRealtimeEverything][relay] erro", relayRes.reason);
-    }
-
-    if (multimeterRes.status === "fulfilled") {
-      const multimeterItem = multimeterRes.value;
-      MULTIMETER_REALTIME = multimeterItem;
-      window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
-      setMultimeterSectionVisible(MULTIMETER_SUPPORTED !== false);
-      if (MULTIMETER_SUPPORTED !== false) renderMultimeterCard(multimeterItem);
-      updateCabineMeterNode(multimeterItem);
-    } else {
-      console.error("[refreshRealtimeEverything][multimeter] erro", multimeterRes.reason);
-    }
-
-    if (trackersRes.status === "fulfilled") {
-      const trackersPayload = trackersRes.value;
-      TRACKERS_DATA = Array.isArray(trackersPayload?.items) ? trackersPayload.items : [];
-      TRACKERS_PLANT_CENTER = trackersPayload?.plant_center ?? null;
-      TRACKERS_PLANT_BOUNDS = trackersPayload?.plant_bounds ?? null;
-      const hasTrackers = Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.some(
-        (t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
-      );
-      if (hasTrackers) {
-        TRACKERS_LAST_HAS_DATA = true;
-      }
-
-      if (!TRACKERS_USER_OPENED) {
-        setTrackersSectionVisible(hasTrackers);
-      } else {
-        setTrackersSectionVisible(TRACKERS_LAST_HAS_DATA);
-      }
-
-      if (TRACKERS_LAST_HAS_DATA) {
-        const trackersSection = document.getElementById("trackersSection");
-        const trackersVisible =
-          trackersSection &&
-          !trackersSection.classList.contains("trackers-hidden") &&
-          !trackersSection.classList.contains("is-collapsed");
-        if (trackersVisible && hasTrackers) renderTrackersPanel();
-      }
-    } else {
-      TRACKERS_DATA = [];
-      TRACKERS_PLANT_CENTER = null;
-      TRACKERS_PLANT_BOUNDS = null;
-      renderTrackersPanel();
-      console.error("[refreshRealtimeEverything][trackers] erro", trackersRes.reason);
-    }
-
-    renderHeaderSummary();
-    renderWeather(realtime?.weather ?? null);
-    renderSummaryStrip();
-
-    try {
-      await refreshOpenStringsPanels();
-      if (OPEN_INVERTER_REAL_ID != null) {
-        const inv = INVERTER_EXTRAS_BY_ID.get(String(OPEN_INVERTER_REAL_ID));
-        renderInverterExtras(OPEN_INVERTER_REAL_ID, inv);
-      }
-    } catch (e) {
-      console.error("[refreshRealtimeEverything][strings] erro", e);
-    }
-  } finally {
-    IS_REFRESHING_PLANT = false;
-  }
-}
-
-// ======================================================
-// TRACKERS (MOCK LOCAL) — MÓDULO INDEPENDENTE
-// ======================================================
-let TRACKER_VIEW_MODE = "state";
-let TRACKERS_DATA = [];
-let TRACKERS_FILTER_TEXT = "";
-let TRACKERS_TRANSFORM = { scale: 1, x: 0, y: 0 };
-let TRACKERS_PLANT_CENTER = null;
-let TRACKERS_PLANT_BOUNDS = null;
-let TRACKERS_HAS_FITTED_ONCE = false;
-let TRACKERS_USER_OPENED = false;
-let TRACKERS_LAST_HAS_DATA = false;
-let TRACKERS_MAP = null;
-let TRACKERS_MARKERS_LAYER = null;
-
-function createMockTrackers(count = 220) {
-  const items = [];
-  const cols = 22;
-  const spacingX = 65;
-  const spacingY = 78;
-  const states = [
-    "off",
-    "manual_daytime",
-    "auto_daytime",
-    "manual_tracking",
-    "auto_tracking",
-    "manual_nighttime",
-    "auto_nighttime",
-    "manual_sleep",
-    "auto_sleep"
-  ];
-
-  for (let i = 0; i < count; i++) {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const offline = i % 17 === 0;
-    const stateCode = offline ? "no_comm" : states[i % states.length];
-    const angle = offline ? null : -60 + ((i * 7) % 131);
-    const error = offline ? null : Number(((i * 1.7) % 11).toFixed(1));
-
-    items.push({
-      id: `TRK-${String(i + 1).padStart(4, "0")}`,
-      name: `Tracker ${String(i + 1).padStart(3, "0")}`,
-      kind: i % 2 === 0 ? "tcu" : "rsu",
-      x: 50 + col * spacingX + (row % 2 ? 12 : 0),
-      y: 45 + row * spacingY,
-      state_code: stateCode,
-      angle_deg: angle,
-      error_value: error,
-      is_online: !offline
-    });
-  }
-  return items;
-}
-
-function getTrackersLegendItems(mode) {
-  if (mode === "state") {
-    return [
-      ["tracker desligado", "#707b86"],
-      ["manual + daytime", "#f6bd60"],
-      ["automático + daytime", "#f2e85e"],
-      ["manual + tracking", "#4f9dff"],
-      ["automático + tracking", "#2ad37f"],
-      ["manual + nighttime", "#7f8cff"],
-      ["automático + nighttime", "#6375ff"],
-      ["manual sleep", "#b47dff"],
-      ["automático sleep", "#9255ff"],
-      ["sem comunicação", "#4a5057"]
-    ];
-  }
-
-  if (mode === "angle") {
-    return [
-      ["-60 a -50", "#7b1fa2"],
-      ["-50 a -40", "#5c2dd6"],
-      ["-40 a -30", "#3949ab"],
-      ["-30 a -20", "#1e88e5"],
-      ["-20 a -10", "#00acc1"],
-      ["-10 a 0", "#26a69a"],
-      ["0 a 10", "#43a047"],
-      ["10 a 20", "#7cb342"],
-      ["20 a 30", "#c0ca33"],
-      ["30 a 40", "#fdd835"],
-      ["40 a 50", "#ffb300"],
-      ["50 a 60", "#fb8c00"],
-      ["60 a 70", "#ef6c00"],
-      ["sem comunicação", "#4a5057"]
-    ];
-  }
-
-  return [
-    ["erro <= 5", "#2ad37f"],
-    ["erro > 5", "#ff8a65"],
-    ["offline", "#4a5057"]
-  ];
-}
-
-function getTrackerColorByMode(item, mode) {
-  if (!item?.is_online) return "#4a5057";
-
-  if (mode === "state") {
-    const map = {
-      off: "#707b86",
-      manual_daytime: "#f6bd60",
-      auto_daytime: "#f2e85e",
-      manual_tracking: "#4f9dff",
-      auto_tracking: "#2ad37f",
-      manual_nighttime: "#7f8cff",
-      auto_nighttime: "#6375ff",
-      manual_sleep: "#b47dff",
-      auto_sleep: "#9255ff",
-      no_comm: "#4a5057"
-    };
-    return map[item.state_code] || "#8a949d";
-  }
-
-  if (mode === "angle") {
-    const a = Number(item.angle_deg);
-    if (!Number.isFinite(a)) return "#4a5057";
-    const ranges = [
-      [-60, -50, "#7b1fa2"], [-50, -40, "#5c2dd6"], [-40, -30, "#3949ab"],
-      [-30, -20, "#1e88e5"], [-20, -10, "#00acc1"], [-10, 0, "#26a69a"],
-      [0, 10, "#43a047"], [10, 20, "#7cb342"], [20, 30, "#c0ca33"],
-      [30, 40, "#fdd835"], [40, 50, "#ffb300"], [50, 60, "#fb8c00"], [60, 70, "#ef6c00"]
-    ];
-    const found = ranges.find(([lo, hi]) => a >= lo && a < hi);
-    return found ? found[2] : "#ef6c00";
-  }
-
-  const err = Number(item.error_value);
-  if (!Number.isFinite(err)) return "#4a5057";
-  return err <= 5 ? "#2ad37f" : "#ff8a65";
-}
-
-function renderTrackersLegend() {
-  const legendEl = document.getElementById("trackersLegend");
-  if (!legendEl) return;
-  const items = getTrackersLegendItems(TRACKER_VIEW_MODE);
-  legendEl.innerHTML = items
-    .map(([label, color]) => `
-      <div class="trackers-legend-item">
-        <span class="trackers-legend-dot" style="background:${color}"></span>
-        <span>${label}</span>
-      </div>
-    `)
-    .join("");
-}
-
-function applyTrackersTransform() {
-  if (!TRACKERS_MAP) return;
-  TRACKERS_MAP.invalidateSize();
-}
-
-function renderTrackersNodes() {
-  if (!TRACKERS_MAP || !TRACKERS_MARKERS_LAYER) return;
-  TRACKERS_MARKERS_LAYER.clearLayers();
-
-  const filterText = TRACKERS_FILTER_TEXT.trim().toLowerCase();
-  const filtered = TRACKERS_DATA.filter((t) => {
-    if (!filterText) return true;
-    const hay = `${t.name || ""} ${t.id || ""} ${t.tracker_id || ""} ${t.kind || ""} ${t.tracker_type || ""}`.toLowerCase();
-    return hay.includes(filterText);
-  });
-
-  const valid = filtered.filter(t =>
-    Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
-  );
-
-  const fallback = document.getElementById("trackersMapFallback");
-  if (!valid.length) {
-    if (fallback) fallback.hidden = false;
-    return;
-  }
-  if (fallback) fallback.hidden = true;
-
-  const bounds = [];
-  const markerIcon = (color) => L.divIcon({
-    className: "",
-    html: `<div class="tracker-map-marker" style="background:${color}"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7]
-  });
-
-  valid.forEach((tracker) => {
-    const lat = Number(tracker.latitude);
-    const lng = Number(tracker.longitude);
-    bounds.push([lat, lng]);
-
-    const color = getTrackerColorByMode(tracker, TRACKER_VIEW_MODE);
-    const m = L.marker([lat, lng], { icon: markerIcon(color) });
-    const displayName = tracker.name || tracker.tracker_code || tracker.tracker_id || "Tracker";
-    const displayType = String(tracker.tracker_type || tracker.kind || "—").toUpperCase();
-    m.bindPopup(`
-      <strong>${displayName}</strong><br>
-      Tipo: ${displayType}<br>
-      Estado: ${tracker.state_code ?? "—"}<br>
-      Ângulo: ${tracker.angle_deg ?? "—"}<br>
-      Erro: ${tracker.error_value ?? "—"}<br>
-      Status: ${tracker.is_online ? "online" : "offline"}<br>
-      Atualização: ${fmtDatePtBR(tracker.last_update)}
-    `);
-    m.addTo(TRACKERS_MARKERS_LAYER);
-  });
-
-  if (!TRACKERS_HAS_FITTED_ONCE) {
-    if (TRACKERS_PLANT_BOUNDS &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
-      TRACKERS_MAP.fitBounds([
-        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
-        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
-      ], { padding: [20, 20] });
-    } else if (TRACKERS_PLANT_CENTER &&
-        Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
-      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
-    } else if (bounds.length) {
-      TRACKERS_MAP.fitBounds(bounds, { padding: [20, 20] });
-    }
-    TRACKERS_HAS_FITTED_ONCE = true;
-  }
-}
-
-function renderTrackersPanel() {
-  renderTrackersLegend();
-  renderTrackersNodes();
-}
-
-function setTrackerMode(mode) {
-  TRACKER_VIEW_MODE = mode;
-  document.getElementById("trackerModeState")?.classList.toggle("is-active", mode === "state");
-  document.getElementById("trackerModeAngle")?.classList.toggle("is-active", mode === "angle");
-  document.getElementById("trackerModeError")?.classList.toggle("is-active", mode === "error");
-  renderTrackersPanel();
-}
-
-function filterTrackers(searchText) {
-  TRACKERS_FILTER_TEXT = searchText || "";
-  renderTrackersNodes();
-}
-
-function initTrackersPanel() {
-  const sectionEl = document.getElementById("trackersSection");
-  const stageWrapEl = document.getElementById("trackersStageWrap");
-  const mapEl = document.getElementById("trackersMap");
-  if (!sectionEl || !stageWrapEl || !mapEl || typeof L === "undefined") return;
-  const tabToggleEl = document.getElementById("trackersTabToggle");
-  const menuToggleEl = document.getElementById("trackersMenuToggle");
-
-  if (tabToggleEl) {
-    tabToggleEl.addEventListener("click", () => {
-      const collapsed = !sectionEl.classList.contains("is-collapsed");
-      setTrackersCollapsed(collapsed);
-      const expanded = !collapsed;
-      if (expanded) applyTrackersTransform();
-    });
-  }
-
-  if (menuToggleEl) {
-    menuToggleEl.addEventListener("click", () => {
-      const section = document.getElementById("trackersSection");
-      if (!section) return;
-
-      const isHidden = section.classList.contains("trackers-hidden");
-      const willShow = isHidden;
-
-      TRACKERS_USER_OPENED = true;
-
-      if (willShow) {
-        setTrackersSectionVisible(true);
-        setTrackersCollapsed(false);
-        TRACKERS_LAST_HAS_DATA = true;
-        requestAnimationFrame(() => {
-          applyTrackersTransform();
-          if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
-            renderTrackersPanel();
-          }
-        });
-      } else {
-        setTrackersSectionVisible(false);
-      }
-    });
-  }
-
-  TRACKERS_DATA = [];
-  TRACKERS_TRANSFORM = { scale: 1, x: 0, y: 0 };
-  TRACKERS_HAS_FITTED_ONCE = false;
-  TRACKERS_MAP = L.map(mapEl, {
-    zoomControl: false,
-    attributionControl: false
-  }).setView([-14.235, -51.9253], 4);
-
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxZoom: 20
-  }).addTo(TRACKERS_MAP);
-  TRACKERS_MARKERS_LAYER = L.layerGroup().addTo(TRACKERS_MAP);
-
-  document.getElementById("trackerModeState")?.addEventListener("click", () => setTrackerMode("state"));
-  document.getElementById("trackerModeAngle")?.addEventListener("click", () => setTrackerMode("angle"));
-  document.getElementById("trackerModeError")?.addEventListener("click", () => setTrackerMode("error"));
-  document.getElementById("trackersSearchInput")?.addEventListener("input", (e) => filterTrackers(e.target.value));
-
-  document.getElementById("trackersZoomIn")?.addEventListener("click", () => {
-    if (TRACKERS_MAP) TRACKERS_MAP.zoomIn();
-  });
-  document.getElementById("trackersZoomOut")?.addEventListener("click", () => {
-    if (TRACKERS_MAP) TRACKERS_MAP.zoomOut();
-  });
-  document.getElementById("trackersZoomReset")?.addEventListener("click", () => {
-    if (!TRACKERS_MAP) return;
-    if (TRACKERS_PLANT_BOUNDS &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
-      TRACKERS_MAP.fitBounds([
-        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
-        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
-      ], { padding: [20, 20] });
-    } else if (TRACKERS_PLANT_CENTER &&
-      Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
-      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
-    } else {
-      TRACKERS_MAP.setView([-14.235, -51.9253], 4);
-    }
-  });
-
-  renderTrackersPanel();
-  setTrackersSectionVisible(false);
-  setTrackersCollapsed(true);
-}
-
-function scrollPlantSectionTarget(target) {
-  if (!target) return;
-
-  if (target === "#sec-trackers") {
-    const section = document.getElementById("trackersSection");
-    const tab = document.getElementById("trackersTabToggle");
-    if (!section) return;
-
-    TRACKERS_USER_OPENED = true;
-    setTrackersSectionVisible(true);
-    setTrackersCollapsed(false);
-    TRACKERS_LAST_HAS_DATA = true;
-    tab?.setAttribute("aria-expanded", "true");
-
-    const anchor = document.querySelector(target);
-    if (anchor) {
-      anchor.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-
-    requestAnimationFrame(() => {
-      applyTrackersTransform();
-      if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
-        renderTrackersPanel();
-      }
-    });
-
-    return;
-  }
-
-  const el = document.querySelector(target);
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function setupDeviceNav() {
-  const btns = document.querySelectorAll(".device-nav-btn[data-target]");
-  if (!btns.length) return;
-
-  btns.forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      scrollPlantSectionTarget(btn.getAttribute("data-target"));
-    });
-  });
-
-  if (location.hash) {
-    const hash = location.hash;
-    setTimeout(() => scrollPlantSectionTarget(hash), 0);
-  }
-}
-
-function buildCommandDeviceOptions() {
-  const out = [];
-  const seen = new Set();
-  const add = (deviceType, deviceId, label) => {
-    if (deviceId == null || deviceId === "") return;
-    const key = `${deviceType}:${deviceId}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({
-      deviceType,
-      deviceId: String(deviceId),
-      label: label || `${String(deviceType).toUpperCase()} ${deviceId}`,
-    });
-  };
-
-  const inverters = Array.isArray(PLANT_CATALOG.inverters) && PLANT_CATALOG.inverters.length
-    ? PLANT_CATALOG.inverters
-    : INVERTERS_REALTIME;
-
-  (Array.isArray(inverters) ? inverters : []).forEach((inv, index) => {
-    const id = getInverterRealId(inv);
-    add("inverter", id, getInverterDisplayName(inv, index));
-  });
-
-  const relayId = RELAY_REALTIME?.device_id ?? RELAY_REALTIME?.relay_id ?? null;
-  add("relay", relayId, RELAY_REALTIME?.device_name || RELAY_REALTIME?.name || "Relé");
-
-  const meterId = MULTIMETER_REALTIME?.device_id ?? MULTIMETER_REALTIME?.multimeter_id ?? null;
-  add("multimeter", meterId, MULTIMETER_REALTIME?.device_name || MULTIMETER_REALTIME?.name || "Multimedidor");
-
-  return out;
-}
-
-function ensureCommandDevicePickerModal() {
-  if (document.getElementById("cmdDevicePickerOverlay")) return;
-
-  const el = document.createElement("div");
-  el.innerHTML = `
-    <div id="cmdDevicePickerOverlay" class="cmd-console-overlay hidden" role="dialog" aria-modal="true" aria-label="Selecionar dispositivo para comando">
-      <div class="cmd-console cmd-device-picker">
-        <div class="cmd-console__header">
-          <div class="cmd-console__title-group">
-            <div class="cmd-console__icon"><i class="fa-solid fa-terminal"></i></div>
-            <div>
-              <div class="cmd-console__label">Console de Comandos</div>
-              <div class="cmd-console__device-name">Selecione um dispositivo</div>
-            </div>
-          </div>
-          <button class="cmd-console__close" id="cmdDevicePickerClose" aria-label="Fechar seleção">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-        <div id="cmdDevicePickerList" class="cmd-device-picker__list"></div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(el);
-
-  const overlay = document.getElementById("cmdDevicePickerOverlay");
-  overlay?.addEventListener("click", (event) => {
-    if (event.target === overlay) closeCommandDevicePicker();
-  });
-  document.getElementById("cmdDevicePickerClose")?.addEventListener("click", closeCommandDevicePicker);
-}
-
-function closeCommandDevicePicker() {
-  document.getElementById("cmdDevicePickerOverlay")?.classList.add("hidden");
-  document.body.style.overflow = "";
-}
-
-function openCommandDevicePicker() {
-  ensureCommandConsoleModal();
-  ensureDeviceCommandModals();
-  ensureCommandDevicePickerModal();
-
-  const overlay = document.getElementById("cmdDevicePickerOverlay");
-  const list = document.getElementById("cmdDevicePickerList");
-  if (!overlay || !list) return;
-
-  const devices = buildCommandDeviceOptions();
-  list.innerHTML = "";
-
-  if (!devices.length) {
-    list.innerHTML = `
-      <div class="cmd-device-picker__empty">
-        Nenhum dispositivo com comando real foi encontrado para esta usina.
-      </div>
-    `;
-  } else {
-    devices.forEach((device) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "cmd-device-picker__item";
-      const type = document.createElement("span");
-      type.className = "cmd-device-picker__type";
-      type.textContent = String(device.deviceType).toUpperCase();
-      const label = document.createElement("span");
-      label.className = "cmd-device-picker__label";
-      label.textContent = device.label;
-      const id = document.createElement("span");
-      id.className = "cmd-device-picker__id";
-      id.textContent = `ID ${device.deviceId}`;
-      btn.append(type, label, id);
-      btn.addEventListener("click", () => {
-        closeCommandDevicePicker();
-        openCommandConsole({
-          deviceType: device.deviceType,
-          deviceId: device.deviceId,
-        });
-      });
-      list.appendChild(btn);
-    });
-  }
-
-  overlay.classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-}
-
-function handleInitialPlantAction() {
-  const action = new URLSearchParams(window.location.search).get("action");
-  if (action === "command") {
-    setTimeout(openCommandDevicePicker, 120);
-  }
-}
-
-window.PlantActions = {
-  ...(window.PlantActions || {}),
-  openCommandDevicePicker,
-  openCommandConsole,
-  scrollToSection: scrollPlantSectionTarget,
-};
-
-// ======================================================
-// INIT
-// ======================================================
-document.addEventListener("DOMContentLoaded", async () => {
-  document.body.classList.add("plant-enter");
-  const expectedMtdPlaceholder = document.getElementById("monthlyKpiExpectedMtd");
-  if (expectedMtdPlaceholder) expectedMtdPlaceholder.textContent = "-";
-  setTimeout(() => document.body.classList.remove("plant-enter"), 500);
-  setupInverterToggles();
-  setupWeatherExpand();
-  wireDailyChartZoomControlsOnce();
-  initTrackersPanel();
-  setupDeviceNav();
-  initInvViewToggle();
-  setupPlantAlarmMenu();
-  renderAlarmMenuButton();
-  renderRelayCommandBar(null);
-  renderMultimeterCommandBar(null);
-  wireDeviceCommandButtons(document);
-  document.addEventListener("click", () => closeAllDeviceCommandMenus());
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeAllDeviceCommandMenus();
-  });
-
-  if (!PLANT_ID) {
-    console.warn("[plant] plant_id ausente na URL; mantendo tela sem dados de fallback.");
-    renderHeaderSummary();
-    renderSummaryStrip();
-    return;
-  }
-
-  try {
-    const refreshPromise = refreshRealtimeEverything();
-
-    const [dailyRaw, monthlyRaw] = await Promise.all([
-      fetchDailyEnergy(PLANT_ID),
-      fetchMonthlyEnergy(PLANT_ID)
-    ]);
-
-    if (dailyRaw) {
-      DAILY = normalizeDailyPayload(dailyRaw);
-      renderDailyChart();
-    }
-
-    if (monthlyRaw) {
-      MONTHLY = normalizeMonthlyPayload(monthlyRaw);
-      renderMonthlyChart();
-    }
-
-    await refreshPromise;
-    handleInitialPlantAction();
-
-    setInterval(() => {
-      void refreshRealtimeEverything();
-    }, PLANT_REFRESH_INTERVAL_MS);
-
-    document.addEventListener("visibilitychange", async () => {
-      if (!document.hidden) {
-        await refreshRealtimeEverything();
-      }
-    });
-
-    window.addEventListener("focus", async () => {
-      await refreshRealtimeEverything();
-    });
-  } catch (e) {
-    console.error(e);
-    renderHeaderSummary();
-    renderSummaryStrip();
-  }
-});
