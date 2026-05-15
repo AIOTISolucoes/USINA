@@ -3,13 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <title>Monitoramento – Usina Solar</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Exo+2:wght@600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 
     <link rel="stylesheet" href="css/style.css" />
@@ -38,16 +39,9 @@
           <button id="btnDataStudio" class="sidebar-btn" title="Data Studio">
             <i class="fa-solid fa-flask-vial"></i>
           </button>
-          <!-- Botão OS desabilitado temporariamente — não disponível para clientes ainda
-          <button id="btnOS" class="sidebar-btn sidebar-btn--os" type="button" title="Ordens de Serviço" aria-label="Ordens de Serviço">
-            <svg class="sidebar-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="7" height="8" rx="1.5"></rect>
-              <rect x="14" y="3" width="7" height="5" rx="1.5"></rect>
-              <rect x="14" y="12" width="7" height="9" rx="1.5"></rect>
-              <rect x="3" y="15" width="7" height="6" rx="1.5"></rect>
-            </svg>
+          <button id="btnOS" class="sidebar-btn" type="button" title="Ordens de Serviço" aria-label="Ordens de Serviço">
+            <i class="fa-solid fa-screwdriver-wrench"></i>
           </button>
-          -->
         </nav>
 
         <div class="sidebar-bottom">
@@ -161,6 +155,16 @@
                         <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="7" height="7" rx="1.5" fill="currentColor"/><rect x="11" y="2" width="7" height="7" rx="1.5" fill="currentColor"/><rect x="2" y="11" width="7" height="7" rx="1.5" fill="currentColor"/><rect x="11" y="11" width="7" height="7" rx="1.5" fill="currentColor"/></svg>
                       </button>
                     </div>
+                    <button
+                      id="btnAddPlant"
+                      class="btn-add-plant hidden"
+                      type="button"
+                      title="Adicionar nova usina"
+                      aria-label="Adicionar nova usina"
+                    >
+                      <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                      <span>Nova usina</span>
+                    </button>
                   </div>
                 </div>
 
@@ -177,7 +181,7 @@
                         <th>Relays Availability (%)</th>
                         <th>PR Daily (%)</th>
                         <th>PR Acc. (%)</th>
-                        <th style="text-align:center;" title="Abrir usina"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></th>
+                        <th style="text-align:center;" title="Acoes da usina"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></th>
                       </tr>
                     </thead>
                     <tbody id="portfolioTbody"></tbody>
@@ -291,221 +295,346 @@
             </div>
           </div>
 
-          <!-- TELA DATA STUDIO (fluxo em etapas) -->
+          <!-- TELA DATA STUDIO v2 -->
           <div id="dataStudioView" class="view-section hidden ds-view">
-  <div class="ds-shell">
+  <div class="ds-v2-shell">
 
-    <!-- HEADER: título + campos de período/usina + botão + contador -->
-    <div class="ds-topbar">
-      <div class="ds-topbar-left">
-        <button id="dsOpenTagsBtn" class="ds-plus-button" type="button" aria-label="Adicionar medidas">+</button>
-        <div class="ds-topbar-info">
-          <h2 class="ds-title">Data Studio</h2>
-          <p class="ds-subtitle">Análise visual em etapas: período → medidas → séries</p>
+    <!-- ZONA 1: Barra de filtros fixa (topo) -->
+    <div class="ds-v2-topbar">
+      <div class="ds-v2-topbar-left">
+        <div class="ds-v2-topbar-icon">
+          <i class="fa-solid fa-chart-line"></i>
+        </div>
+        <div>
+          <h2>Data Studio</h2>
+          <p>Análise histórica e consolidada de medidas da sua usina solar.</p>
         </div>
       </div>
-      <div class="ds-topbar-fields">
-        <label class="ds-field">
-          <span>Data inicial</span>
-          <input id="dsStartDateInput" type="date" />
-        </label>
-        <label class="ds-field">
-          <span>Data final</span>
-          <input id="dsEndDateInput" type="date" />
-        </label>
-        <label class="ds-field">
-          <span>Usina</span>
+
+      <div class="ds-v2-topbar-controls">
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">USINA</span>
           <select id="dsPlantSelect"></select>
-        </label>
-        <div class="ds-selection-pill">
-          <span>Selecionadas</span>
-          <strong id="dsSelectedCountTop">0</strong>
         </div>
+
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">INTERVALO DE DATAS</span>
+          <div class="ds-v2-date-range">
+            <input id="dsStartDateInput" type="date" />
+            <span class="ds-v2-date-sep">→</span>
+            <input id="dsEndDateInput" type="date" />
+          </div>
+        </div>
+
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">PERÍODO RÁPIDO</span>
+          <div class="ds-v2-quick-btns">
+            <button class="ds-v2-quick" data-days="0" type="button">Hoje</button>
+            <button class="ds-v2-quick" data-days="7" type="button">7 dias</button>
+            <button class="ds-v2-quick active" data-days="30" type="button">30 dias</button>
+            <button class="ds-v2-quick" data-days="-1" type="button">Personalizado</button>
+          </div>
+        </div>
+
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">MODO</span>
+          <div class="ds-v2-mode-toggle">
+            <button class="ds-v2-mode-btn active" data-mode="historico" type="button">Histórico</button>
+            <button class="ds-v2-mode-btn" data-mode="consolidado" type="button">Consolidado</button>
+          </div>
+          <select id="dsModeSelect" class="ds-v2-hidden-select">
+            <option value="historico">Histórico</option>
+            <option value="consolidado">Consolidado</option>
+          </select>
+        </div>
+
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">AGREGAÇÃO</span>
+          <select id="dsAggregationSelect">
+            <option value="avg">Média</option>
+            <option value="integral">Integral</option>
+            <option value="median">Mediana</option>
+            <option value="max">Máxima</option>
+            <option value="sum">Soma</option>
+            <option value="none">Sem agregação</option>
+          </select>
+        </div>
+
+        <div class="ds-v2-ctrl-group">
+          <span class="ds-v2-ctrl-label">PERÍODO CONSOLIDADO</span>
+          <select id="dsConsolidationSelect">
+            <option value="5min">5 min</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+            <option value="hdaily">HDaily</option>
+            <option value="hweekly">HWeekly</option>
+            <option value="hmonthly">HMonthly</option>
+            <option value="hyearly">HYearly</option>
+          </select>
+        </div>
+
+        <button id="dsApplyTopbarBtn" class="ds-v2-apply-btn" type="button">▶ Aplicar</button>
       </div>
     </div>
 
-    <!-- BODY: sidebar catálogo + área principal -->
-    <div class="ds-body-layout">
+    <!-- ZONA 2: Infobar de contexto -->
+    <div class="ds-v2-infobar hidden">
+      <div class="ds-v2-info-item">
+        <i class="fa-solid fa-chart-bar"></i>
+        <span>SÉRIES SELECIONADAS</span>
+        <strong id="dsSelectedCountTop">0</strong>
+        <small>séries ativas</small>
+      </div>
+      <div class="ds-v2-info-item">
+        <i class="fa-solid fa-calendar"></i>
+        <span>PERÍODO</span>
+        <strong id="dsInfoPeriod">—</strong>
+      </div>
+      <div class="ds-v2-info-item">
+        <i class="fa-solid fa-seedling"></i>
+        <span>USINA</span>
+        <strong id="dsInfoPlant">—</strong>
+      </div>
+      <div class="ds-v2-info-item">
+        <i class="fa-solid fa-clock"></i>
+        <span>RESOLUÇÃO</span>
+        <strong id="dsInfoResolution">—</strong>
+      </div>
+    </div>
 
-      <!-- SIDEBAR: catálogo de medidas -->
-      <aside class="ds-sidebar" id="dsCatalogSection">
-        <div class="ds-sidebar-inner ds-modal-panel">
+    <!-- ZONA 3: Corpo principal (3 colunas) -->
+    <div class="ds-v2-body">
 
-          <div class="ds-sidebar-head">
-            <div class="ds-modal-header">
-              <div>
-                <h3>Medidas</h3>
-                <p>Clique para adicionar às séries.</p>
-              </div>
+      <!-- COLUNA ESQUERDA: Catálogo -->
+      <aside class="ds-v2-catalog" id="dsCatalogSection">
+        <div class="ds-v2-catalog-header">
+          <h3>Catálogo de Medidas</h3>
+          <button class="ds-v2-catalog-collapse" title="Recolher" type="button">«</button>
+        </div>
+
+        <div class="ds-v2-catalog-search">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="dsSearchInput" type="text" placeholder="Buscar medida ou dispositivo..." />
+          <button class="ds-v2-filter-icon" title="Filtros" type="button">
+            <i class="fa-solid fa-sliders"></i>
+          </button>
+        </div>
+
+        <div class="ds-v2-cat-pills">
+          <button class="ds-v2-pill active" data-cat="all" type="button">Todos</button>
+          <button class="ds-v2-pill" data-cat="planta" type="button">Planta</button>
+          <button class="ds-v2-pill" data-cat="inversor" type="button">Inversores</button>
+          <button class="ds-v2-pill" data-cat="weather" type="button">Weather</button>
+          <button class="ds-v2-pill" data-cat="relay" type="button">Relé</button>
+          <button class="ds-v2-pill" data-cat="meter" type="button">Multimedidor</button>
+          <button class="ds-v2-pill" data-cat="alarm" type="button">⚠ Alarmes</button>
+        </div>
+
+        <div class="ds-v2-catalog-filters">
+          <div class="ds-v2-filter-row">
+            <div class="ds-v2-filter-group">
+              <label>Contexto</label>
+              <select id="dsContextSelect" class="ds-chip-select">
+                <option value="all">Todos contextos</option>
+              </select>
             </div>
-
-            <div class="ds-search-row">
-              <input id="dsSearchInput" type="text" placeholder="Buscar medida ou dispositivo..." />
-              <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-            </div>
-
-            <div class="ds-chip-filters">
+            <div class="ds-v2-filter-group">
+              <label>Tipo</label>
               <select id="dsDataKindSelect" class="ds-chip-select">
                 <option value="all">Todos tipos</option>
                 <option value="analog">Analógico</option>
                 <option value="discrete">Alarmes</option>
               </select>
+            </div>
+          </div>
+          <div class="ds-v2-filter-row">
+            <div class="ds-v2-filter-group">
+              <label>Origem</label>
               <select id="dsSourceSelect" class="ds-chip-select">
                 <option value="all">Todas origens</option>
                 <option value="historico">Histórico</option>
                 <option value="consolidado">Consolidado</option>
               </select>
-              <select id="dsContextSelect" class="ds-chip-select">
-                <option value="all">Todos contextos</option>
-              </select>
-            </div>
-
-            <div class="ds-selection-meta">
-              Selecionadas: <strong id="dsSelectedCount">0</strong>
-            </div>
-            <div id="dsContextInfo" class="ds-context-info hidden"></div>
-          </div>
-
-          <!-- tabela existente — mantida para compatibilidade com app.js -->
-          <div class="ds-modal-table-wrap">
-            <table id="dsTagsTable" class="ds-table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Contexto</th>
-                  <th>Descrição</th>
-                  <th>Origem</th>
-                  <th>Tipo</th>
-                  <th>Unidade</th>
-                  <th>Plant</th>
-                  <th>Pathname</th>
-                </tr>
-              </thead>
-              <tbody id="dsTagsTbody"></tbody>
-            </table>
-          </div>
-
-          <div class="ds-sidebar-footer ds-modal-footer">
-            <div class="ds-modal-footer__count">
-              Selecionadas: <strong id="dsSelectedCountBottom">0</strong>
-            </div>
-            <div class="ds-modal-actions">
-              <button id="dsTagsClearBtn" class="btn-clear" type="button">Limpar</button>
-              <button id="dsTagsApplyBtn" class="btn-clear" type="button">Atualizar</button>
-              <button id="dsConfirmSelectionBtn" class="btn-apply" type="button">OK</button>
             </div>
           </div>
+        </div>
 
+        <div class="ds-v2-catalog-meta">
+          <span id="dsContextInfo" class="ds-context-info"></span>
+          <div>
+            <span class="ds-v2-found-count">— medidas encontradas</span>
+            <span class="ds-v2-auto-status">Atualizacao automatica</span>
+            <button id="dsTagsApplyBtn" class="ds-v2-link-btn" title="Recarregar catalogo" type="button">Recarregar</button>
+          </div>
+        </div>
+
+        <div class="ds-v2-catalog-table-wrap">
+          <table id="dsTagsTable" class="ds-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Contexto</th>
+                <th>Descrição</th>
+                <th>Origem</th>
+                <th>Tipo</th>
+                <th>Unidade</th>
+                <th>Plant</th>
+                <th>Pathname</th>
+              </tr>
+            </thead>
+            <tbody id="dsTagsTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="ds-v2-catalog-footer">
+          <span>Selecionadas: <strong id="dsSelectedCount">0</strong></span>
+          <div>
+            <button id="dsTagsClearBtn" class="btn-clear" type="button">Limpar</button>
+            <button id="dsConfirmSelectionBtn" class="btn-apply" type="button">Adicionar medidas ⊕</button>
+          </div>
         </div>
       </aside>
 
-      <!-- ÁREA PRINCIPAL -->
-      <div class="ds-main-area">
+      <!-- COLUNA CENTRAL: Gráfico -->
+      <div class="ds-v2-chart-col">
 
-        <!-- chips de séries ativas -->
-        <div id="dsSelectedTagsList" class="ds-selected-tags"></div>
-
-        <!-- empty state -->
+        <!-- Empty state -->
         <div id="dsEmptyState" class="ds-empty-state">
           <div class="ds-empty-icon"><i class="fa-solid fa-chart-simple"></i></div>
-          <h3>Nenhuma medida confirmada</h3>
-          <p>Clique no botão +, selecione medidas e confirme em OK para liberar a configuração.</p>
+          <h3>Nenhuma medida selecionada</h3>
+          <p>Use o catálogo à esquerda para escolher medidas e clique em Adicionar medidas.</p>
         </div>
 
-        <!-- workspace: configuração + gráfico -->
+        <!-- Workspace -->
         <div id="dsWorkspace" class="ds-workspace hidden">
 
-          <!-- painel de configuração (bulk) -->
-          <div id="dsBulkPanel" class="ds-bulk-panel">
-            <div class="ds-panel-head">
-              <button class="ds-back-btn" type="button" id="dsBackToHeroBtn" aria-label="Voltar">
-                <i class="fa-solid fa-chevron-left"></i>
-              </button>
-              <div>
-                <h3>Configuração</h3>
-                <p>Ajuste modo, agregação e período consolidado.</p>
-              </div>
+          <div class="ds-v2-chart-header">
+            <h3>Visualização das Séries</h3>
+            <div class="ds-v2-zoom-shorts">
+              <button class="ds-v2-zs" data-zoom="1h" type="button">1h</button>
+              <button class="ds-v2-zs" data-zoom="6h" type="button">6h</button>
+              <button class="ds-v2-zs" data-zoom="12h" type="button">12h</button>
+              <button class="ds-v2-zs" data-zoom="1d" type="button">1d</button>
+              <button class="ds-v2-zs active" data-zoom="7d" type="button">7d</button>
+              <button class="ds-v2-zs" data-zoom="30d" type="button">30d</button>
+              <button class="ds-v2-zs" data-zoom="all" type="button">Tudo</button>
             </div>
-            <div class="ds-bulk-card">
-              <div class="ds-bulk-card__title">
-                <i class="fa-solid fa-sliders"></i><span>Aplicar em massa</span>
-              </div>
-              <div class="ds-bulk-grid">
-                <label>
-                  <span>Modo</span>
-                  <select id="dsModeSelect">
-                    <option value="historico">Histórico</option>
-                    <option value="consolidado">Consolidado</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Agregação</span>
-                  <select id="dsAggregationSelect">
-                    <option value="avg">Média</option>
-                    <option value="integral">Integral</option>
-                    <option value="median">Mediana</option>
-                    <option value="max">Máxima</option>
-                    <option value="sum">Soma</option>
-                    <option value="none">Sem agregação</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Período consolidado</span>
-                  <select id="dsConsolidationSelect">
-                    <option value="5min">5 min</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                    <option value="yearly">Yearly</option>
-                    <option value="hdaily">HDaily</option>
-                    <option value="hweekly">HWeekly</option>
-                    <option value="hmonthly">HMonthly</option>
-                    <option value="hyearly">HYearly</option>
-                  </select>
-                </label>
-              </div>
-              <div class="ds-bulk-actions">
-                <button id="dsSaveSelectionBtn" class="btn-apply" type="button">Salvar seleção</button>
-                <button id="dsLoadSeriesBtn" class="btn-clear" type="button">Carregar séries</button>
-              </div>
+            <div class="ds-v2-chart-actions">
+              <button id="dsZoomInBtn" class="ds-zoom-btn" title="Zoom in" type="button">
+                <i class="fa-solid fa-magnifying-glass-plus"></i>
+              </button>
+              <button id="dsZoomOutBtn" class="ds-zoom-btn" title="Zoom out" type="button">
+                <i class="fa-solid fa-magnifying-glass-minus"></i>
+              </button>
+              <button id="dsZoomResetBtn" class="ds-zoom-btn" title="Resetar zoom" type="button">
+                <i class="fa-solid fa-rotate-left"></i>
+              </button>
+              <button id="dsFullscreenBtn" class="ds-zoom-btn" title="Tela cheia do grafico" aria-label="Tela cheia do grafico" aria-pressed="false" type="button">
+                <i class="fa-solid fa-expand"></i>
+              </button>
+              <button id="dsExportBtn" class="ds-export-btn" title="Exportar CSV" disabled type="button">
+                <i class="fa-solid fa-file-csv"></i>
+              </button>
             </div>
           </div>
 
-          <!-- gráfico -->
-          <div class="ds-chart-card">
-            <div class="ds-chart-card__head">
-              <div>
-                <h3>Séries selecionadas</h3>
-                <p>Visualização temporal das medidas escolhidas.</p>
-              </div>
-              <div class="ds-chart-toolbar">
-                <button id="dsZoomInBtn" class="ds-zoom-btn" title="Zoom in">
-                  <i class="fa-solid fa-plus"></i>
-                </button>
-                <button id="dsZoomOutBtn" class="ds-zoom-btn" title="Zoom out">
-                  <i class="fa-solid fa-minus"></i>
-                </button>
-                <button id="dsZoomResetBtn" class="ds-zoom-btn ds-zoom-btn--reset" title="Resetar zoom">
-                  <i class="fa-solid fa-rotate-left"></i>
-                </button>
-                <button id="dsExportBtn" class="ds-export-btn" title="Exportar CSV" disabled>
-                  <i class="fa-solid fa-file-csv"></i>
-                </button>
-                <!-- BOTÃO NOVO: fullscreen do gráfico -->
-                <button id="dsFullscreenBtn" class="ds-zoom-btn" title="Tela cheia">
-                  <i class="fa-solid fa-expand"></i>
-                </button>
+          <div class="ds-v2-chart-hint">
+            <span><i class="fa-solid fa-scroll"></i> Scroll para zoom</span>
+            <span class="ds-v2-hint-sep">·</span>
+            <span><i class="fa-solid fa-hand"></i> Clique e arraste para mover</span>
+            <span class="ds-v2-hint-sep">·</span>
+            <span><i class="fa-solid fa-expand"></i> Ícone de tela cheia no canto superior direito</span>
+          </div>
+
+          <div class="ds-chart-wrap" id="dsChartWrap">
+            <button id="dsFullscreenCloseBtn" class="ds-fullscreen-close" title="Voltar para tamanho normal" aria-label="Voltar para tamanho normal" type="button">
+              <i class="fa-solid fa-compress"></i>
+            </button>
+            <canvas id="dsChart"></canvas>
+          </div>
+
+          <!-- Tabela estatística -->
+          <div class="ds-v2-stats-section">
+            <div class="ds-v2-stats-left">
+              <h4>Resumo estatístico do período selecionado</h4>
+              <div class="ds-v2-stats-table-wrap">
+                <table class="ds-v2-stats-table">
+                  <thead>
+                    <tr>
+                      <th>Série</th>
+                      <th>Unidade</th>
+                      <th>Mínimo</th>
+                      <th>Máximo</th>
+                      <th>Média</th>
+                      <th>Último Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dsStatsTbody">
+                    <tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div class="ds-chart-wrap" id="dsChartWrap">
-              <canvas id="dsChart"></canvas>
+            <div class="ds-v2-insights">
+              <h4>Insights rápidos</h4>
+              <div id="dsInsightsList" class="ds-v2-insights-list"></div>
             </div>
           </div>
+
+          <!-- Bulk panel (preservar IDs, compacto) -->
+          <div id="dsBulkPanel" class="ds-v2-bulk-inline hidden"></div>
 
         </div><!-- /dsWorkspace -->
-      </div><!-- /ds-main-area -->
-    </div><!-- /ds-body-layout -->
-  </div><!-- /ds-shell -->
+      </div><!-- /ds-v2-chart-col -->
+
+      <!-- COLUNA DIREITA: Séries -->
+      <aside class="ds-v2-series-panel">
+        <div class="ds-v2-series-header">
+          <h3>Séries selecionadas</h3>
+          <p>Gerenciar as séries do gráfico</p>
+        </div>
+
+        <div id="dsSelectedTagsList" class="ds-v2-series-list"></div>
+
+        <button id="dsOpenTagsBtn" class="ds-v2-add-series-btn" type="button">
+          <i class="fa-solid fa-plus"></i> Adicionar medida
+        </button>
+
+        <div class="ds-v2-axes-section">
+          <h4>Eixos Y configurados</h4>
+          <div class="ds-v2-axes-chips" id="dsAxesChips"></div>
+        </div>
+      </aside>
+
+    </div><!-- /ds-v2-body -->
+
+    <!-- ZONA 4: Barra de ações (rodapé) -->
+    <div class="ds-v2-bottombar">
+      <button class="ds-v2-bottom-btn ds-v2-bottom-btn--primary" data-action="dsOpenTagsBtn" type="button">
+        <i class="fa-solid fa-circle-plus"></i> Adicionar medidas
+      </button>
+      <button class="ds-v2-bottom-btn" data-action="dsApplyTopbarBtn" type="button">
+        <i class="fa-solid fa-star"></i> Salvar seleção
+      </button>
+      <button id="dsLoadSeriesBtn" class="ds-v2-bottom-btn" type="button">
+        <i class="fa-solid fa-upload"></i> Carregar seleção
+      </button>
+      <button class="ds-v2-bottom-btn" id="dsExportBtnBottom" type="button" data-action="dsExportBtn">
+        <i class="fa-solid fa-download"></i> Exportar CSV
+      </button>
+      <button class="ds-v2-bottom-btn ds-v2-bottom-btn--danger" data-action="dsTagsClearBtn" type="button">
+        <i class="fa-solid fa-trash"></i> Limpar
+      </button>
+    </div>
+
+    <!-- Elementos ocultos preservados para app.js -->
+    <span id="dsSelectedCountBottom" style="display:none">0</span>
+    <button id="dsBackToHeroBtn" style="display:none" type="button"></button>
+    <button id="dsSaveSelectionBtn" style="display:none" type="button"></button>
+
+  </div><!-- /ds-v2-shell -->
 </div>
 
           <!-- TELA DE DIAGRAMA (OCULTA DO MENU) -->
@@ -528,47 +657,364 @@
       </main>
     </div>
 
-    <div id="plantEditModal" class="plant-edit-modal hidden" aria-hidden="true">
+    <div id="plantCreateModal" class="plant-edit-modal hidden" aria-hidden="true">
       <div class="plant-edit-modal__backdrop"></div>
-      <div class="plant-edit-modal__box" role="dialog" aria-modal="true" aria-labelledby="plantEditModalTitle">
+      <div class="plant-edit-modal__box" role="dialog" aria-modal="true" aria-labelledby="plantCreateModalTitle">
         <div class="plant-edit-modal__header">
-          <h3 id="plantEditModalTitle">Editar usina</h3>
-          <button class="plant-edit-modal__close" type="button" onclick="closePlantEditModal()" aria-label="Fechar">
+          <h3 id="plantCreateModalTitle">Nova usina</h3>
+          <button class="plant-edit-modal__close" type="button"
+                  onclick="closePlantCreateModal()" aria-label="Fechar">
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
 
         <div class="plant-edit-section">
-          <label for="plantEditNameInput">Nome da usina</label>
-          <div class="plant-edit-inline">
-            <input type="text" id="plantEditNameInput" placeholder="Nome da usina" />
-            <button type="button" onclick="savePlantName()" title="Salvar nome da usina" aria-label="Salvar nome da usina">
-              <i class="fa-solid fa-check"></i>
-            </button>
-          </div>
-          <div id="plantEditNameFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+          <label for="plantCreateNameInput">Nome da usina *</label>
+          <input type="text" id="plantCreateNameInput" placeholder="Ex: Massapê 1" />
         </div>
-
-        <div class="plant-edit-section" id="plantEditRatedSection">
-          <label for="plantEditRatedInput">Rated Power (kWp)</label>
-          <div class="plant-edit-inline">
-            <input type="number" id="plantEditRatedInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
-            <button type="button" onclick="savePlantRatedPower()" title="Salvar rated power" aria-label="Salvar rated power">
-              <i class="fa-solid fa-check"></i>
-            </button>
-          </div>
-          <div id="plantEditRatedFeedback" class="plant-edit-feedback" aria-live="polite"></div>
-        </div>
-
-        <hr class="plant-edit-divider" />
 
         <div class="plant-edit-section">
-          <label>Dispositivos</label>
-          <div id="plantEditDevicesList" class="plant-edit-devices-list" tabindex="-1" aria-live="polite"></div>
+          <label for="plantCreateDcInput">Rated Power DC (kWp)</label>
+          <input type="number" id="plantCreateDcInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
+        </div>
+
+        <div class="plant-edit-section">
+          <label for="plantCreateAcInput">Capacidade AC (kW)</label>
+          <input type="number" id="plantCreateAcInput" placeholder="Ex: 1230.0" min="0" step="0.1" />
+        </div>
+
+        <div class="plant-edit-section">
+          <label for="plantCreateLocationInput">Localização</label>
+          <input type="text" id="plantCreateLocationInput" placeholder="Ex: Massapê, CE" />
+        </div>
+
+        <div class="plant-edit-section" id="plantCreateCustomerSection" style="display:none">
+          <label for="plantCreateCustomerInput">Customer ID (superuser)</label>
+          <input type="number" id="plantCreateCustomerInput" placeholder="ID do cliente" min="1" step="1" />
+        </div>
+
+        <div id="plantCreateFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+
+        <div class="plant-edit-section" style="margin-top:8px;">
+          <button
+            id="plantCreateSaveBtn"
+            type="button"
+            class="plant-create-save-btn"
+            onclick="createNewPlant()"
+          >
+            <i class="fa-solid fa-seedling"></i>
+            Criar usina
+          </button>
         </div>
       </div>
     </div>
 
+    <div id="plantEditModal" class="plant-edit-modal hidden" aria-hidden="true">
+      <div class="plant-edit-modal__backdrop"></div>
+      <div class="plant-edit-modal__box" role="dialog" aria-modal="true" aria-labelledby="plantEditModalTitle">
+        <div class="plant-edit-modal__header">
+          <h3 id="plantEditModalTitle">Gerenciar usina</h3>
+          <button class="plant-edit-modal__close" type="button" onclick="closePlantEditModal()" aria-label="Fechar">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- Abas -->
+        <div class="pem-tabs">
+          <button class="pem-tab active" data-tab="info" onclick="switchPlantEditTab('info')">
+            <i class="fa-solid fa-circle-info"></i> Informações
+          </button>
+          <button class="pem-tab" data-tab="devices" onclick="switchPlantEditTab('devices')">
+            <i class="fa-solid fa-microchip"></i> Dispositivos
+          </button>
+          <button class="pem-tab" data-tab="cabins" onclick="switchPlantEditTab('cabins')">
+            <i class="fa-solid fa-table-cells"></i> Cabines
+          </button>
+        </div>
+
+        <!-- Tab: Informações -->
+        <div class="pem-tab-panel" id="pemTabInfo">
+          <div class="plant-edit-section">
+            <label for="plantEditNameInput">Nome da usina</label>
+            <div class="plant-edit-inline">
+              <input type="text" id="plantEditNameInput" placeholder="Nome da usina" />
+              <button type="button" onclick="savePlantName()" title="Salvar nome">
+                <i class="fa-solid fa-check"></i>
+              </button>
+            </div>
+            <div id="plantEditNameFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+          </div>
+          <div class="plant-edit-section" id="plantEditRatedSection">
+            <label for="plantEditRatedInput">Rated Power (kWp)</label>
+            <div class="plant-edit-inline">
+              <input type="number" id="plantEditRatedInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
+              <button type="button" onclick="savePlantRatedPower()" title="Salvar rated power">
+                <i class="fa-solid fa-check"></i>
+              </button>
+            </div>
+            <div id="plantEditRatedFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <!-- Tab: Dispositivos -->
+        <div class="pem-tab-panel hidden" id="pemTabDevices">
+          <div class="plant-edit-section">
+            <label>Adicionar dispositivo</label>
+            <div class="pem-add-row">
+              <select id="pemDeviceTypeSelect" class="pem-ctrl">
+                <option value="">Tipo...</option>
+              </select>
+              <input type="text" id="pemDeviceNameInput" class="pem-ctrl" placeholder="Nome do dispositivo" />
+              <button type="button" class="pem-action-btn pem-action-btn--add" onclick="pemAddDevice()">
+                <i class="fa-solid fa-plus"></i> Adicionar
+              </button>
+            </div>
+            <div id="pemAddDeviceFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+          </div>
+          <div class="plant-edit-section">
+            <label>Dispositivos cadastrados</label>
+            <div id="pemDevicesList" class="plant-edit-devices-list" tabindex="-1" aria-live="polite">
+              <div class="plant-edit-empty">Carregando…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Cabines -->
+        <div class="pem-tab-panel hidden" id="pemTabCabins">
+          <div class="plant-edit-section">
+            <label>Adicionar cabine</label>
+            <div class="pem-add-row">
+              <input type="text" id="pemCabinNameInput" class="pem-ctrl pem-ctrl--grow" placeholder="Ex: Cabine 01" />
+              <button type="button" class="pem-action-btn pem-action-btn--add" onclick="pemAddCabin()">
+                <i class="fa-solid fa-plus"></i> Adicionar
+              </button>
+            </div>
+            <div id="pemAddCabinFeedback" class="plant-edit-feedback" aria-live="polite"></div>
+          </div>
+          <div class="plant-edit-section">
+            <label>Cabines cadastradas</label>
+            <div id="pemCabinsList" class="plant-edit-devices-list" tabindex="-1" aria-live="polite">
+              <div class="plant-edit-empty">Carregando…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- DS v2 — comportamentos adicionais (não modificam app.js) -->
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+
+      // 1. Quick period buttons → atualiza dsStartDateInput e dsEndDateInput
+      document.querySelectorAll('.ds-v2-quick').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.ds-v2-quick').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const days = parseInt(btn.dataset.days);
+          if (days < 0) return; // personalizado: não sobrescrever
+          const end = new Date();
+          const start = new Date();
+          if (days > 0) start.setDate(end.getDate() - days);
+          const fmt = d => d.toISOString().slice(0,10);
+          const si = document.getElementById('dsStartDateInput');
+          const ei = document.getElementById('dsEndDateInput');
+          if (si) si.value = fmt(start);
+          if (ei) ei.value = fmt(end);
+          si?.dispatchEvent(new Event('change'));
+          ei?.dispatchEvent(new Event('change'));
+        });
+      });
+
+      // 2. Mode toggle → sincroniza com select#dsModeSelect
+      document.querySelectorAll('.ds-v2-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.ds-v2-mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const sel = document.getElementById('dsModeSelect');
+          if (sel) { sel.value = btn.dataset.mode; sel.dispatchEvent(new Event('change')); }
+        });
+      });
+
+      // 3. Category pills → filtra a tabela de tags localmente
+      document.querySelectorAll('.ds-v2-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+          document.querySelectorAll('.ds-v2-pill').forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+          const cat = pill.dataset.cat;
+          if (typeof window.applyDataStudioTagFilters === 'function') {
+            window.applyDataStudioTagFilters();
+            return;
+          }
+          const rows = document.querySelectorAll('#dsTagsTbody tr');
+          rows.forEach(tr => {
+            if (cat === 'all') { tr.style.display = ''; return; }
+            const pathname = tr.querySelector('.ds-pathname-cell')?.textContent || tr.cells?.[7]?.textContent || '';
+            const lower = pathname.toLowerCase();
+            const map = { planta:'plant', inversor:'inv', weather:'weather', relay:'relay', meter:'meter', alarm:'alarm' };
+            const prefix = map[cat] || '';
+            tr.style.display = lower.includes(prefix) ? '' : 'none';
+          });
+        });
+      });
+
+      // 4. Delegação dos botões do rodapé (evita IDs duplicados)
+      document.querySelectorAll('[data-action]').forEach(el => {
+        el.addEventListener('click', () => {
+          const target = document.getElementById(el.dataset.action);
+          target?.click();
+        });
+      });
+
+      // 5. Infobar: mostrar quando dsWorkspace não tiver .hidden
+      const obs = new MutationObserver(() => {
+        const ws = document.getElementById('dsWorkspace');
+        const bar = document.querySelector('.ds-v2-infobar');
+        if (ws && bar) bar.classList.toggle('hidden', ws.classList.contains('hidden'));
+      });
+      const ws = document.getElementById('dsWorkspace');
+      if (ws) obs.observe(ws, { attributes: true, attributeFilter: ['class'] });
+
+      // 6. Catalog collapse toggle
+      const collapseBtn = document.querySelector('.ds-v2-catalog-collapse');
+      if (collapseBtn) {
+        collapseBtn.addEventListener('click', () => {
+          const catalog = document.querySelector('.ds-v2-catalog');
+          if (catalog) {
+            catalog.classList.toggle('ds-v2-catalog--collapsed');
+            collapseBtn.textContent = catalog.classList.contains('ds-v2-catalog--collapsed') ? '»' : '«';
+          }
+        });
+      }
+
+      // 7. Topbar "Aplicar": confirma seleção + salva/plota
+      // (mudar datas reseta catalogConfirmed no app.js, então precisamos re-confirmar antes de salvar)
+      const applyTopbarBtn = document.getElementById('dsApplyTopbarBtn');
+      if (applyTopbarBtn) {
+        applyTopbarBtn.addEventListener('click', () => {
+          const confirmBtn = document.getElementById('dsConfirmSelectionBtn');
+          const saveBtn = document.getElementById('dsSaveSelectionBtn');
+          // Re-confirma a seleção (define catalogConfirmed=true) antes de salvar
+          if (confirmBtn) confirmBtn.click();
+          // Se a confirmação passou (sem alert de "sem medidas"), dispara o save
+          if (saveBtn) setTimeout(() => saveBtn.click(), 0);
+        });
+      }
+
+      // 8. Infobar: atualizar período e usina ao mudar filtros
+      function updateInfobar() {
+        const si = document.getElementById('dsStartDateInput');
+        const ei = document.getElementById('dsEndDateInput');
+        const plant = document.getElementById('dsPlantSelect');
+        const period = document.getElementById('dsInfoPeriod');
+        const plantInfo = document.getElementById('dsInfoPlant');
+        const resolution = document.getElementById('dsInfoResolution');
+        const agg = document.getElementById('dsAggregationSelect');
+        if (period && si && ei) period.textContent = (si.value || '—') + ' → ' + (ei.value || '—');
+        if (plantInfo && plant) plantInfo.textContent = plant.options[plant.selectedIndex]?.text || '—';
+        if (resolution && agg) resolution.textContent = agg.options[agg.selectedIndex]?.text || '—';
+      }
+      ['dsStartDateInput','dsEndDateInput','dsPlantSelect','dsAggregationSelect'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateInfobar);
+      });
+
+      // 8. Estatísticas: preencher #dsStatsTbody após gráfico renderizar
+      window.addEventListener('load', () => {
+        const orig = window.renderDataStudioChart;
+        if (typeof orig === 'function') {
+          window.renderDataStudioChart = function(payload) {
+            orig.call(this, payload);
+            _fillDsStats(payload);
+            _fillDsAxesChips();
+            updateInfobar();
+          };
+        }
+      });
+    });
+
+    function _fillDsStats(payload) {
+      const tbody = document.getElementById('dsStatsTbody');
+      if (!tbody) return;
+      const series = payload?.series || payload?.items || [];
+      if (!series.length) { tbody.innerHTML = '<tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>'; return; }
+      const colors = ['#4da3ff','#39e58c','#ffd84d','#ff8a65','#b39ddb'];
+      tbody.innerHTML = series.map((s, i) => {
+        const pts = (s.points || s.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v != null && isFinite(v));
+        const min = pts.length ? Math.min(...pts).toFixed(2) : '—';
+        const max = pts.length ? Math.max(...pts).toFixed(2) : '—';
+        const avg = pts.length ? (pts.reduce((a,b) => a+b,0)/pts.length).toFixed(2) : '—';
+        const last = pts.length ? pts[pts.length-1].toFixed(2) : '—';
+        const color = colors[i % colors.length];
+        return '<tr>' +
+          '<td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';margin-right:6px;"></span>'+(s.label || s.pathname || 'Série '+(i+1))+'</td>' +
+          '<td>'+(s.unit || '—')+'</td><td>'+min+'</td><td>'+max+'</td><td>'+avg+'</td><td>'+last+'</td>' +
+        '</tr>';
+      }).join('');
+
+      const il = document.getElementById('dsInsightsList');
+      if (il && series.length) {
+        const first = series[0];
+        const pts = (first.points || first.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v!=null&&isFinite(v));
+        const peak = pts.length ? Math.max(...pts).toFixed(1) : '—';
+        il.innerHTML =
+          '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Pico de <strong>'+(first.label||'Série 1')+'</strong>: <strong>'+peak+' '+(first.unit||'')+'</strong></span></div>' +
+          '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Total de séries: <strong>'+series.length+'</strong></span></div>';
+      }
+    }
+
+    function _fillDsAxesChips() {
+      const el = document.getElementById('dsAxesChips');
+      if (!el || typeof DATASTUDIO_CHART === 'undefined' || !DATASTUDIO_CHART) return;
+      const scales = DATASTUDIO_CHART.options?.scales || {};
+      const colors = ['#4da3ff','#39e58c','#ffd84d','#ff8a65','#b39ddb'];
+      let i = 0;
+      el.innerHTML = Object.entries(scales)
+        .filter(([k]) => k.startsWith('y'))
+        .map(([k]) => '<span class="ds-v2-axis-chip" style="border-color:'+colors[i++] || '#888'+'">'+k.toUpperCase()+'</span>')
+        .join('');
+    }
+    </script>
+
     <script src="js/app.js"></script>
+
+    <!-- Portfolio: forçar card view no mobile após app.js inicializar -->
+    <script>
+    (function() {
+      function forceMobileCardView() {
+        if (window.innerWidth > 640) return;
+        if (typeof portfolioSetView === 'function') {
+          portfolioSetView('card');
+        } else {
+          // fallback: manipula diretamente
+          var cardView = document.getElementById('portfolioCardView');
+          var listView = document.getElementById('portfolioListView');
+          if (cardView) cardView.classList.remove('hidden');
+          if (listView) listView.classList.add('hidden');
+        }
+      }
+      window.addEventListener('load', forceMobileCardView);
+      window.addEventListener('resize', function() {
+        forceMobileCardView();
+      });
+    })();
+    // Controle de visibilidade do botão OS
+    const _u = JSON.parse(localStorage.getItem("user") || "{}")
+    const _perms = _u.permissions || {}
+    const _canSeeOS = _u.is_superuser === true || _perms.os_open === true || _perms.os_view === true
+    const _btnOS = document.getElementById("btnOS")
+    if (_btnOS) _btnOS.style.display = _canSeeOS ? "" : "none"
+
+    document.getElementById("btnOS")?.addEventListener("click", () => {
+      window.location.href = "os.html"
+    })
+    </script>
+  <!-- Sprite SVG para o botão de comando de dispositivo -->
+  <svg class="device-svg-sprite" aria-hidden="true" focusable="false" width="0" height="0" style="position:absolute">
+    <symbol id="device-command-switch-glyph" viewBox="0 0 24 24">
+      <path d="M12 3.5v7.2" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+      <path d="M7.3 6.8a6.7 6.7 0 1 0 9.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    </symbol>
+  </svg>
   </body>
   </html>
