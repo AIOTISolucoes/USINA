@@ -2016,6 +2016,10 @@ function buildCabineCard(inv, idx = 0) {
       <div class="cabine-inv-card__status ${isOnline ? "dot-online" : "dot-offline"}"></div>
       <span class="cabine-inv-card__name" title="${safeTitle}">${safeName}</span>
       <span class="cabine-inv-card__state">${stateText}</span>
+      ${realId != null ? `<button class="unif-dj-btn cabine-dj-btn" data-dj-inv-id="${safeRealId}"
+              title="Disjuntor: ${safeName}" onclick="event.stopPropagation()">
+        ${unifSVGDisjuntor(hasAlarm ? true : isOnline ? false : null, 'small')}
+      </button>` : ''}
       ${_canSendCommand() && realId != null
         ? `<div class="cabine-inv-card__cmd">${renderDeviceCommandControl("inverter", realId, isOnline ? "on" : "off")}</div>`
         : ""}
@@ -2319,6 +2323,420 @@ function unifSVGSA() {
   </svg>`;
 }
 
+/* ── Wire status helper ── */
+function getWireClass(device, isOnline) {
+  if (!device) return 'wire--idle';
+  if (isOnline === false) return 'wire--fault';
+  const quality = device?.quality ?? device?.data?.quality ?? null;
+  if (quality === 28) return 'wire--fault';
+  if (isOnline === true) return 'wire--active';
+  return 'wire--idle';
+}
+
+/* ── SVG relay v2 ── */
+function unifSVGRelayV2(isOnline) {
+  const c = isOnline ? 'rgba(57,229,140,' : 'rgba(239,68,68,';
+  return `<svg viewBox="0 0 52 64" width="52" height="64" fill="none" class="unif-device-svg">
+    <line x1="26" y1="0" x2="26" y2="10" stroke="${c}0.55)" stroke-width="2" stroke-linecap="round"/>
+    <rect x="6" y="10" width="40" height="36" rx="5"
+          fill="${isOnline ? 'rgba(57,229,140,0.06)' : 'rgba(239,68,68,0.05)'}"
+          stroke="${c}0.5)" stroke-width="1.5"/>
+    <path d="M12 22 Q16 18 20 22 Q24 26 28 22 Q32 18 36 22 Q40 26 44 22"
+          stroke="${c}0.6)" stroke-width="1.2" fill="none"/>
+    <path d="M12 30 Q16 26 20 30 Q24 34 28 30 Q32 26 36 30 Q40 34 44 30"
+          stroke="${c}0.4)" stroke-width="1" fill="none"/>
+    <circle cx="26" cy="38" r="5" stroke="${c}0.7)" stroke-width="1.2"/>
+    <path d="M26 34 L24 38 H27 L22 42 L30 37 H27 L28 34 Z"
+          fill="${c}0.8)" opacity="0.9"/>
+    <line x1="26" y1="46" x2="26" y2="56" stroke="${c}0.55)" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="42" cy="14" r="2.5"
+            fill="${isOnline ? '#39e58c' : '#ef4444'}"
+            style="filter:drop-shadow(0 0 4px ${isOnline ? 'rgba(57,229,140,0.9)' : 'rgba(239,68,68,0.7)'})"/>
+  </svg>`;
+}
+
+/* ── SVG medidor v2 ── */
+function unifSVGMeterV2(isOnline) {
+  const c = isOnline ? 'rgba(57,229,140,' : 'rgba(239,68,68,';
+  return `<svg viewBox="0 0 52 64" width="52" height="64" fill="none" class="unif-device-svg">
+    <line x1="26" y1="0" x2="26" y2="12" stroke="${c}0.55)" stroke-width="2" stroke-linecap="round"/>
+    <rect x="5" y="12" width="42" height="34" rx="4"
+          fill="${isOnline ? 'rgba(57,229,140,0.06)' : 'rgba(239,68,68,0.05)'}"
+          stroke="${c}0.5)" stroke-width="1.5"/>
+    <rect x="10" y="17" width="32" height="18" rx="2"
+          fill="rgba(0,0,0,0.4)" stroke="${c}0.25)" stroke-width="0.7"/>
+    <line x1="13" y1="22" x2="39" y2="22" stroke="${c}0.45)" stroke-width="0.6"/>
+    <line x1="13" y1="26" x2="35" y2="26" stroke="${c}0.3)" stroke-width="0.6"/>
+    <line x1="13" y1="30" x2="38" y2="30" stroke="${c}0.4)" stroke-width="0.6"/>
+    <text x="26" y="23" text-anchor="middle" font-size="5"
+          fill="${c}0.7)" font-family="monospace" font-weight="700">METER</text>
+    <line x1="26" y1="46" x2="26" y2="56" stroke="${c}0.55)" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="40" cy="42" r="2.2"
+            fill="${isOnline ? '#39e58c' : '#ef4444'}"
+            style="filter:drop-shadow(0 0 3px ${isOnline ? 'rgba(57,229,140,0.8)' : 'rgba(239,68,68,0.6)'})"/>
+  </svg>`;
+}
+
+/* ── SVG disjuntor (IEC) ── */
+function unifSVGDisjuntor(isTripped, size) {
+  const lg  = size === 'large';
+  const vW  = lg ? 40 : 26, vH = lg ? 56 : 38;
+  const w   = lg ? 36 : 22, h  = lg ? 50 : 34;
+  const cx  = vW / 2;
+  const bX  = lg ? 4 : 2, bY = lg ? 10 : 7;
+  const bW  = vW - bX * 2, bH = lg ? 30 : 20;
+
+  const c   = isTripped === true  ? 'rgba(239,68,68,'
+            : isTripped === false ? 'rgba(57,229,140,'
+            :                      'rgba(245,200,66,';
+  const led = isTripped === true  ? '#ef4444'
+            : isTripped === false ? '#39e58c'
+            :                      '#f5c842';
+  const glo = isTripped === true  ? 'rgba(239,68,68,.8)'
+            : isTripped === false ? 'rgba(57,229,140,.8)'
+            :                      'rgba(245,200,66,.8)';
+  const bgFill = isTripped === true  ? 'rgba(239,68,68,.05)'
+               : isTripped === false ? 'rgba(57,229,140,.05)'
+               :                      'rgba(245,200,66,.04)';
+
+  // Contact positions
+  const ctY2 = bY + (lg ? 10 : 7);           // top contact end / pivot
+  const cbY1 = bY + bH - (lg ? 10 : 7);      // bottom contact start
+  // Arm: vertical = closed, angled = open/tripped
+  const armX2 = isTripped ? cx + (lg ? 8 : 5) : cx;
+  const sw = lg ? 2.5 : 2;
+
+  return `<svg viewBox="0 0 ${vW} ${vH}" width="${w}" height="${h}" fill="none">
+    <line x1="${cx}" y1="0" x2="${cx}" y2="${bY}" stroke="${c}.65)" stroke-width="2" stroke-linecap="round"/>
+    <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="${lg ? 4 : 3}"
+          fill="${bgFill}" stroke="${c}.55)" stroke-width="1.5"/>
+    ${lg ? `<text x="${cx}" y="${bY + bH - 4}" text-anchor="middle" font-size="6" font-family="monospace" font-weight="700" fill="${c}.45)">DJ</text>` : ''}
+    <line x1="${cx}" y1="${bY + 3}" x2="${cx}" y2="${ctY2}" stroke="${c}.85)" stroke-width="${sw}" stroke-linecap="round"/>
+    <circle cx="${cx}" cy="${ctY2}" r="${lg ? 2 : 1.5}" fill="${c}.75)"/>
+    <line x1="${cx}" y1="${ctY2}" x2="${armX2}" y2="${cbY1}" stroke="${c}.9)" stroke-width="${lg ? 2 : 1.8}" stroke-linecap="round"/>
+    <line x1="${cx}" y1="${cbY1}" x2="${cx}" y2="${bY + bH - 3}" stroke="${c}.85)" stroke-width="${sw}" stroke-linecap="round"/>
+    <circle cx="${bX + bW - (lg ? 6 : 4)}" cy="${bY + (lg ? 5 : 4)}" r="${lg ? 2.5 : 2}"
+            fill="${led}" style="filter:drop-shadow(0 0 3px ${glo})"/>
+    <line x1="${cx}" y1="${bY + bH}" x2="${cx}" y2="${vH}" stroke="${c}.65)" stroke-width="2" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/* ── Slot de inversor no overview (com líquido de eficiência) ── */
+function buildUnifInvSlotHTML(inv) {
+  const realId   = getInverterRealId(inv);
+  const safeId   = String(realId != null ? realId : Math.random().toString(36).slice(2)).replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const isOnline = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
+  const hasAlarm = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
+  const powerKw  = asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0);
+  const ratedKw  = asNumber(inv.rated_power_kw ?? 100, 100);
+  const effRaw   = asNumber(inv.efficiency_pct ?? inv.dc_efficiency ?? null, null);
+  const effPct   = effRaw ?? (ratedKw > 0 ? Math.min(100, (powerKw / ratedKw) * 100) : 0);
+  const nm       = cabinMapEscape(getInverterDisplayName(inv, 0));
+
+  // Corpo do inversor: x=3 y=10 w=50 h=34 → clip interno x=4 y=11 w=48 h=32
+  const LIQUID_TOP   = 11;
+  const LIQUID_H_MAX = 32;
+  const liquidH  = Math.max(0, (effPct / 100) * LIQUID_H_MAX);
+  const liquidY  = LIQUID_TOP + LIQUID_H_MAX - liquidH;
+  const slotCls  = hasAlarm ? 'has-alarm' : isOnline ? 'is-online' : 'is-offline';
+  const boltClr  = hasAlarm ? '#ef9f27' : isOnline ? '#39e58c' : '#334433';
+  const liqClr   = isOnline ? (hasAlarm ? '#ef9f27' : '#39e58c') : '#ef4444';
+  const liqAlpha = isOnline ? '0.55' : '0.2';
+  const wireClass = getWireClass(inv, isOnline);
+
+  return `<div class="unif-inv-slot ${slotCls}"
+               data-inv-id="${safeId}"
+               title="${nm}: ${powerKw.toFixed(0)} kW · Efic: ${effPct.toFixed(1)}%"
+               onclick="typeof openCabineDetailForInverter==='function'&&openCabineDetailForInverter('${safeId}')">
+    <svg width="2" height="12" style="overflow:visible">
+      <line x1="1" y1="0" x2="1" y2="12" class="${wireClass}" stroke-width="2"/>
+    </svg>
+    ${_canSendCommand() ? `<button class="unif-dj-btn" data-dj-inv-id="${safeId}" title="Disjuntor: ${nm}"
+            onclick="event.stopPropagation()">
+      ${unifSVGDisjuntor(hasAlarm ? true : isOnline ? false : null, 'small')}
+    </button>` : ''}
+    <svg viewBox="0 0 56 56" width="52" height="52" fill="none" class="cabine-inv-svg" aria-hidden="true">
+      <defs>
+        <filter id="ig${safeId}" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="${isOnline ? '2' : '0'}" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <clipPath id="ilc${safeId}">
+          <rect x="4" y="11" width="48" height="32" rx="4"/>
+        </clipPath>
+        <linearGradient id="ilg${safeId}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${liqClr}" stop-opacity="0.7"/>
+          <stop offset="100%" stop-color="${liqClr}" stop-opacity="0.3"/>
+        </linearGradient>
+      </defs>
+      <rect x="3" y="10" width="50" height="34" rx="5"
+            stroke="${isOnline ? 'rgba(57,229,140,.65)' : hasAlarm ? 'rgba(239,159,39,.5)' : 'rgba(90,110,100,.28)'}"
+            stroke-width="1.6"
+            fill="${isOnline ? 'rgba(57,229,140,.04)' : 'rgba(0,0,0,.25)'}"
+            filter="url(#ig${safeId})"/>
+      <g clip-path="url(#ilc${safeId})">
+        <rect class="inv-liquid" x="4" y="${liquidY.toFixed(1)}" width="48" height="${liquidH.toFixed(1)}"
+              fill="url(#ilg${safeId})" opacity="${liqAlpha}"/>
+        ${isOnline && liquidH > 4 ? `<path class="inv-liquid-wave"
+              d="M4,${liquidY.toFixed(1)} Q18,${(liquidY-2.5).toFixed(1)} 28,${liquidY.toFixed(1)} Q42,${(liquidY+2.5).toFixed(1)} 52,${liquidY.toFixed(1)} L52,${(liquidY+5).toFixed(1)} Q42,${(liquidY+7.5).toFixed(1)} 28,${(liquidY+5).toFixed(1)} Q18,${(liquidY+2.5).toFixed(1)} 4,${(liquidY+5).toFixed(1)} Z"
+              fill="${liqClr}" opacity="0.35"/>` : ''}
+      </g>
+      <rect x="7" y="15" width="14" height="10" rx="1.5"
+            fill="${isOnline ? 'rgba(57,229,140,.16)' : 'rgba(50,70,60,.08)'}"/>
+      <line x1="7" y1="20" x2="21" y2="20"
+            stroke="${isOnline ? 'rgba(57,229,140,.35)' : 'rgba(50,70,60,.12)'}" stroke-width=".7"/>
+      <line x1="14" y1="15" x2="14" y2="25"
+            stroke="${isOnline ? 'rgba(57,229,140,.35)' : 'rgba(50,70,60,.12)'}" stroke-width=".7"/>
+      <path d="M21 20 L26 20" stroke="${isOnline ? 'rgba(57,229,140,.5)' : 'rgba(70,90,80,.2)'}"
+            stroke-width="1" stroke-dasharray="2 1.5"/>
+      <path d="M30 14 L26 25 H30 L25 42 L35 23 H31 L35 14 Z"
+            fill="${boltClr}" opacity="${isOnline ? '1' : '0.18'}"/>
+      <path d="M40 20 Q42 16.5 44 20 Q46 23.5 48 20"
+            stroke="${isOnline ? 'rgba(57,229,140,.6)' : 'rgba(80,100,90,.2)'}"
+            stroke-width="1.4" fill="none" stroke-linecap="round"/>
+      <path d="M40 26 Q42 22.5 44 26 Q46 29.5 48 26"
+            stroke="${isOnline ? 'rgba(57,229,140,.4)' : 'rgba(80,100,90,.15)'}"
+            stroke-width="1.1" fill="none" stroke-linecap="round"/>
+      <circle cx="46" cy="40" r="2.5"
+              fill="${isOnline ? '#39e58c' : hasAlarm ? '#ef9f27' : '#334433'}"
+              style="${isOnline ? 'filter:drop-shadow(0 0 5px rgba(57,229,140,.95));' : hasAlarm ? 'filter:drop-shadow(0 0 4px rgba(239,159,39,.8));' : ''}"/>
+    </svg>
+    <span class="unif-inv-name">${nm}</span>
+    <span class="unif-inv-val">${powerKw > 0 ? powerKw.toFixed(0) + ' kW' : '—'}</span>
+  </div>`;
+}
+
+/* ── Coluna de cabine no overview ── */
+function buildUnifCabineColHTML(group, idx) {
+  const online  = group.inverters.filter(inv => isOnlineByFreshness(inv) && !isZeroSnapshot(inv)).length;
+  const alarm   = group.inverters.filter(inv => !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active)).length;
+  const total   = group.inverters.reduce((s, inv) => s + asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0), 0);
+  const sc      = alarm > 0 ? 'has-alarm' : online === group.inverters.length && online > 0 ? 'all-online' : online > 0 ? 'partial-online' : 'all-offline';
+  const wireClass = online > 0 ? 'wire--active' : alarm > 0 ? 'wire--fault' : 'wire--idle';
+  const invsHTML  = group.inverters.map(inv => buildUnifInvSlotHTML(inv)).join('');
+  const cabinIdSafe = cabinMapEscape(String(group.id));
+
+  return `<div class="unif-cabin-col">
+    <svg width="2" height="28" style="overflow:visible;display:block;margin:0 auto">
+      <line x1="1" y1="0" x2="1" y2="28" class="${wireClass}" stroke-width="2"/>
+    </svg>
+    <div class="unif-cabin-box ${sc}"
+         data-cabin-id="${cabinIdSafe}"
+         data-cabin-idx="${idx}"
+         title="Duplo clique para detalhar">
+      <div class="unif-cabin-hdr-v2">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="opacity:.7">
+          <rect x=".5" y="2.5" width="11" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.1"/>
+          <path d="M3.5 2.5V2a2.5 2.5 0 015 0v.5" stroke="currentColor" stroke-width="1.1"/>
+        </svg>
+        <span class="unif-cabin-name-lbl">${cabinMapEscape(group.name)}</span>
+        <span class="unif-cabin-stats-lbl">${online}/${group.inverters.length} · ${total.toFixed(0)} kW</span>
+      </div>
+      <div class="unif-cabin-inverters">${invsHTML}</div>
+    </div>
+  </div>`;
+}
+
+/* ── Navegar para detalhe de cabine a partir do inversor ── */
+function openCabineDetailForInverter(invId) {
+  const idx = UNIF_GROUPS.findIndex(g =>
+    g.inverters.some(inv => String(getInverterRealId(inv)) === String(invId))
+  );
+  if (idx < 0) return;
+  UNIF_CABIN_IDX = idx;
+  setUnifMode('cabin', idx);
+  setTimeout(() => {
+    const el = document.querySelector(`[data-inverter-real-id="${invId}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 150);
+}
+
+/* ── Console de comando em massa (Disjuntor Geral) ── */
+function openBulkCommandConsole() {
+  if (!_canSendCommand()) return;
+  document.getElementById('bulkCmdOverlay')?.remove();
+
+  const allInvs = UNIF_GROUPS.flatMap(g =>
+    g.inverters.map(inv => ({
+      id:       String(getInverterRealId(inv) ?? ''),
+      name:     getInverterDisplayName(inv, 0),
+      cabin:    g.name,
+      isOnline: isOnlineByFreshness(inv) && !isZeroSnapshot(inv),
+      hasAlarm: !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active)
+    }))
+  );
+  if (!allInvs.length) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'bulkCmdOverlay';
+  overlay.className = 'bulk-cmd-overlay';
+
+  const invRows = allInvs.map(inv => {
+    const sc = inv.hasAlarm ? 'alarm' : inv.isOnline ? 'online' : 'offline';
+    const sl = inv.hasAlarm ? 'Alarme' : inv.isOnline ? 'Online' : 'Offline';
+    return `<label class="bulk-inv-row">
+      <input type="checkbox" class="bulk-inv-chk" value="${cabinMapEscape(inv.id)}" checked/>
+      <span class="bulk-inv-info">
+        <span class="bulk-inv-name">${cabinMapEscape(inv.name)}</span>
+        <span class="bulk-inv-cabin">${cabinMapEscape(inv.cabin)}</span>
+      </span>
+      <span class="bulk-inv-badge bulk-inv-badge--${sc}">${sl}</span>
+    </label>`;
+  }).join('');
+
+  overlay.innerHTML = `
+    <div class="bulk-cmd-console">
+      <div class="bulk-cmd-header">
+        <div class="bulk-cmd-title-wrap">
+          ${unifSVGDisjuntor(null, 'large')}
+          <div>
+            <div class="bulk-cmd-title">Disjuntor Geral</div>
+            <div class="bulk-cmd-subtitle">Todos os inversores</div>
+          </div>
+        </div>
+        <button class="bulk-cmd-close" id="bulkCmdClose" type="button" aria-label="Fechar">×</button>
+      </div>
+
+      <div class="bulk-cmd-body" id="bulkCmdBody">
+        <div class="bulk-select-bar">
+          <button class="bulk-sel-btn" id="bulkSelAll" type="button">Sel. todos</button>
+          <button class="bulk-sel-btn" id="bulkSelNone" type="button">Desmarcar</button>
+          <span class="bulk-count" id="bulkCount">${allInvs.length} selecionados</span>
+        </div>
+        <div class="bulk-inv-list">${invRows}</div>
+      </div>
+
+      <div class="bulk-cmd-auth" id="bulkCmdAuth" style="display:none">
+        <p class="bulk-auth-label" id="bulkAuthLabel">Autenticação necessária</p>
+        <input class="bulk-auth-input" type="text" id="bulkAuthUser" placeholder="Usuário" autocomplete="username"/>
+        <input class="bulk-auth-input" type="password" id="bulkAuthPass" placeholder="Senha" autocomplete="current-password"/>
+        <div class="bulk-progress-wrap" id="bulkProgressWrap" style="display:none">
+          <div class="bulk-progress-bar"><div class="bulk-progress-fill" id="bulkProgressFill"></div></div>
+          <span class="bulk-progress-text" id="bulkProgressText">Enviando...</span>
+        </div>
+        <div class="bulk-auth-actions">
+          <button class="bulk-auth-cancel" id="bulkAuthCancel" type="button">Voltar</button>
+          <button class="bulk-auth-confirm" id="bulkAuthConfirm" type="button">Confirmar</button>
+        </div>
+      </div>
+
+      <div class="bulk-cmd-footer" id="bulkCmdFooter">
+        <button class="bulk-cmd-btn bulk-cmd-btn--on"    data-bulk-action="on"    type="button">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 1.5a5.5 5.5 0 1 1 0 11 5.5 5.5 0 0 1 0-11zm0 1.5v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          LIGAR
+        </button>
+        <button class="bulk-cmd-btn bulk-cmd-btn--off"   data-bulk-action="off"   type="button">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><rect x="2.5" y="2.5" width="9" height="9" rx="1.8" stroke="currentColor" stroke-width="1.5"/></svg>
+          DESLIGAR
+        </button>
+        <button class="bulk-cmd-btn bulk-cmd-btn--reset" data-bulk-action="reset" type="button">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 7A5 5 0 1 1 7 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M2 4.5v2.5H4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          RESETAR
+        </button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('bulk-cmd-visible'));
+
+  let pendingAction = null;
+
+  const closeBulk = () => {
+    overlay.classList.remove('bulk-cmd-visible');
+    setTimeout(() => overlay.remove(), 220);
+  };
+
+  document.getElementById('bulkCmdClose').addEventListener('click', closeBulk);
+  overlay.addEventListener('pointerdown', e => { if (!e.target.closest('.bulk-cmd-console')) closeBulk(); });
+
+  const updateCount = () => {
+    const n = overlay.querySelectorAll('.bulk-inv-chk:checked').length;
+    document.getElementById('bulkCount').textContent = `${n} selecionado${n !== 1 ? 's' : ''}`;
+  };
+  document.getElementById('bulkSelAll').addEventListener('click',  () => { overlay.querySelectorAll('.bulk-inv-chk').forEach(c => c.checked = true);  updateCount(); });
+  document.getElementById('bulkSelNone').addEventListener('click', () => { overlay.querySelectorAll('.bulk-inv-chk').forEach(c => c.checked = false); updateCount(); });
+  overlay.querySelectorAll('.bulk-inv-chk').forEach(c => c.addEventListener('change', updateCount));
+
+  overlay.querySelectorAll('.bulk-cmd-btn[data-bulk-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const selected = [...overlay.querySelectorAll('.bulk-inv-chk:checked')].map(c => c.value);
+      if (!selected.length) return;
+      const act = btn.dataset.bulkAction;
+      const actLbl = act === 'on' ? 'LIGAR' : act === 'off' ? 'DESLIGAR' : 'RESETAR';
+      pendingAction = { action: act, ids: selected };
+      document.getElementById('bulkAuthLabel').textContent =
+        `${actLbl} ${selected.length} inversor${selected.length !== 1 ? 'es' : ''} — autentique-se`;
+      document.getElementById('bulkAuthUser').value = '';
+      document.getElementById('bulkAuthPass').value = '';
+      document.getElementById('bulkProgressWrap').style.display = 'none';
+      document.getElementById('bulkAuthCancel').disabled = false;
+      document.getElementById('bulkAuthConfirm').disabled = false;
+      document.getElementById('bulkAuthConfirm').textContent = 'Confirmar';
+      document.getElementById('bulkCmdBody').style.display   = 'none';
+      document.getElementById('bulkCmdFooter').style.display = 'none';
+      document.getElementById('bulkCmdAuth').style.display   = '';
+      setTimeout(() => document.getElementById('bulkAuthUser')?.focus(), 50);
+    });
+  });
+
+  document.getElementById('bulkAuthCancel').addEventListener('click', () => {
+    document.getElementById('bulkCmdAuth').style.display   = 'none';
+    document.getElementById('bulkCmdBody').style.display   = '';
+    document.getElementById('bulkCmdFooter').style.display = '';
+    pendingAction = null;
+  });
+
+  document.getElementById('bulkAuthConfirm').addEventListener('click', async () => {
+    if (!pendingAction) return;
+    const username = (document.getElementById('bulkAuthUser').value || '').trim();
+    const password = document.getElementById('bulkAuthPass').value || '';
+    if (!username || !password) {
+      document.getElementById('bulkAuthLabel').textContent = 'Preencha usuário e senha.';
+      return;
+    }
+    const { action, ids } = pendingAction;
+    const progressWrap = document.getElementById('bulkProgressWrap');
+    const fillEl       = document.getElementById('bulkProgressFill');
+    const textEl       = document.getElementById('bulkProgressText');
+    const confirmBtn   = document.getElementById('bulkAuthConfirm');
+    const cancelBtn    = document.getElementById('bulkAuthCancel');
+
+    progressWrap.style.display = '';
+    confirmBtn.disabled = true;
+    cancelBtn.disabled  = true;
+    confirmBtn.textContent = 'Aguarde...';
+
+    let done = 0, errors = 0;
+    const total = ids.length;
+    const headers = typeof buildAuthHeaders === 'function' ? buildAuthHeaders() : { 'Content-Type': 'application/json' };
+
+    for (const deviceId of ids) {
+      textEl.textContent = `${action.toUpperCase()} → ${done + 1}/${total}`;
+      fillEl.style.width = `${Math.round((done / total) * 100)}%`;
+      try {
+        const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/devices/${deviceId}/command`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action, username, password, requested_by: username })
+        });
+        if (!res.ok) errors++;
+        if (action === 'on' || action === 'off') {
+          setDevicePersistentState('inverter', deviceId, action);
+          applyDeviceVisualState('inverter', deviceId, action);
+        }
+      } catch (_) { errors++; }
+      done++;
+    }
+
+    fillEl.style.width = '100%';
+    textEl.textContent = errors === 0
+      ? `${done} comando${done !== 1 ? 's' : ''} enviado${done !== 1 ? 's' : ''} com sucesso!`
+      : `${done - errors}/${done} enviados (${errors} erro${errors !== 1 ? 's' : ''})`;
+
+    setTimeout(closeBulk, 1800);
+  });
+}
+
 /* ── Overview: constrói HTML do diagrama completo ── */
 function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
   const relayItem  = Array.isArray(relayData)      ? relayData[0]      : relayData;
@@ -2330,96 +2748,116 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
   const meterPowerRaw  = meterItem  ? pickDeviceMetricValue(meterItem,  meterItem?.analog  ?? meterItem?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
   const relayPowerStr  = relayPowerRaw  != null ? `${cabinMapFormat(relayPowerRaw, 1)} kW`  : "—";
   const meterPowerStr  = meterPowerRaw  != null ? `${cabinMapFormat(meterPowerRaw, 1)} kW`  : "—";
-  const redePowerStr   = relayPowerRaw  != null ? relayPowerStr : asNumber(PLANT_STATE.active_power_kw, 0) > 0 ? `${asNumber(PLANT_STATE.active_power_kw, 0).toFixed(1)} kW` : "—";
-  const redeCapStr     = asNumber(PLANT_STATE.capacity_percent, 0) > 0 ? `${asNumber(PLANT_STATE.capacity_percent, 0).toFixed(1)}%` : "—";
 
-  /* Chips de inversores em cada cabine */
-  const cabinesHTML = groups.map((g, idx) => {
-    const online = g.inverters.filter(inv => isOnlineByFreshness(inv) && !isZeroSnapshot(inv)).length;
-    const alarm  = g.inverters.filter(inv => !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active)).length;
-    const total  = g.inverters.reduce((s, inv) => s + asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0), 0);
-    const sc     = alarm > 0 ? "has-alarm" : online === g.inverters.length && online > 0 ? "all-online" : online > 0 ? "partial-online" : "all-offline";
+  const meterName = meterItem?.device_name || meterItem?.name || "Medidor";
+  const relayName = relayItem?.device_name  || relayItem?.name  || "Relé";
+  const trafoKva  = asNumber(PLANT_STATE?.rated_power_kwp, 0);
 
-    const chips = g.inverters.map(inv => {
-      const id = getInverterRealId(inv);
-      const isOn = isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
-      const isAl = !!(inv?.alarm || inv?.fault || inv?.warning || inv?.alarm_active);
-      const pKw  = asNumber(inv.active_power_kw ?? inv.power_kw ?? 0, 0);
-      const rat  = asNumber(inv.rated_power_kw ?? 100, 100);
-      const pct  = Math.min(100, (pKw / Math.max(1, rat)) * 100);
-      const cls  = isAl ? "chip-alarm" : isOn ? "chip-online" : "chip-offline";
-      const nm   = cabinMapEscape(getInverterDisplayName(inv, 0));
-      return `<div class="unif-inv-chip ${cls}" title="${nm}: ${pKw.toFixed(0)} kW">
-        <span class="unif-chip-dot"></span>
-        <span class="unif-chip-name">${nm}</span>
-        <div class="unif-chip-bar"><div class="unif-chip-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>
-        <span class="unif-chip-val">${pKw > 0 ? pKw.toFixed(0) + " kW" : "—"}</span>
-      </div>`;
-    }).join("");
+  // Wire statuses
+  const wireGridRelay  = getWireClass(relayItem, relayOnline);
+  const wireRelayTrafo = relayItem ? getWireClass(relayItem, relayOnline) : 'wire--idle';
+  const wireTrafoMeter = meterItem ? getWireClass(meterItem, meterOnline) : (relayOnline === true ? 'wire--active' : 'wire--idle');
+  const wireMetrDJ     = (relayOnline === true || meterOnline === true) ? 'wire--active' : 'wire--idle';
+  const wireDJBus      = groups.some(g => g.inverters.some(inv => isOnlineByFreshness(inv) && !isZeroSnapshot(inv))) ? 'wire--active' : 'wire--idle';
+  const wireBus        = wireDJBus;
 
-    return `<div class="unif-cabin-box ${sc}" data-cabin-id="${cabinMapEscape(String(g.id))}" data-cabin-idx="${idx}" title="Duplo clique para detalhar">
-      <div class="unif-cabin-hdr">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x=".5" y="2.5" width="11" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.1"/><path d="M3.5 2.5V2a2.5 2.5 0 015 0v.5" stroke="currentColor" stroke-width="1.1"/></svg>
-        <span class="unif-cabin-name">${cabinMapEscape(g.name)}</span>
-        <span class="unif-cabin-stats">${online}/${g.inverters.length} · ${total.toFixed(0)} kW</span>
+  const relayBadge = relayOnline === true  ? `<span class="unif-badge unif-badge--online" id="unifRelayBadge">Online</span>`
+                   : relayOnline === false ? `<span class="unif-badge unif-badge--offline" id="unifRelayBadge">Offline</span>`
+                   :                        `<span class="unif-badge" id="unifRelayBadge">—</span>`;
+  const meterBadge = meterOnline === true  ? `<span class="unif-badge unif-badge--online" id="unifMeterBadge">Online</span>`
+                   : meterOnline === false ? `<span class="unif-badge unif-badge--offline" id="unifMeterBadge">Offline</span>`
+                   :                        `<span class="unif-badge" id="unifMeterBadge">—</span>`;
+
+  const relayNodeHTML = relayItem ? `
+    <div class="unif-node-row">
+      <div class="unif-node--relay ${relayOnline === true ? 'is-online' : relayOnline === false ? 'is-offline' : ''}"
+           id="unifNodeRelay" data-unif-device="relay">
+        ${unifSVGRelayV2(relayOnline === true)}
+        <span class="unif-node-lbl">${cabinMapEscape(relayName)}</span>
+        <span class="unif-node-val-v2" id="unifRelayPower">${relayPowerStr}</span>
+        ${relayBadge}
       </div>
-      <div class="unif-cabin-body">${chips}</div>
-    </div>`;
-  }).join("");
-
-  const meterName  = meterItem?.device_name || meterItem?.name || "Medidor";
-  const relayName  = relayItem?.device_name  || relayItem?.name  || "Relé";
-  const cabinMinPx = groups.length >= 18 ? 136 : groups.length >= 10 ? 148 : 160;
-
-  const meterBadge = meterOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
-                   : meterOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
-                   :                        `<span class="unif-badge">—</span>`;
-  const relayBadge = relayOnline === true  ? `<span class="unif-badge unif-badge--online">Online</span>`
-                   : relayOnline === false ? `<span class="unif-badge unif-badge--offline">Offline</span>`
-                   :                        `<span class="unif-badge">—</span>`;
-
-  const meterNode = meterItem ? `
-      <div class="unif-hwire unif-hwire--main"></div>
-      <div class="unif-node-wrap">
-        <div class="unif-node unif-node--cc ${meterOnline === true ? "is-online" : meterOnline === false ? "is-offline" : ""}"
-             id="unifNodeMeter" data-unif-device="multimeter">
-          ${unifSVGCC()}
-          <span class="unif-node-name">${cabinMapEscape(meterName)}</span>
-          <span class="unif-node-val" id="unifMeterPower">${meterPowerStr}</span>
-          ${meterBadge}
-        </div>
-      </div>` : "";
-
-  const relayNode = relayItem ? `
-      <div class="unif-hwire unif-hwire--main"></div>
-      <div class="unif-node-wrap">
-        <div class="unif-node unif-node--qgbt ${relayOnline === true ? "is-online" : relayOnline === false ? "is-offline" : ""}"
-             id="unifNodeRelay" data-unif-device="relay">
-          ${unifSVGQGBT(relayOnline)}
-          <span class="unif-node-name">${cabinMapEscape(relayName)}</span>
-          <span class="unif-node-val" id="unifRelayPower">${relayPowerStr}</span>
-          ${relayBadge}
-        </div>
-      </div>` : "";
-
-  const meterLbl = meterItem ? `<div class="unif-sec-lbl unif-sec-lbl--cc">${cabinMapEscape(meterName)}</div>` : "";
-  const relayLbl = relayItem ? `<div class="unif-sec-lbl unif-sec-lbl--qgbt">${cabinMapEscape(relayName)}</div>` : "";
-
-  return `<div class="unif-diagram">
-    <div class="unif-sec-strip">
-      <div class="unif-sec-lbl unif-sec-lbl--gen">GERAÇÃO FV</div>
-      ${meterLbl}
-      ${relayLbl}
     </div>
+    <svg width="2" height="28" style="display:block;margin:0 auto;overflow:visible">
+      <line x1="1" y1="0" x2="1" y2="28" class="${wireRelayTrafo}" stroke-width="2"/>
+    </svg>` : '';
 
-    <div class="unif-flow">
-      <!-- Geração: cabines em linhas horizontais + bus coletor -->
-      <div class="unif-gen-section">
-        <div class="unif-cabins" style="--unif-cabin-min:${cabinMinPx}px">${cabinesHTML}</div>
-        <div class="unif-vbus"></div>
+  const trafoNodeHTML = trafoKva > 0 ? `
+    <div class="unif-node-row">
+      <div class="unif-node--trafo-v2" data-unif-device="transformer">
+        ${unifSVGTransformer()}
+        <span class="unif-node-lbl">Transformador</span>
+        <span class="unif-node-val-v2">${trafoKva.toFixed(0)} kVA</span>
       </div>
-      ${meterNode}
-      ${relayNode}
+    </div>
+    <svg width="2" height="28" style="display:block;margin:0 auto;overflow:visible">
+      <line x1="1" y1="0" x2="1" y2="28" class="${wireTrafoMeter}" stroke-width="2"/>
+    </svg>` : '';
+
+  const meterNodeHTML = meterItem ? `
+    <div class="unif-node-row">
+      <div class="unif-node--meter ${meterOnline === true ? 'is-online' : meterOnline === false ? 'is-offline' : ''}"
+           id="unifNodeMeter" data-unif-device="multimeter">
+        ${unifSVGMeterV2(meterOnline === true)}
+        <span class="unif-node-lbl">${cabinMapEscape(meterName)}</span>
+        <span class="unif-node-val-v2" id="unifMeterPower">${meterPowerStr}</span>
+        ${meterBadge}
+      </div>
+    </div>
+    <svg width="2" height="28" style="display:block;margin:0 auto;overflow:visible">
+      <line x1="1" y1="0" x2="1" y2="28" class="${wireMetrDJ}" stroke-width="2"/>
+    </svg>` : '';
+
+  const canCmd = _canSendCommand();
+  const djGeralHTML = `
+    <div class="unif-node-row">
+      <div class="unif-node--dj-geral${canCmd ? ' is-clickable' : ''}"
+           id="unifDjGeral"
+           ${canCmd ? 'onclick="typeof openBulkCommandConsole===\'function\'&&openBulkCommandConsole()"' : ''}>
+        ${unifSVGDisjuntor(null, 'large')}
+        <span class="unif-node-lbl">Disjuntor Geral</span>
+        ${canCmd ? '<span class="unif-dj-hint">Clique para comandar</span>' : ''}
+      </div>
+    </div>
+    <svg width="2" height="28" style="display:block;margin:0 auto;overflow:visible">
+      <line x1="1" y1="0" x2="1" y2="28" class="${wireDJBus}" stroke-width="2"/>
+    </svg>`;
+
+  const cabinesHTML = groups.map((g, idx) => buildUnifCabineColHTML(g, idx)).join('');
+
+  return `<div class="unif-diagram unif-diagram--v2">
+    <div class="unif-spine">
+      <div class="unif-node-row">
+        <div class="unif-node--grid">
+          <svg viewBox="0 0 40 32" width="40" height="32" fill="none" opacity=".5">
+            <line x1="20" y1="0" x2="20" y2="32" stroke="rgba(255,255,255,.4)" stroke-width="1.5"/>
+            <line x1="8" y1="8" x2="32" y2="8" stroke="rgba(255,255,255,.4)" stroke-width="1.5"/>
+            <line x1="4" y1="16" x2="36" y2="16" stroke="rgba(255,255,255,.4)" stroke-width="1.5"/>
+            <line x1="8" y1="8" x2="4" y2="32" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+            <line x1="32" y1="8" x2="36" y2="32" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+            <line x1="20" y1="0" x2="8" y2="8" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+            <line x1="20" y1="0" x2="32" y2="8" stroke="rgba(255,255,255,.25)" stroke-width="1"/>
+          </svg>
+          <span class="unif-grid-lbl">REDE / SUBESTAÇÃO</span>
+        </div>
+      </div>
+
+      <svg width="2" height="28" style="display:block;margin:0 auto;overflow:visible">
+        <line x1="1" y1="0" x2="1" y2="28" class="${wireGridRelay}" stroke-width="2"/>
+      </svg>
+
+      ${relayNodeHTML}
+      ${trafoNodeHTML}
+      ${meterNodeHTML}
+      ${djGeralHTML}
+
+      <div class="unif-busbar-v2">
+        <svg width="100%" height="8" style="overflow:visible;display:block">
+          <line x1="0" y1="4" x2="100%" y2="4" class="${wireBus} unif-busline" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <div class="unif-cabins-row">${cabinesHTML}</div>
     </div>
   </div>`;
 }
@@ -2527,6 +2965,16 @@ function renderUnifCabinDetail(idx, direction) {
   const idxRef = { value: 0 };
   group.inverters.forEach(inv => container.appendChild(buildCabineCard(inv, idxRef.value++)));
 
+  /* Disjuntor individual na visão de cabine */
+  container.querySelectorAll(".cabine-dj-btn[data-dj-inv-id]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!_canSendCommand()) return;
+      const id = btn.dataset.djInvId;
+      if (id) openCommandConsole({ deviceType: "inverter", deviceId: id });
+    });
+  });
+
   /* Wires click -> modal */
   container.querySelectorAll(".cabine-inv-card[data-inverter-real-id]").forEach(card => {
     card.addEventListener("click", (e) => {
@@ -2580,6 +3028,15 @@ function buildUnifilarOverview() {
   el.querySelectorAll("[data-unif-device]").forEach(node => {
     node.addEventListener("click", () => openUnifDeviceModalById(node.dataset.unifDevice, null));
   });
+
+  /* Click em disjuntor individual -> command console do inversor */
+  el.querySelectorAll(".unif-dj-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.djInvId;
+      if (id) openCommandConsole({ deviceType: "inverter", deviceId: id });
+    });
+  });
 }
 
 function refreshCabineMapCards(invertersRaw) {
@@ -2598,14 +3055,14 @@ function refreshCabineMapCards(invertersRaw) {
 function updateCabineRelayNode(relayData) {
   if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
   const item  = Array.isArray(relayData) ? relayData[0] : relayData;
-  const qgbt  = document.getElementById("unifNodeQGBT");
-  const val   = document.getElementById("unifQGBTVal");
-  const badge = document.getElementById("unifQGBTBadge");
-  if (!qgbt) return;
+  const relay = document.getElementById("unifNodeRelay");
+  const val   = document.getElementById("unifRelayPower");
+  const badge = document.getElementById("unifRelayBadge");
+  if (!relay) return;
   const online = item ? relayOnlineFromPayload(item) : false;
   const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? {}, ["active_power_kw","power_kw","active_power","power"]) : null;
-  qgbt.classList.toggle("is-online",  online);
-  qgbt.classList.toggle("is-offline", !online && item != null);
+  relay.classList.toggle("is-online",  online);
+  relay.classList.toggle("is-offline", !online && item != null);
   if (val)   val.textContent   = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
   if (badge) badge.textContent = online ? "Online" : "Offline";
 }
@@ -2613,13 +3070,13 @@ function updateCabineRelayNode(relayData) {
 function updateCabineMeterNode(multimeterData) {
   if (!isUnifilarVisible() || UNIF_MODE !== "overview") return;
   const item = Array.isArray(multimeterData) ? multimeterData[0] : multimeterData;
-  const cc   = document.getElementById("unifNodeCC");
-  const val  = document.getElementById("unifCCPower");
-  if (!cc) return;
+  const meter = document.getElementById("unifNodeMeter");
+  const val   = document.getElementById("unifMeterPower");
+  if (!meter) return;
   const online = item ? multimeterOnlineFromPayload(item) : false;
   const pKw    = item ? pickDeviceMetricValue(item, item?.analog ?? item?.data ?? {}, ["active_power_kw","p_kw","power_kw"]) : null;
-  cc.classList.toggle("is-online",  online);
-  cc.classList.toggle("is-offline", !online && item != null);
+  meter.classList.toggle("is-online",  online);
+  meter.classList.toggle("is-offline", !online && item != null);
   if (val) val.textContent = pKw != null ? `${cabinMapFormat(pKw, 1)} kW` : "—";
 }
 
@@ -2629,19 +3086,36 @@ function renderUnifilarSidePanel() {
   const footerEl = document.getElementById("unifilarSideFooter");
   if (!listEl) return;
 
-  const devices = buildUnifDeviceList(UNIF_ACTIVE_CABIN_FILTER, UNIF_SEARCH_TEXT);
-  listEl.innerHTML = devices.map(d => buildUnifSideRow(d)).join("") ||
-    `<div class="unif-side-empty">Nenhum dispositivo encontrado</div>`;
+  const alarms  = Array.isArray(ACTIVE_ALARMS) ? ACTIVE_ALARMS : [];
+  const devices = buildUnifDeviceList(UNIF_ACTIVE_CABIN_FILTER, UNIF_SEARCH_TEXT || "");
 
-  listEl.querySelectorAll("[data-unif-side-type]").forEach(row => {
-    row.addEventListener("click", () => openUnifDeviceModalById(row.dataset.unifSideType, row.dataset.unifSideId));
+  listEl.innerHTML = devices.length > 0
+    ? devices.map(d => {
+        const devAlarms = alarms.filter(a =>
+          String(a?.device_id ?? a?.deviceId ?? '') === String(d.id)
+        );
+        return buildUnifSideRow(d, devAlarms);
+      }).join('')
+    : `<div class="unif-side-empty">Sem dispositivos</div>`;
+
+  listEl.querySelectorAll(".unif-side-row").forEach(row => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".unif-side-alarm-badge")) return;
+      openUnifDeviceModalById(row.dataset.unifSideType, row.dataset.unifSideId);
+    });
+  });
+
+  listEl.querySelectorAll(".unif-side-alarm-badge").forEach(badge => {
+    badge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showUnifAlarmPopover(badge, badge.dataset.deviceId);
+    });
   });
 
   if (footerEl) {
-    const all     = buildUnifDeviceList(null, "");
-    const online  = all.filter(d => d.status === "online").length;
-    const alarm   = all.filter(d => d.status === "alarm").length;
-    const offline = all.filter(d => d.status === "offline").length;
+    const online  = devices.filter(d => d.status === "online").length;
+    const alarm   = devices.filter(d => d.status === "alarm").length;
+    const offline = devices.filter(d => d.status === "offline").length;
     footerEl.innerHTML = `
       <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--online"></span>Online ${online}</span>
       <span class="unif-foot-item"><span class="unif-foot-dot unif-foot-dot--alarm"></span>Alerta ${alarm}</span>
@@ -2691,7 +3165,7 @@ function buildUnifDeviceList(cabinFilter, search) {
   return devices;
 }
 
-function buildUnifSideRow(d) {
+function buildUnifSideRow(d, deviceAlarms = []) {
   const sc = d.status === "online" ? "online" : d.status === "alarm" ? "alarm" : "offline";
   const sl = d.status === "online" ? "Online" : d.status === "alarm" ? "Alerta" : "Offline";
   const iconMap = {
@@ -2702,6 +3176,18 @@ function buildUnifSideRow(d) {
     sa:          `<svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.2"/><path d="M10 3L8.5 8.5H11.5L8 17L14.5 10H11.5L13 3Z" fill="currentColor" opacity=".7"/></svg>`,
     rede:        `<svg viewBox="0 0 20 20" fill="none"><line x1="10" y1="1" x2="10" y2="19" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><line x1="2" y1="5" x2="18" y2="5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="4" y1="9" x2="16" y2="9" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="6" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><line x1="18" y1="5" x2="14" y2="19" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".6"/><circle cx="2" cy="5" r="1.4" fill="currentColor"/><circle cx="18" cy="5" r="1.4" fill="currentColor"/></svg>`
   };
+  const alarmBadge = deviceAlarms.length > 0
+    ? `<button class="unif-side-alarm-badge" data-device-id="${d.id}"
+              title="${deviceAlarms.length} alarme(s) ativo(s)">
+         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+           <path d="M7 1L1 13h12L7 1z" stroke="#f59e0b" stroke-width="1.3"
+                 fill="rgba(245,158,11,.15)" stroke-linejoin="round"/>
+           <path d="M7 5.5v3" stroke="#f59e0b" stroke-width="1.3" stroke-linecap="round"/>
+           <circle cx="7" cy="10.5" r=".7" fill="#f59e0b"/>
+         </svg>
+         ${deviceAlarms.length > 1 ? `<span class="unif-side-alarm-count">${deviceAlarms.length}</span>` : ''}
+       </button>`
+    : '';
   return `<div class="unif-side-row" data-unif-side-type="${d.type}" data-unif-side-id="${d.id}">
     <div class="unif-side-row-icon" style="color:rgba(127,208,85,.65)">${iconMap[d.type] || iconMap.inverter}</div>
     <div class="unif-side-row-info">
@@ -2713,7 +3199,73 @@ function buildUnifSideRow(d) {
       <span class="unif-side-status unif-side-status--${sc}">${sl}</span>
     </div>
     <button class="unif-side-row-action" type="button" title="Ver detalhes">⋮</button>
+    ${alarmBadge}
   </div>`;
+}
+
+/* ── Linha de alarme no painel lateral ── */
+function buildUnifAlarmRow(alarm) {
+  const deviceType = String(alarm.device_type ?? alarm.type ?? 'inverter');
+  const deviceId   = String(alarm.device_id ?? alarm.deviceId ?? '');
+  const deviceName = String(alarm.device_name ?? alarm.deviceName ?? deviceId);
+  const msg        = String(alarm.event_name ?? alarm.alarm_message ?? alarm.message ?? alarm.event_code ?? '—');
+  const rawTs      = alarm.started_at ?? alarm.timestamp ?? alarm.created_at ?? null;
+  let timeStr = '';
+  if (rawTs) {
+    try {
+      const d = new Date(rawTs);
+      if (!isNaN(d.getTime())) {
+        const pad = n => String(n).padStart(2, '0');
+        timeStr = `${pad(d.getDate())}/${pad(d.getMonth()+1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+    } catch(_) {}
+  }
+  return `<div class="unif-alarm-row"
+    data-unif-alarm-device-type="${deviceType}"
+    data-unif-alarm-device-id="${deviceId}">
+    <div class="unif-alarm-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 1.5L1 14h14L8 1.5z" stroke="#f59e0b" stroke-width="1.4" stroke-linejoin="round" fill="rgba(245,158,11,.12)"/>
+        <path d="M8 6v4" stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"/>
+        <circle cx="8" cy="12" r=".85" fill="#f59e0b"/>
+      </svg>
+    </div>
+    <div class="unif-alarm-info">
+      <span class="unif-alarm-device">${cabinMapEscape(deviceName)}</span>
+      <span class="unif-alarm-msg">${cabinMapEscape(msg)}</span>
+    </div>
+    ${timeStr ? `<span class="unif-alarm-time">${timeStr}</span>` : ''}
+  </div>`;
+}
+
+/* ── Popover flutuante de alarmes ── */
+function showUnifAlarmPopover(anchorEl, deviceId) {
+  document.getElementById("unifAlarmPopover")?.remove();
+  const alarms = (Array.isArray(ACTIVE_ALARMS) ? ACTIVE_ALARMS : [])
+    .filter(a => String(a?.device_id ?? a?.deviceId ?? '') === String(deviceId));
+  if (!alarms.length) return;
+
+  const pop = document.createElement("div");
+  pop.id = "unifAlarmPopover";
+  pop.className = "unif-alarm-popover";
+  pop.innerHTML = `
+    <div class="unif-alarm-pop-header">Alarmes ativos (${alarms.length})</div>
+    ${alarms.map(a => buildUnifAlarmRow(a)).join('')}`;
+  document.body.appendChild(pop);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const popW = 260;
+  let left = rect.left - popW - 8;
+  if (left < 8) left = rect.right + 8;
+  pop.style.cssText = `top:${rect.top + window.scrollY}px;left:${left}px;width:${popW}px`;
+
+  const close = (e) => {
+    if (!pop.contains(e.target) && e.target !== anchorEl) {
+      pop.remove();
+      document.removeEventListener("click", close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", close, true), 0);
 }
 
 /* ── Barra de estatísticas ── */
