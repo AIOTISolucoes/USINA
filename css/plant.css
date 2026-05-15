@@ -5468,8 +5468,8 @@ body.plant-map-mode {
 body.plant-map-mode .plant-layout {
   width: 100%;
   max-width: none;
-  height: calc(100vh - 20px);
-  min-height: calc(100vh - 20px);
+  height: 100dvh;
+  min-height: 100dvh;
   grid-template-areas:
     "header"
     "devices";
@@ -5702,11 +5702,12 @@ body.plant-map-mode .cabine-map-stage {
 
   body.plant-map-mode {
     overflow: hidden;
+    padding: 0 !important;
   }
 
   body.plant-map-mode .plant-layout {
-    height: calc(100vh - 20px);
-    min-height: calc(100vh - 20px);
+    height: 100dvh;
+    min-height: 100dvh;
   }
 
   body.plant-map-mode .plant-devices-card {
@@ -6295,8 +6296,10 @@ body.plant-map-mode .cabine-map-stage {
 .unif-stage-wrap {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── OVERVIEW: planta inteira ── */
@@ -7493,5 +7496,1009 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
     flex: 0 0 auto;
     width: 100%;
     min-height: 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   UNIFILAR v2 — DIAGRAMA TOP-DOWN
+═══════════════════════════════════════════════════ */
+
+/* Animações de corrente */
+@keyframes dashFlow {
+  to { stroke-dashoffset: -20; }
+}
+@keyframes dashFlowFast {
+  to { stroke-dashoffset: -16; }
+}
+@keyframes waveAnim {
+  0%, 100% { transform: translateX(0); }
+  50%       { transform: translateX(-6px); }
+}
+
+/* Classes de fio */
+.wire--active {
+  stroke: #39e58c;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  animation: dashFlow 0.7s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(57,229,140,0.55));
+}
+.wire--active.unif-busline {
+  stroke-width: 4;
+  stroke-dasharray: 8 5;
+  animation: dashFlowFast 0.5s linear infinite;
+}
+.wire--fault {
+  stroke: #ef4444;
+  stroke-width: 2;
+  stroke-dasharray: 0;
+  animation: none;
+  filter: none;
+}
+.wire--idle {
+  stroke: rgba(255,255,255,0.12);
+  stroke-width: 2;
+  stroke-dasharray: 0;
+  animation: none;
+}
+
+/* Container principal v2 */
+.unif-diagram--v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 48px;
+  min-height: 100%;
+  width: 100%;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+
+.unif-spine {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1400px;
+}
+
+/* Nó genérico (linha de dispositivo) */
+.unif-node-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 2;
+}
+
+/* Nó rede */
+.unif-node--grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+}
+
+.unif-grid-lbl {
+  font-size: 10px;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-family: var(--font-display, monospace);
+}
+
+/* Nós relay e medidor */
+.unif-node--relay,
+.unif-node--meter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(57,229,140,0.2);
+  background: rgba(57,229,140,0.04);
+  min-width: 110px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.unif-node--relay:hover,
+.unif-node--meter:hover {
+  border-color: rgba(57,229,140,0.5);
+  box-shadow: 0 0 14px rgba(57,229,140,0.15);
+}
+.unif-node--relay.is-offline,
+.unif-node--meter.is-offline {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.05);
+}
+
+.unif-node-lbl {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  text-align: center;
+  font-family: var(--font-display, sans-serif);
+}
+
+.unif-node-val-v2 {
+  font-size: 13px;
+  font-weight: 700;
+  color: #39e58c;
+  font-family: var(--font-mono, monospace);
+}
+.unif-node--relay.is-offline .unif-node-val-v2,
+.unif-node--meter.is-offline .unif-node-val-v2 {
+  color: #ef4444;
+}
+
+/* SVG dos dispositivos */
+.unif-device-svg {
+  display: block;
+  flex-shrink: 0;
+}
+.unif-node--relay.is-offline .relay-body,
+.unif-node--meter.is-offline .meter-body {
+  stroke: rgba(239,68,68,0.5) !important;
+  fill: rgba(239,68,68,0.05) !important;
+}
+
+/* Barramento principal */
+.unif-busbar-v2 {
+  width: 100%;
+  height: 8px;
+  position: relative;
+  margin: 0;
+}
+
+/* Grade de cabines */
+.unif-cabins-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  width: 100%;
+  padding-top: 8px;
+}
+
+/* Coluna de cabine */
+.unif-cabin-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+/* Cabine box — override do estilo legado no contexto v2 */
+.unif-diagram--v2 .unif-cabin-box {
+  width: auto !important;
+  min-width: 120px !important;
+  max-width: 300px !important;
+  height: auto !important;
+  min-height: auto !important;
+  max-height: none !important;
+  flex: 0 0 auto !important;
+  border: 1px solid rgba(57,229,140,0.18);
+  border-radius: 10px;
+  background: rgba(57,229,140,0.03);
+  padding: 10px;
+  box-sizing: border-box;
+}
+.unif-diagram--v2 .unif-cabin-box.has-alarm {
+  border-color: rgba(239,159,39,0.5);
+  background: rgba(239,159,39,0.04);
+}
+.unif-diagram--v2 .unif-cabin-box.all-offline {
+  border-color: rgba(239,68,68,0.3);
+  background: rgba(239,68,68,0.03);
+}
+.unif-diagram--v2 .unif-cabin-box::before,
+.unif-diagram--v2 .unif-cabin-box::after {
+  display: none !important;
+}
+
+/* Cabeçalho da cabine v2 */
+.unif-cabin-hdr-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 10px;
+  color: rgba(127,208,85,0.7);
+}
+.unif-cabin-name-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+  font-family: var(--font-display, sans-serif);
+  text-align: center;
+}
+.unif-cabin-stats-lbl {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  font-family: var(--font-mono, monospace);
+}
+
+/* Grade de inversores dentro da cabine */
+.unif-cabin-inverters {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+/* Slot de inversor */
+.unif-inv-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.unif-inv-slot:hover {
+  opacity: 0.85;
+}
+.unif-inv-slot:hover .cabine-inv-svg {
+  filter: brightness(1.18);
+}
+.unif-inv-name {
+  font-size: 9px;
+  color: rgba(255,255,255,0.5);
+  text-align: center;
+  max-width: 56px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, monospace);
+}
+.unif-inv-val {
+  font-size: 10px;
+  font-weight: 700;
+  color: #39e58c;
+  font-family: var(--font-mono, monospace);
+}
+.unif-inv-slot.is-offline .unif-inv-val { color: #ef4444; }
+.unif-inv-slot.has-alarm  .unif-inv-val { color: #ef9f27; }
+
+/* Líquido de eficiência no SVG do inversor */
+.inv-liquid {
+  transition: y 0.8s ease, height 0.8s ease;
+}
+.inv-liquid-wave {
+  animation: waveAnim 2.5s ease-in-out infinite;
+}
+.unif-inv-slot.is-offline .inv-liquid {
+  fill: #ef4444 !important;
+  opacity: 0.2 !important;
+}
+.unif-inv-slot.is-offline .inv-liquid-wave {
+  display: none;
+}
+
+/* ════════════════════════════════════════════════════
+   UNIFILAR v2 — FASE 2: Disjuntores, Transformador, Alarmes
+   ════════════════════════════════════════════════════ */
+
+/* ── Nó: Transformador ── */
+.unif-node--trafo-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  background: rgba(245,158,11,.07);
+  border: 1px solid rgba(245,158,11,.25);
+  border-radius: 8px;
+  cursor: default;
+}
+.unif-node--trafo-v2 .unif-node-lbl {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: rgba(245,158,11,.6);
+}
+.unif-node--trafo-v2 .unif-node-val-v2 {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(245,158,11,.9);
+  font-family: var(--font-mono, monospace);
+}
+
+/* ── Nó: Disjuntor Geral ── */
+.unif-node--dj-geral {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  background: rgba(245,200,66,.07);
+  border: 1px solid rgba(245,200,66,.25);
+  border-radius: 8px;
+  cursor: default;
+  transition: background .18s, border-color .18s;
+}
+.unif-node--dj-geral.is-clickable {
+  cursor: pointer;
+}
+.unif-node--dj-geral.is-clickable:hover {
+  background: rgba(245,200,66,.14);
+  border-color: rgba(245,200,66,.5);
+}
+.unif-node--dj-geral .unif-node-lbl {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: rgba(245,200,66,.6);
+}
+.unif-dj-hint {
+  font-size: 9px;
+  color: rgba(245,200,66,.5);
+  letter-spacing: .03em;
+}
+
+/* ── Botão disjuntor individual (por inversor) ── */
+.unif-dj-btn {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  margin: 1px auto 0;
+  line-height: 0;
+  border-radius: 3px;
+  transition: filter .15s;
+}
+.unif-dj-btn:hover svg {
+  filter: brightness(1.35);
+}
+.unif-dj-btn:active svg {
+  filter: brightness(0.85);
+}
+
+/* ── Painel de alarmes (lateral) ── */
+.unif-alarm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  cursor: pointer;
+  transition: background .14s;
+}
+.unif-alarm-row:hover {
+  background: rgba(245,158,11,.08);
+}
+.unif-alarm-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.unif-alarm-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.unif-alarm-device {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.unif-alarm-msg {
+  font-size: 10px;
+  color: rgba(245,158,11,.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.unif-alarm-time {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: rgba(255,255,255,.3);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  align-self: center;
+}
+.unif-side-empty-alarms {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: rgba(255,255,255,.3);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── Bulk Command Console ── */
+#bulkCmdOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3100;
+  background: rgba(0,0,0,.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn .18s ease;
+}
+.bulk-cmd-console {
+  background: #181f2a;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
+}
+.bulk-cmd-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  flex-shrink: 0;
+}
+.bulk-cmd-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255,255,255,.9);
+  margin: 0 0 2px;
+}
+.bulk-cmd-subtitle {
+  font-size: 11px;
+  color: rgba(255,255,255,.4);
+  margin: 0;
+}
+.bulk-cmd-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,.4);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color .15s;
+}
+.bulk-cmd-close:hover { color: rgba(255,255,255,.85); }
+.bulk-cmd-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.bulk-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  flex-shrink: 0;
+}
+.bulk-sel-btn {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(127,208,85,.8);
+  background: none;
+  border: 1px solid rgba(127,208,85,.25);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: border-color .14s, color .14s;
+}
+.bulk-sel-btn:hover {
+  color: #7fd055;
+  border-color: rgba(127,208,85,.5);
+}
+.bulk-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(255,255,255,.35);
+  font-family: var(--font-mono, monospace);
+}
+.bulk-inv-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.bulk-inv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  transition: background .12s;
+}
+.bulk-inv-row:hover { background: rgba(255,255,255,.03); }
+.bulk-inv-chk {
+  width: 15px;
+  height: 15px;
+  accent-color: #7fd055;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bulk-inv-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,.85);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bulk-inv-cabin {
+  font-size: 10px;
+  color: rgba(255,255,255,.35);
+  flex-shrink: 0;
+}
+.bulk-inv-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.bulk-inv-badge--online  { background: rgba(57,229,140,.15); color: #39e58c; }
+.bulk-inv-badge--alarm   { background: rgba(239,159,39,.15);  color: #ef9f27; }
+.bulk-inv-badge--offline { background: rgba(239,68,68,.13);   color: #ef4444; }
+.bulk-cmd-auth {
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255,255,255,.07);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  background: rgba(0,0,0,.2);
+}
+.bulk-auth-label {
+  font-size: 11px;
+  color: rgba(255,255,255,.4);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bulk-auth-input {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 5px;
+  color: rgba(255,255,255,.9);
+  font-size: 12px;
+  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color .15s;
+}
+.bulk-auth-input:focus {
+  border-color: rgba(127,208,85,.45);
+}
+.bulk-auth-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.bulk-auth-cancel {
+  font-size: 12px;
+  color: rgba(255,255,255,.4);
+  background: none;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 5px;
+  padding: 5px 14px;
+  cursor: pointer;
+  transition: border-color .14s, color .14s;
+}
+.bulk-auth-cancel:hover {
+  color: rgba(255,255,255,.75);
+  border-color: rgba(255,255,255,.25);
+}
+.bulk-auth-confirm {
+  font-size: 12px;
+  font-weight: 700;
+  color: #181f2a;
+  background: #7fd055;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 16px;
+  cursor: pointer;
+  transition: opacity .14s;
+}
+.bulk-auth-confirm:hover { opacity: .88; }
+.bulk-auth-confirm:disabled { opacity: .45; cursor: not-allowed; }
+.bulk-progress-wrap {
+  padding: 10px 14px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.bulk-progress-bar {
+  height: 6px;
+  background: rgba(255,255,255,.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bulk-progress-fill {
+  height: 100%;
+  background: #7fd055;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.bulk-progress-text {
+  font-size: 11px;
+  color: rgba(255,255,255,.45);
+  text-align: center;
+  font-family: var(--font-mono, monospace);
+}
+.bulk-cmd-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255,255,255,.07);
+  flex-shrink: 0;
+}
+.bulk-cmd-btn {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 8px;
+  cursor: pointer;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  transition: opacity .14s, transform .1s;
+}
+.bulk-cmd-btn:hover  { opacity: .88; }
+.bulk-cmd-btn:active { transform: scale(.97); }
+.bulk-cmd-btn:disabled { opacity: .35; cursor: not-allowed; }
+.bulk-cmd-btn--on    { background: rgba(57,229,140,.18);  color: #39e58c;  border: 1px solid rgba(57,229,140,.3); }
+.bulk-cmd-btn--off   { background: rgba(239,68,68,.16);   color: #ef4444;  border: 1px solid rgba(239,68,68,.3); }
+.bulk-cmd-btn--reset { background: rgba(245,200,66,.15);  color: #f5c842;  border: 1px solid rgba(245,200,66,.3); }
+.bulk-cmd-visible { display: flex !important; }
+
+/* ── Badge de alarme na linha do painel lateral ── */
+.unif-side-alarm-badge {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  transition: background .14s;
+}
+.unif-side-alarm-badge:hover { background: rgba(245,158,11,.12); }
+.unif-side-alarm-count {
+  font-size: 9px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: rgba(245,158,11,.18);
+  border-radius: 3px;
+  padding: 0 3px;
+  line-height: 1.4;
+}
+
+/* ── Popover flutuante de alarmes ── */
+.unif-alarm-popover {
+  position: fixed;
+  z-index: 3200;
+  background: #181f2a;
+  border: 1px solid rgba(245,158,11,.3);
+  border-radius: 8px;
+  min-width: 240px;
+  max-height: 320px;
+  overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0,0,0,.6);
+  animation: fadeIn .15s ease;
+}
+.unif-alarm-pop-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: #f59e0b;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid rgba(245,158,11,.15);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+/* ── Disjuntor na visão de cabine ── */
+.cabine-dj-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVIDADE MOBILE — plant view ≤640px
+   ══════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+
+  /* ── Unifilar: painel lateral forçado para colapso ── */
+  .unif-side {
+    width: 40px !important;
+    min-width: 40px !important;
+  }
+  .unif-side .unif-side-search-wrap,
+  .unif-side .unif-side-list,
+  .unif-side .unif-side-footer,
+  .unif-side .unif-side-title {
+    display: none !important;
+  }
+
+  /* ── Unifilar: overview com padding reduzido ── */
+  .unif-overview {
+    padding: 10px 6px;
+  }
+
+  /* ── Diagrama v2: padding menor ── */
+  .unif-diagram--v2 {
+    padding: 12px 4px 24px;
+  }
+
+  /* ── Cabines: reduzir largura para caber na tela ── */
+  .unif-diagram--v2 .unif-cabin-box {
+    min-width: 108px !important;
+    width: 108px !important;
+    max-width: 108px !important;
+  }
+
+  /* ── Slots de inversor: compactar ── */
+  .unif-inv-slot {
+    min-width: 60px;
+    max-width: 76px;
+  }
+  .unif-inv-slot svg.cabine-inv-svg {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  /* ── Nós da espinha: padding reduzido ── */
+  .unif-node--relay,
+  .unif-node--meter,
+  .unif-node--trafo-v2,
+  .unif-node--dj-geral {
+    padding: 6px 10px;
+  }
+  .unif-node--relay .unif-node-lbl,
+  .unif-node--meter .unif-node-lbl,
+  .unif-node--trafo-v2 .unif-node-lbl,
+  .unif-node--dj-geral .unif-node-lbl {
+    font-size: 8px;
+  }
+
+  /* ── Header e topbar do unifilar ── */
+  .unif-topbar {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .unif-topbar-title {
+    font-size: 12px;
+  }
+  .unif-search-input {
+    font-size: 12px;
+  }
+
+  /* ── Cards na visão de cabine: grid 2 colunas ── */
+  .unif-cabin-cards {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px 8px;
+  }
+  .cabine-inv-card {
+    min-width: 0;
+  }
+  .cabine-inv-card__top {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .cabine-inv-card__cmd {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  /* ── Stat bar do unifilar ── */
+  .unif-stats-bar {
+    gap: 8px;
+    padding: 6px 8px;
+    flex-wrap: wrap;
+  }
+  .unif-stat {
+    font-size: 10px;
+  }
+
+  /* ── Bulk command console: sheet inferior ── */
+  #bulkCmdOverlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .bulk-cmd-console {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 14px 14px 0 0;
+    max-height: 85vh;
+  }
+
+  /* ── Popover de alarme: largura adaptada ── */
+  .unif-alarm-popover {
+    position: fixed !important;
+    left: 8px !important;
+    right: 8px !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+
+  /* ── Modais internos do unifilar ── */
+  .unif-modal-card {
+    width: calc(100vw - 16px);
+    max-height: 90vh;
+    border-radius: 12px;
+  }
+
+  /* ── Cabines na linha: scroll horizontal ── */
+  .unif-cabins-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 6px;
+    gap: 8px;
+  }
+
+  /* ── Legenda ── */
+  .unif-legend {
+    gap: 8px;
+    font-size: 10px;
+    padding: 4px 8px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Unifilar map-mode mobile: garantir scroll e altura ── */
+  body.plant-map-mode .unif-stage-wrap {
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.plant-map-mode .unif-overview {
+    min-height: 300px;
+    height: auto;
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.plant-map-mode .unif-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVIDADE MOBILE PEQUENO ≤390px
+   ══════════════════════════════════════════════════════ */
+@media (max-width: 390px) {
+  .unif-cabin-cards {
+    grid-template-columns: 1fr;
+  }
+  .unif-diagram--v2 .unif-cabin-box {
+    min-width: 94px !important;
+    width: 94px !important;
+    max-width: 94px !important;
+  }
+  .unif-inv-slot {
+    min-width: 52px;
+    max-width: 66px;
+  }
+  .unif-inv-slot svg.cabine-inv-svg {
+    width: 38px !important;
+    height: 38px !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   NUCLEAR MOBILE FIX — Unifilar visível no celular
+   Resolve: diagrama invisível em plant-map-mode mobile
+   ══════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* ── Desbloquear scroll: body NÃO pode ser overflow:hidden no mobile ── */
+  body.plant-map-mode {
+    overflow: auto !important;
+    overflow-x: hidden !important;
+    padding: 6px !important;
+  }
+
+  /* ── Layout: NÃO travar em 100dvh no mobile ── */
+  body.plant-map-mode .plant-layout {
+    height: auto !important;
+    min-height: 100dvh !important;
+    grid-template-rows: auto auto !important;
+  }
+
+  /* ── Devices card: altura natural, não height:100% ── */
+  body.plant-map-mode .plant-devices-card {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* ── Unifilar view: altura natural com scroll ── */
+  body.plant-map-mode .unifilar-view {
+    height: auto !important;
+    min-height: 400px !important;
+    flex: none !important;
+    overflow: visible !important;
+  }
+
+  /* ── Content: destravar overflow ── */
+  body.plant-map-mode .unif-content {
+    overflow: visible !important;
+    flex: none !important;
+    min-height: 0 !important;
+    flex-direction: column !important;
+  }
+
+  /* ── Stage wrap: scrollável com altura garantida ── */
+  body.plant-map-mode .unif-stage-wrap {
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    min-height: 350px !important;
+    flex: none !important;
+  }
+
+  /* ── Overview: tamanho natural do conteúdo ── */
+  body.plant-map-mode .unif-overview {
+    height: auto !important;
+    min-height: 300px !important;
+    overflow: visible !important;
+  }
+
+  /* ── Side panel: colapsar totalmente no mobile ── */
+  body.plant-map-mode .unif-side {
+    display: none !important;
+  }
+
+  /* ── Stats bar: visível e scrollável ── */
+  body.plant-map-mode .unif-stats-bar {
+    flex-shrink: 0 !important;
+    overflow-x: auto !important;
+  }
+
+  /* ── Cabin detail: altura natural ── */
+  body.plant-map-mode .unif-cabin-detail {
+    height: auto !important;
+    min-height: 300px !important;
+    overflow: auto !important;
+  }
+
+  /* ── Cabines row: scroll horizontal ── */
+  .unif-cabins-row {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    flex-wrap: nowrap !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* ── Diagrama v2: padding menor ── */
+  .unif-diagram--v2 {
+    padding: 12px 6px 20px !important;
+    min-height: 300px !important;
   }
 }
