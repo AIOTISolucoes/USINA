@@ -24,6 +24,11 @@ function logout() {
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const INVERTER_NO_COMM_AFTER_MS = 15 * 60 * 1000; // legado (chips usam status do mart)
 const DASHBOARD_REFRESH_INTERVAL_MS = 10000;
+const DS_SERIES_PALETTE = [
+  "#4da3ff", "#39e58c", "#ffd84d", "#ff8a65",
+  "#b39ddb", "#80cbc4", "#f06292", "#aed581",
+  "#ffb74d", "#4dd0e1", "#ce93d8", "#a5d6a7"
+];
 const EVENTS_REFRESH_INTERVAL_MS = 10000;
 
 function apiFetch(path, options = {}) {
@@ -42,21 +47,19 @@ function apiFetch(path, options = {}) {
   });
 }
 
-function normalizeApiPayload(data) {
-  if (data && Object.prototype.hasOwnProperty.call(data, "body")) {
-    return typeof data.body === "string" ? JSON.parse(data.body) : data.body;
-  }
-  return data;
+// =============================================================================
+// HELPERS DE PERMISSÃO (lê role_key do localStorage — salvo no login)
+// =============================================================================
+function _getUser() {
+  try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; }
 }
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, char => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  }[char]));
+function _canEditPlantUI() {
+  const u = _getUser();
+  return u.is_superuser === true || u.role_key === "admin_customer";
+}
+function _canAckAlarmUI() {
+  const u = _getUser();
+  return u.is_superuser === true || u.role_key === "admin_customer" || u.role_key === "operator";
 }
 
 // =============================================================================
@@ -103,8 +106,10 @@ let DATASTUDIO_STATE = {
   selectedDataKind: "all", // all | analog | discrete
   selectedSource: "all", // all | historico | consolidado
   selectedContext: "all", // all | PLANT | inverter | relay | meter etc
+  selectedCategory: "all",
   searchText: "",
 
+  catalogTags: [],
   availableTags: [],
   selectedTags: [],
 
@@ -121,6 +126,7 @@ let DATASTUDIO_STATE = {
 };
 
 let DATASTUDIO_CHART = null;
+let DATASTUDIO_TAGS_ABORT_CONTROLLER = null;
 
 // Abort controller pra evitar race condition
 let eventsAbortController = null;
@@ -559,8 +565,11 @@ async function fetchPlantDeviceOptions(plantId) {
   if (!res.ok) throw new Error("Erro ao buscar equipamentos da usina");
 
   const data = await res.json();
-  const parsed = normalizeApiPayload(data);
-  return Array.isArray(parsed?.items) ? parsed.items : (Array.isArray(parsed) ? parsed : []);
+  if (data && data.body) {
+    const parsed = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    return Array.isArray(parsed?.items) ? parsed.items : (Array.isArray(parsed) ? parsed : []);
+  }
+  return Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
 }
 
 
@@ -1872,7 +1881,7 @@ function renderPortfolioTable(plants) {
       null;
     const plantIconClass = alarmSeverity
       ? `plant-icon plant-icon--${alarmSeverity}`
-      : (plantState.kind === "standby" ? "plant-icon plant-icon--standby" : "plant-icon plant-icon--ok");
+      : "plant-icon plant-icon--ok";
 
     tr.innerHTML = `
       <td>
@@ -1893,24 +1902,12 @@ function renderPortfolioTable(plants) {
       <td>${plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "—"}</td>
       <td>${plant.pr_daily_pct != null ? Number(plant.pr_daily_pct).toFixed(1) + "%" : "—"}</td>
       <td>${plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "—"}</td>
-      <td style="text-align:center; white-space:nowrap;">
-        <button class="plant-action-btn" title="Ações da usina" aria-label="Ações da usina" aria-haspopup="menu" aria-expanded="false" data-plant-id="${plantId}" style="margin-right:6px;">
-          <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M10.5 3.5 L2.5 11.5 L2 15.5 L6 15 L14 7 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.12"/>
-            <path d="M8.5 5.5 L12 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            <path d="M13 2.5 L15 4.5 L14 7 L10.5 3.5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="0.3"/>
-          </svg>
-        </button>
+      <td style="text-align:center;">
         <button class="plant-link-btn" title="Abrir usina" data-plant-id="${plantId}">
           <i class="fa-solid fa-arrow-up-right-from-square"></i>
         </button>
       </td>
     `;
-
-    tr.querySelector(".plant-action-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      openPortfolioPlantActionMenu(e, plantId, plantName);
-    });
 
     tr.querySelector(".plant-link-btn").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1933,6 +1930,21 @@ function renderPortfolioTable(plants) {
       openPlantPage();
     });
 
+    const _u2 = JSON.parse(localStorage.getItem("user") || "{}");
+    if (_u2.is_superuser === true || _u2.role_key === "admin_customer") {
+      const _editTd = document.createElement("td");
+      _editTd.style.textAlign = "center";
+      _editTd.innerHTML = `
+        <button class="plant-action-btn plant-list-edit-btn" title="Editar usina" style="cursor:pointer;">
+          <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;color:#39e58c;"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+        </button>`;
+      _editTd.querySelector("button").addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPlantEditModal(plantId, plantName, Number(plant.rated_power_kw ?? 0));
+      });
+      tr.appendChild(_editTd);
+    }
+
     tbody.appendChild(tr);
   });
 }
@@ -1944,6 +1956,15 @@ function renderPortfolioTable(plants) {
 function dsSafeTrim(v) {
   if (v == null) return "";
   return String(v).trim();
+}
+
+function dsAbbrevContext(ctx) {
+  if (!ctx) return ctx;
+  return ctx
+    .replace(/Eletrocentro\s*/gi, 'Eletr.')
+    .replace(/Cabine\s*/gi,       'Cab.')
+    .replace(/Inversor\s*/gi,     'Inv.')
+    .replace(/Inverter\s*/gi,     'Inv.');
 }
 
 function dsIsoStartOfDay(dateYYYYMMDD) {
@@ -1992,13 +2013,146 @@ function dsContextMatches(tagContext, selectedContext) {
 
   const tagNorm = dsNormalizeContextText(tagContext);
   const selectedNorm = dsNormalizeContextText(selectedContext);
-  if (!tagNorm) return false;
+  if (!tagNorm || !selectedNorm) return false;
 
-  const tagNum = tagNorm.match(/\d+/)?.[0] || null;
-  const selectedNum = selectedNorm.match(/\d+/)?.[0] || null;
-  if (tagNum && selectedNum && tagNum === selectedNum) return true;
+  return tagNorm === selectedNorm ||
+         tagNorm.includes(selectedNorm) ||
+         selectedNorm.includes(tagNorm);
+}
 
-  return tagNorm.includes(selectedNorm) || selectedNorm.includes(tagNorm);
+function dsNormalizeSearchText(value) {
+  return dsSafeTrim(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function dsTagMatchesSearch(tag, query) {
+  const needle = dsNormalizeSearchText(query);
+  if (!needle) return true;
+
+  const haystack = [
+    tag?.description,
+    tag?.point_name,
+    tag?.pathname,
+    tag?.path_name,
+    tag?.context,
+    tag?.device_type,
+    tag?.unit
+  ].map(dsNormalizeSearchText).join(" ");
+
+  return haystack.includes(needle);
+}
+
+function dsTagGroup(tag) {
+  const pathname = String(tag?.pathname || tag?.path_name || "");
+  const deviceType = String(tag?.device_type || "").toLowerCase();
+
+  if (String(tag?.data_kind || "").toLowerCase() === "discrete") return "alarm";
+  if (pathname.startsWith("PLANT.")) return "plant";
+  if (pathname.startsWith("WEATHER_") || deviceType.includes("weather")) return "weather";
+  if (pathname.startsWith("METER_") || deviceType.includes("meter")) return "meter";
+  if (pathname.startsWith("RELAY_") || deviceType.includes("relay")) return "relay";
+  if (pathname.startsWith("INV_") || deviceType.includes("inverter")) return "inverter";
+  return "outro";
+}
+
+function dsCategoryMatches(tag, category) {
+  const cat = dsSafeTrim(category || "all");
+  if (!cat || cat === "all") return true;
+
+  const group = dsTagGroup(tag);
+  const map = {
+    planta: "plant",
+    inversor: "inverter",
+    weather: "weather",
+    relay: "relay",
+    meter: "meter",
+    alarm: "alarm"
+  };
+
+  return group === (map[cat] || cat);
+}
+
+function getDataStudioActiveCategory() {
+  const active = document.querySelector(".ds-v2-pill.active");
+  return dsSafeTrim(active?.dataset?.cat || DATASTUDIO_STATE.selectedCategory || "all") || "all";
+}
+
+function setDataStudioActiveCategory(category) {
+  const nextCategory = dsSafeTrim(category || "all") || "all";
+  DATASTUDIO_STATE.selectedCategory = nextCategory;
+
+  document.querySelectorAll(".ds-v2-pill").forEach((pill) => {
+    pill.classList.toggle("active", (pill.dataset.cat || "all") === nextCategory);
+  });
+}
+
+function updateDataStudioFoundCount(count, text) {
+  const { foundCount } = getDataStudioUIElements();
+  if (!foundCount) return;
+
+  if (text) {
+    foundCount.textContent = text;
+    return;
+  }
+
+  const n = Number(count) || 0;
+  const plural = n === 1 ? "" : "s";
+  foundCount.textContent = `${n} medida${plural} encontrada${plural}`;
+}
+
+function applyDataStudioTagFilters() {
+  const catalog = Array.isArray(DATASTUDIO_STATE.catalogTags) ? DATASTUDIO_STATE.catalogTags : [];
+  const selectedContext = dsSafeTrim(DATASTUDIO_STATE.selectedContext) || "all";
+  const selectedCategory = getDataStudioActiveCategory();
+  const searchText = dsSafeTrim(DATASTUDIO_STATE.searchText);
+
+  DATASTUDIO_STATE.selectedCategory = selectedCategory;
+
+  const filteredTags = catalog.filter((tag) => {
+    return dsContextMatches(tag?.context, selectedContext) &&
+           dsCategoryMatches(tag, selectedCategory) &&
+           dsTagMatchesSearch(tag, searchText);
+  });
+
+  DATASTUDIO_STATE.availableTags = filteredTags;
+  updateDataStudioContextInfo();
+  updateDataStudioFoundCount(filteredTags.length);
+  renderDataStudioTagsTable(filteredTags);
+  return filteredTags;
+}
+
+function dsSortTags(tags) {
+  const order = {
+    plant: 0,
+    weather: 1,
+    meter: 2,
+    relay: 3,
+    inverter: 4,
+    alarm: 5,
+    outro: 9
+  };
+
+  return [...(Array.isArray(tags) ? tags : [])].sort((a, b) => {
+    const ga = dsTagGroup(a);
+    const gb = dsTagGroup(b);
+
+    if ((order[ga] ?? 9) !== (order[gb] ?? 9)) {
+      return (order[ga] ?? 9) - (order[gb] ?? 9);
+    }
+
+    const ca = String(a?.context || "");
+    const cb = String(b?.context || "");
+    const c = ca.localeCompare(cb, "pt-BR", { sensitivity: "base", numeric: true });
+    if (c !== 0) return c;
+
+    const da = String(a?.description || a?.point_name || a?.pathname || "");
+    const db = String(b?.description || b?.point_name || b?.pathname || "");
+    return da.localeCompare(db, "pt-BR", { sensitivity: "base", numeric: true });
+  });
 }
 
 function getDataStudioUIElements() {
@@ -2012,9 +2166,12 @@ function getDataStudioUIElements() {
     zoomInBtn: document.getElementById("dsZoomInBtn"),
     zoomOutBtn: document.getElementById("dsZoomOutBtn"),
     zoomResetBtn: document.getElementById("dsZoomResetBtn"),
+    fullscreenBtn: document.getElementById("dsFullscreenBtn"),
+    fullscreenCloseBtn: document.getElementById("dsFullscreenCloseBtn"),
 
     catalogSection: document.getElementById("dsCatalogSection"),
     contextInfo: document.getElementById("dsContextInfo"),
+    foundCount: document.querySelector(".ds-v2-found-count"),
 
     dataKindSelect: document.getElementById("dsDataKindSelect"),
     sourceSelect: document.getElementById("dsSourceSelect"),
@@ -2036,6 +2193,7 @@ function getDataStudioUIElements() {
     saveSelectionBtn: document.getElementById("dsSaveSelectionBtn"),
     loadSeriesBtn: document.getElementById("dsLoadSeriesBtn"),
 
+    chartWrap: document.getElementById("dsChartWrap"),
     chartCanvas: document.getElementById("dsChart")
   };
 }
@@ -2065,18 +2223,15 @@ function renderSelectedTagsList() {
     const chip = document.createElement("div");
     chip.className = "ds-selected-tag-chip";
 
-    const CHIP_COLORS = [
-      '#1d9e75','#378add','#d4537e','#ef9f27',
-      '#7f77dd','#5dcaa5','#e24b4a','#639922',
-      '#ba7517','#185fa5','#993556','#0f6e56'
-    ];
-    const colorIdx = DATASTUDIO_STATE.selectedTags.indexOf(tag) % CHIP_COLORS.length;
-    const chipColor = CHIP_COLORS[Math.max(0, colorIdx)];
+    const colorIdx = DATASTUDIO_STATE.selectedTags.indexOf(tag) % DS_SERIES_PALETTE.length;
+    const chipColor = DS_SERIES_PALETTE[Math.max(0, colorIdx)];
     chip.style.setProperty('--ds-chip-color', chipColor);
-    const label = `${valueOrDash(tag?.context)} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
+
+    const labelFull  = `${valueOrDash(tag?.context)} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
+    const labelShort = `${valueOrDash(dsAbbrevContext(tag?.context))} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
     chip.innerHTML = `
       <span class="ds-selected-tag-chip__dot"></span>
-      <span class="ds-selected-tag-chip__text" title="${label}">${label}</span>
+      <span class="ds-selected-tag-chip__text" title="${labelFull}">${labelShort}</span>
       <button type="button" class="ds-selected-tag-chip__remove" aria-label="Remover medida">×</button>
     `;
 
@@ -2097,7 +2252,7 @@ function populateDataStudioContextSelect(tags) {
   const prev = dsSafeTrim(contextSelect.value || DATASTUDIO_STATE.selectedContext) || "all";
   const contexts = Array.from(new Set((Array.isArray(tags) ? tags : [])
     .map((t) => dsSafeTrim(t?.context))
-    .filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    .filter(Boolean)));
 
   contextSelect.innerHTML = "";
   const allOpt = document.createElement("option");
@@ -2154,6 +2309,10 @@ function isTagSelected(tagOrPath) {
 function addSelectedTag(tag) {
   if (!tag || !dsSafeTrim(tag.pathname)) return false;
   if (isTagSelected(tag)) return true;
+  if (DATASTUDIO_STATE.selectedTags.length >= 50) {
+    window.alert("Você pode selecionar no máximo 50 medidas.");
+    return false;
+  }
   DATASTUDIO_STATE.selectedTags.push(tag);
   DATASTUDIO_STATE.forceHeroState = false;
   updateDataStudioStageUI();
@@ -2182,6 +2341,7 @@ function renderDataStudioTagsTable(tags) {
 
   const rows = Array.isArray(tags) ? tags : [];
   tagsTableBody.innerHTML = "";
+  updateDataStudioFoundCount(rows.length);
 
   if (!rows.length) {
     const tr = document.createElement("tr");
@@ -2199,7 +2359,7 @@ function renderDataStudioTagsTable(tags) {
     tr.classList.add("ds-table-row-clickable");
     const checked = isTagSelected(tag) ? "checked" : "";
 
-    const isAlarm = (tag?.data_kind === 'discrete') || (tag?.description || '').startsWith('⚠');
+    const isAlarm = (tag?.data_kind === 'discrete') || (tag?.description || '').startsWith('âš ');
     const isPlant = (tag?.context || '').toUpperCase().startsWith('PLANT') ||
                     (tag?.pathname || '').startsWith('PLANT.');
     const isWeather = (tag?.device_type || '').toLowerCase().includes('weather') ||
@@ -2207,11 +2367,14 @@ function renderDataStudioTagsTable(tags) {
     const isMeter   = (tag?.device_type || '').toLowerCase().includes('meter') ||
                       (tag?.context || '').toLowerCase().includes('medidor') ||
                       (tag?.context || '').toLowerCase().includes('meter');
+    const isRelay = (tag?.device_type || '').toLowerCase().includes('relay') ||
+                    (tag?.pathname || '').startsWith('RELAY_');
 
     const svgInverter = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="3" width="10" height="7" rx="1.5" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><path d="M4 3V2a2 2 0 014 0v1" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><line x1="4" y1="6.5" x2="8" y2="6.5" stroke="rgba(57,229,140,.6)" stroke-width="1"/></svg>`;
     const svgPlant   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10V5M3 7l3-3 3 3" stroke="rgba(55,138,221,.9)" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/><rect x="7" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/></svg>`;
     const svgWeather = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="5" r="2.5" stroke="rgba(239,159,39,.8)" stroke-width="1.2"/><line x1="6" y1="1" x2="6" y2="2" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="6" y1="8" x2="6" y2="9" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="3" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="9" y1="5" x2="10" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/></svg>`;
     const svgMeter   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="8" rx="1.5" stroke="rgba(212,83,126,.8)" stroke-width="1.2"/><path d="M3.5 7.5 C3.5 5.5 8.5 5.5 8.5 7.5" stroke="rgba(212,83,126,.7)" stroke-width="1" fill="none"/><line x1="6" y1="7.5" x2="5" y2="5.5" stroke="rgba(212,83,126,.9)" stroke-width="1" stroke-linecap="round"/></svg>`;
+    const svgRelay   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2.5" width="10" height="7" rx="1.3" stroke="rgba(57,229,140,.8)" stroke-width="1.1"/><line x1="3" y1="8" x2="8.5" y2="8" stroke="rgba(57,229,140,.75)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="8" x2="5" y2="5" stroke="rgba(57,229,140,.85)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="5" x2="8.5" y2="5" stroke="rgba(57,229,140,.35)" stroke-width=".9" stroke-dasharray="2 1.3" stroke-linecap="round"/></svg>`;
     const svgAlarm   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5L1.5 9.5h9L6 1.5z" stroke="rgba(239,159,39,.9)" stroke-width="1.2" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="rgba(239,159,39,.9)" stroke-width="1" stroke-linecap="round"/><circle cx="6" cy="9" r=".6" fill="rgba(239,159,39,.9)"/></svg>`;
 
     let iconSvg = svgInverter;
@@ -2220,16 +2383,17 @@ function renderDataStudioTagsTable(tags) {
     else if (isPlant)   { iconSvg = svgPlant;   iconClass = 'plant'; }
     else if (isWeather) { iconSvg = svgWeather; iconClass = 'analog'; }
     else if (isMeter)   { iconSvg = svgMeter;   iconClass = 'analog'; }
+    else if (isRelay)   { iconSvg = svgRelay;   iconClass = 'analog'; }
 
-    const unitHtml = tag?.unit ? `<span class="ds-unit-badge">${tag.unit}</span>` : '<span style="opacity:.35">—</span>';
+    const unitHtml = tag?.unit ? `<span class="ds-unit-badge">${tag.unit}</span>` : '<span style="opacity:.35">â€”</span>';
     const descHtml = valueOrDash(tag?.description);
 
     tr.innerHTML = `
       <td><input type="checkbox" data-ds-pathname="${pathname.replaceAll('"','&quot;')}" ${checked}></td>
-      <td>
+      <td style="min-width:90px;max-width:130px;white-space:normal;word-break:break-word;line-height:1.3;font-size:11px;">
         <div class="ds-tag-context-cell">
           <span class="ds-tag-icon ds-tag-icon--${iconClass}">${iconSvg}</span>
-          ${valueOrDash(tag?.context)}
+          <span title="${(tag?.context||'').replace(/"/g,'&quot;')}">${valueOrDash(dsAbbrevContext(tag?.context))}</span>
         </div>
       </td>
       <td style="white-space:normal;line-height:1.35;font-size:11px;">${descHtml}</td>
@@ -2292,6 +2456,7 @@ function renderDataStudioTagsTable(tags) {
 function setDataStudioLoadingTags(isLoading) {
   DATASTUDIO_STATE.loadingTags = Boolean(isLoading);
   const { openTagsBtn, tagsApplyBtn, tagsClearBtn } = getDataStudioUIElements();
+  if (DATASTUDIO_STATE.loadingTags) updateDataStudioFoundCount(null, "Buscando medidas...");
   if (openTagsBtn) {
     openTagsBtn.disabled = DATASTUDIO_STATE.loadingTags;
     openTagsBtn.textContent = DATASTUDIO_STATE.loadingTags
@@ -2348,6 +2513,9 @@ function buildDataStudioSelectionPayload() {
   if (!Array.isArray(DATASTUDIO_STATE.selectedTags) || !DATASTUDIO_STATE.selectedTags.length) {
     throw new Error("Selecione ao menos uma medida.");
   }
+  if (DATASTUDIO_STATE.selectedTags.length > 50) {
+    throw new Error("Limite de 50 medidas excedido.");
+  }
 
   const allowedAgg = new Set(["none", "avg", "integral", "median", "max", "sum"]);
   const allowedPeriod = new Set(["5min", "daily", "weekly", "monthly", "yearly", "hdaily", "hweekly", "hmonthly", "hyearly"]);
@@ -2367,7 +2535,7 @@ function buildDataStudioSelectionPayload() {
     throw new Error("Há medidas selecionadas de outra usina. Limpe a seleção e selecione novamente.");
   }
 
-  const items = DATASTUDIO_STATE.selectedTags.map((t, idx) => ({
+  const items = DATASTUDIO_STATE.selectedTags.slice(0, 50).map((t, idx) => ({
     tag_id: t?.id ?? t?.tag_id ?? null,
     pathname: dsSafeTrim(t.pathname),
     display_type: "line",
@@ -2489,6 +2657,79 @@ function resetDataStudioChartZoom() {
   }
 }
 
+function resizeDataStudioChartSoon() {
+  if (!DATASTUDIO_CHART || typeof DATASTUDIO_CHART.resize !== "function") return;
+
+  requestAnimationFrame(() => {
+    try {
+      DATASTUDIO_CHART.resize();
+    } catch (err) {
+      console.warn("[DataStudio] erro ao redimensionar grafico:", err);
+    }
+  });
+}
+
+function setDataStudioChartFullscreen(expanded) {
+  const { chartWrap, fullscreenBtn } = getDataStudioUIElements();
+  if (!chartWrap) return;
+
+  const isExpanded = Boolean(expanded);
+  chartWrap.classList.toggle("ds-chart-fullscreen", isExpanded);
+  document.body.classList.toggle("ds-chart-modal-open", isExpanded);
+
+  if (fullscreenBtn) {
+    fullscreenBtn.classList.toggle("is-active", isExpanded);
+    fullscreenBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
+    fullscreenBtn.title = isExpanded ? "Voltar para tamanho normal" : "Tela cheia do grafico";
+    fullscreenBtn.setAttribute("aria-label", fullscreenBtn.title);
+    fullscreenBtn.innerHTML = isExpanded
+      ? '<i class="fa-solid fa-compress"></i>'
+      : '<i class="fa-solid fa-expand"></i>';
+  }
+
+  resizeDataStudioChartSoon();
+  window.setTimeout(resizeDataStudioChartSoon, 180);
+}
+
+function toggleDataStudioChartFullscreen() {
+  const { chartWrap } = getDataStudioUIElements();
+  setDataStudioChartFullscreen(!chartWrap?.classList.contains("ds-chart-fullscreen"));
+}
+
+function wireDataStudioChartPanCursorOnce() {
+  const { chartCanvas, chartWrap } = getDataStudioUIElements();
+  if (!chartCanvas || !chartWrap) return;
+  if (chartCanvas.dataset.dsPanCursorWired === "true") return;
+  chartCanvas.dataset.dsPanCursorWired = "true";
+
+  const stopPanning = () => {
+    chartWrap.classList.remove("is-panning");
+  };
+
+  chartCanvas.addEventListener("pointerdown", (event) => {
+    if (event.button != null && event.button !== 0) return;
+    chartWrap.classList.add("is-panning");
+    try { chartCanvas.setPointerCapture(event.pointerId); } catch (err) {}
+  });
+
+  ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"].forEach((eventName) => {
+    chartCanvas.addEventListener(eventName, stopPanning);
+  });
+
+  window.addEventListener("pointerup", stopPanning);
+}
+
+function wireDataStudioChartFullscreenKeysOnce() {
+  if (window.__dsChartFullscreenKeysWired) return;
+  window.__dsChartFullscreenKeysWired = true;
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setDataStudioChartFullscreen(false);
+    }
+  });
+}
+
 function isMobileViewport() {
   return window.innerWidth <= 768;
 }
@@ -2541,6 +2782,7 @@ function openDataStudioCatalogInline({ resetFilters = false } = {}) {
     DATASTUDIO_STATE.selectedDataKind = "all";
     DATASTUDIO_STATE.selectedSource = "all";
     DATASTUDIO_STATE.selectedContext = "all";
+    DATASTUDIO_STATE.selectedCategory = "all";
     DATASTUDIO_STATE.searchText = "";
 
     const { dataKindSelect, sourceSelect, contextSelect, searchInput } = getDataStudioUIElements();
@@ -2548,6 +2790,7 @@ function openDataStudioCatalogInline({ resetFilters = false } = {}) {
     if (sourceSelect) sourceSelect.value = "all";
     if (contextSelect) contextSelect.value = "all";
     if (searchInput) searchInput.value = "";
+    setDataStudioActiveCategory("all");
   }
 
   DATASTUDIO_STATE.catalogOpen = true;
@@ -2591,6 +2834,8 @@ async function fetchDataStudioTags() {
   const source = dsSafeTrim(sourceSelect?.value || DATASTUDIO_STATE.selectedSource);
   const context = dsSafeTrim(contextSelect?.value || DATASTUDIO_STATE.selectedContext);
   const q = dsSafeTrim(searchInput?.value || DATASTUDIO_STATE.searchText);
+  const requestSeq = (DATASTUDIO_STATE.tagsRequestSeq || 0) + 1;
+  DATASTUDIO_STATE.tagsRequestSeq = requestSeq;
 
   DATASTUDIO_STATE.selectedPlantId = plantId || null;
   DATASTUDIO_STATE.selectedDataKind = dataKind || "all";
@@ -2602,8 +2847,7 @@ async function fetchDataStudioTags() {
   if (plantId) params.set("plant_id", plantId);
   if (dataKind && dataKind !== "all") params.set("data_kind", dataKind);
   if (source && source !== "all") params.set("source", source);
-  if (q) params.set("q", q);
-  params.set("limit", "3000");
+  params.set("limit", "5000");
 
   const normalizeTagsResponse = (parsed) => {
     if (Array.isArray(parsed)) return parsed;
@@ -2612,37 +2856,54 @@ async function fetchDataStudioTags() {
     return [];
   };
 
+  if (DATASTUDIO_TAGS_ABORT_CONTROLLER) {
+    try { DATASTUDIO_TAGS_ABORT_CONTROLLER.abort(); } catch (err) {}
+  }
+
+  DATASTUDIO_TAGS_ABORT_CONTROLLER =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+
   setDataStudioLoadingTags(true);
 
   try {
     const qs = params.toString();
-    const res = await apiFetch(`/datastudio/tags${qs ? `?${qs}` : ""}`);
+    const fetchOptions = DATASTUDIO_TAGS_ABORT_CONTROLLER
+      ? { signal: DATASTUDIO_TAGS_ABORT_CONTROLLER.signal }
+      : {};
+    const res = await apiFetch(`/datastudio/tags${qs ? `?${qs}` : ""}`, fetchOptions);
     if (!res.ok) throw new Error(`Falha ao buscar medidas (${res.status})`);
     const data = await res.json();
     const parsed = dsNormalizeApiBody(data);
+    if (requestSeq !== DATASTUDIO_STATE.tagsRequestSeq) return;
 
     const allTags = normalizeTagsResponse(parsed);
     console.log("[DataStudio] TAGS RECEBIDAS:", allTags.length);
+    console.table(Object.entries(allTags.reduce((acc, tag) => {
+      const g = dsTagGroup(tag);
+      acc[g] = (acc[g] || 0) + 1;
+      return acc;
+    }, {})).map(([grupo, count]) => ({ grupo, count })));
 
-    populateDataStudioContextSelect(allTags);
+    const sortedTags = dsSortTags(allTags);
+    DATASTUDIO_STATE.catalogTags = sortedTags;
+    populateDataStudioContextSelect(sortedTags);
 
     const contextAfterPopulate = dsSafeTrim(contextSelect?.value || DATASTUDIO_STATE.selectedContext || "all");
     DATASTUDIO_STATE.selectedContext = contextAfterPopulate || "all";
-
-    const filteredTags = (contextAfterPopulate && contextAfterPopulate !== "all")
-      ? allTags.filter((tag) => dsContextMatches(tag?.context, contextAfterPopulate))
-      : allTags;
-
-    DATASTUDIO_STATE.availableTags = filteredTags;
-    updateDataStudioContextInfo();
-    renderDataStudioTagsTable(filteredTags);
+    applyDataStudioTagFilters();
   } catch (err) {
+    if (err?.name === "AbortError") return;
+    if (requestSeq !== DATASTUDIO_STATE.tagsRequestSeq) return;
     console.error("[DataStudio] erro ao buscar tags:", err);
+    DATASTUDIO_STATE.catalogTags = [];
     DATASTUDIO_STATE.availableTags = [];
     updateDataStudioContextInfo();
     renderDataStudioTagsTable([]);
   } finally {
-    setDataStudioLoadingTags(false);
+    if (requestSeq === DATASTUDIO_STATE.tagsRequestSeq) {
+      DATASTUDIO_TAGS_ABORT_CONTROLLER = null;
+      setDataStudioLoadingTags(false);
+    }
   }
 }
 
@@ -2735,18 +2996,40 @@ function renderDataStudioChart(seriesPayload) {
   const axisByUnit = new Map([["_default_", "y"]]);
 
   if (seriesList.length) {
-    const palette = ["#4da3ff", "#39e58c", "#ffd84d", "#ff8a65", "#b39ddb", "#80cbc4"];
+    const palette = DS_SERIES_PALETTE;
+
+    // 1. Coletar todos os timestamps únicos de TODAS as séries e ordenar
+    const allTsSet = new Set();
+    seriesList.forEach((serie) => {
+      const points = Array.isArray(serie?.points)
+        ? serie.points
+        : (Array.isArray(serie?.data) ? serie.data : []);
+      points.forEach((pt) => {
+        const ts = pt?.ts || pt?.timestamp || pt?.x;
+        if (ts) allTsSet.add(String(ts));
+      });
+    });
+    const allTsSorted = Array.from(allTsSet).sort();
+    allTsSorted.forEach((ts) => {
+      labels.push(new Date(ts).toLocaleString("pt-BR"));
+    });
+
+    // 2. Para cada série, mapear valores pelo timestamp (não por índice)
     seriesList.forEach((serie, idx) => {
       const points = Array.isArray(serie?.points)
         ? serie.points
         : (Array.isArray(serie?.data) ? serie.data : []);
 
-      if (!labels.length) {
-        points.forEach((pt) => {
-          const ts = pt?.ts || pt?.timestamp || pt?.x;
-          labels.push(ts ? new Date(ts).toLocaleString("pt-BR") : "");
-        });
-      }
+      // Mapa ts_string -> value para alinhamento correto
+      const valueByTs = new Map();
+      points.forEach((pt) => {
+        const ts = pt?.ts || pt?.timestamp || pt?.x;
+        if (ts != null) {
+          let v = pt?.value ?? pt?.y ?? null;
+          try { v = v != null ? Number(v) : null; } catch { v = null; }
+          valueByTs.set(String(ts), v);
+        }
+      });
 
       const unitKey = dsSafeTrim(serie?.unit || "") || "_default_";
       if (!axisByUnit.has(unitKey)) {
@@ -2763,7 +3046,7 @@ function renderDataStudioChart(seriesPayload) {
 
       datasets.push({
         label: serie?.label || serie?.pathname || `Série ${idx + 1}`,
-        data: points.map((pt) => Number(pt?.value ?? pt?.y ?? null)),
+        data: allTsSorted.map((ts) => valueByTs.has(ts) ? valueByTs.get(ts) : null),
         borderColor: palette[idx % palette.length],
         backgroundColor: palette[idx % palette.length],
         borderWidth: 2,
@@ -2772,7 +3055,8 @@ function renderDataStudioChart(seriesPayload) {
         pointHoverRadius: 6,
         pointHitRadius: 16,
         fill: false,
-        yAxisID: axisByUnit.get(unitKey) || "y"
+        yAxisID: axisByUnit.get(unitKey) || "y",
+        spanGaps: true
       });
     });
   } else {
@@ -2848,11 +3132,26 @@ function renderDataStudioChart(seriesPayload) {
           },
           pan: {
             enabled: true,
-            mode: "xy"
+            mode: "xy",
+            threshold: 2,
+            onPanStart: () => {
+              const { chartWrap } = getDataStudioUIElements();
+              chartWrap?.classList.add("is-panning");
+              return true;
+            },
+            onPanComplete: () => {
+              const { chartWrap } = getDataStudioUIElements();
+              chartWrap?.classList.remove("is-panning");
+            },
+            onPanRejected: () => {
+              const { chartWrap } = getDataStudioUIElements();
+              chartWrap?.classList.remove("is-panning");
+            }
           },
           zoom: {
             wheel: {
-              enabled: true
+              enabled: true,
+              speed: 0.08
             },
             pinch: {
               enabled: true
@@ -2867,7 +3166,6 @@ function renderDataStudioChart(seriesPayload) {
       scales
     }
   });
-  window.dsChartInstance = DATASTUDIO_CHART;
 }
 
 
@@ -2949,6 +3247,13 @@ function markDataStudioSeriesDirty() {
 
   renderDataStudioChart(null);
   updateDataStudioExportButton();
+}
+
+function scheduleDataStudioTagsFetch(delay = 220) {
+  window.clearTimeout(DATASTUDIO_STATE.tagsSearchTimer);
+  DATASTUDIO_STATE.tagsSearchTimer = window.setTimeout(() => {
+    fetchDataStudioTags();
+  }, delay);
 }
 
 function formatDateInputValue(dateObj) {
@@ -3045,10 +3350,12 @@ function wireDataStudioOnce() {
     DATASTUDIO_STATE.selectedPlantId = nextPlantId;
 
     DATASTUDIO_STATE.selectedTags = [];
+    DATASTUDIO_STATE.catalogTags = [];
     DATASTUDIO_STATE.availableTags = [];
     DATASTUDIO_STATE.selectionId = null;
     DATASTUDIO_STATE.chartData = null;
     DATASTUDIO_STATE.selectedContext = "all";
+    DATASTUDIO_STATE.selectedCategory = "all";
     DATASTUDIO_STATE.searchText = "";
 
     if (ui.contextSelect) {
@@ -3061,30 +3368,49 @@ function wireDataStudioOnce() {
     }
 
     if (ui.searchInput) ui.searchInput.value = "";
+    setDataStudioActiveCategory("all");
 
     renderDataStudioTagsTable([]);
     renderDataStudioChart(null);
     updateSelectedTagsCounter();
     updateDataStudioExportButton();
+    DATASTUDIO_STATE.catalogOpen = Boolean(nextPlantId);
+    DATASTUDIO_STATE.forceHeroState = false;
+    DATASTUDIO_STATE.catalogConfirmed = false;
     updateDataStudioStageUI();
+    if (nextPlantId) fetchDataStudioTags();
   });
 
   ui.dataKindSelect?.addEventListener("change", (e) => {
     DATASTUDIO_STATE.selectedDataKind = dsSafeTrim(e.target.value) || "all";
+    fetchDataStudioTags();
   });
 
   ui.sourceSelect?.addEventListener("change", (e) => {
     DATASTUDIO_STATE.selectedSource = dsSafeTrim(e.target.value) || "all";
+    fetchDataStudioTags();
   });
 
   ui.contextSelect?.addEventListener("change", (e) => {
     DATASTUDIO_STATE.selectedContext = dsSafeTrim(e.target.value) || "all";
-    updateDataStudioContextInfo();
-    fetchDataStudioTags();
+    if (DATASTUDIO_STATE.catalogTags.length) applyDataStudioTagFilters();
+    else fetchDataStudioTags();
   });
 
   ui.searchInput?.addEventListener("input", (e) => {
     DATASTUDIO_STATE.searchText = dsSafeTrim(e.target.value);
+    if (DATASTUDIO_STATE.catalogTags.length) {
+      applyDataStudioTagFilters();
+    } else {
+      scheduleDataStudioTagsFetch();
+    }
+  });
+
+  document.querySelectorAll(".ds-v2-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      setDataStudioActiveCategory(dsSafeTrim(pill.dataset.cat || "all") || "all");
+      if (DATASTUDIO_STATE.catalogTags.length) applyDataStudioTagFilters();
+    });
   });
 
   ui.modeSelect?.addEventListener("change", (e) => {
@@ -3131,41 +3457,8 @@ function wireDataStudioOnce() {
   ui.zoomInBtn?.addEventListener("click", () => zoomDataStudioChart(1.2));
   ui.zoomOutBtn?.addEventListener("click", () => zoomDataStudioChart(0.8));
   ui.zoomResetBtn?.addEventListener("click", resetDataStudioChartZoom);
-
-  const dsFullscreenBtn = document.getElementById("dsFullscreenBtn");
-  const dsChartWrap = document.getElementById("dsChartWrap");
-  if (dsFullscreenBtn && dsChartWrap) {
-
-    // Botão de fechar fixo dentro do chart wrap
-    const closeBtn = document.createElement("button");
-    closeBtn.id = "dsFullscreenClose";
-    closeBtn.className = "ds-fullscreen-close";
-    closeBtn.title = "Sair da tela cheia";
-    closeBtn.innerHTML = '<i class="fa-solid fa-compress"></i>';
-    dsChartWrap.appendChild(closeBtn);
-
-    const exitFullscreen = () => {
-      dsChartWrap.classList.remove("ds-chart-fullscreen");
-      const icon = dsFullscreenBtn.querySelector("i");
-      if (icon) icon.className = "fa-solid fa-expand";
-      if (window.dsChartInstance) setTimeout(() => window.dsChartInstance.resize(), 100);
-    };
-
-    dsFullscreenBtn.addEventListener("click", () => {
-      const isFullscreen = dsChartWrap.classList.toggle("ds-chart-fullscreen");
-      const icon = dsFullscreenBtn.querySelector("i");
-      if (icon) icon.className = isFullscreen ? "fa-solid fa-compress" : "fa-solid fa-expand";
-      if (window.dsChartInstance) setTimeout(() => window.dsChartInstance.resize(), 100);
-    });
-
-    closeBtn.addEventListener("click", exitFullscreen);
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && dsChartWrap.classList.contains("ds-chart-fullscreen")) {
-        exitFullscreen();
-      }
-    });
-  }
+  ui.fullscreenBtn?.addEventListener("click", toggleDataStudioChartFullscreen);
+  ui.fullscreenCloseBtn?.addEventListener("click", () => setDataStudioChartFullscreen(false));
   ui.backToHeroBtn?.addEventListener("click", () => {
     DATASTUDIO_STATE.forceHeroState = true;
     DATASTUDIO_STATE.catalogConfirmed = false;
@@ -3178,6 +3471,8 @@ function wireDataStudioOnce() {
   });
 
   wireDataStudioChartOutsideTapOnce();
+  wireDataStudioChartPanCursorOnce();
+  wireDataStudioChartFullscreenKeysOnce();
 
   syncDataStudioAggregationUI();
   updateSelectedTagsCounter();
@@ -3389,7 +3684,6 @@ async function refreshDashboard() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   wireDataStudioOnce();
-  wirePlantEditModalOnce();
 
   // Preenche nome do usuário logado
   try {
@@ -3437,675 +3731,6 @@ let _portfolioMiniCharts = new Map();
 let _portfolioRenderGen = 0;
 const _miniChartDataCache = new Map(); // plantId → { ts, body }
 const _MINI_CHART_CACHE_TTL_MS = 5 * 60 * 1000;
-
-let currentEditPlantId = null;
-let currentEditPlantName = "";
-let _plantEditModalWired = false;
-let _plantEditLastFocus = null;
-let _portfolioActionMenuWired = false;
-let _portfolioActionMenuButton = null;
-let _portfolioActionMenuContext = null;
-
-function getOrCreatePlantEditModal() {
-  let modal = document.getElementById("plantEditModal");
-  if (modal) return modal;
-
-  document.body.insertAdjacentHTML("beforeend", `
-    <div id="plantEditModal" class="plant-edit-modal hidden" aria-hidden="true">
-      <div class="plant-edit-modal__backdrop"></div>
-      <div class="plant-edit-modal__box" role="dialog" aria-modal="true" aria-labelledby="plantEditModalTitle">
-        <div class="plant-edit-modal__header">
-          <h3 id="plantEditModalTitle">Editar usina</h3>
-          <button class="plant-edit-modal__close" type="button" onclick="closePlantEditModal()" aria-label="Fechar">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-        <div class="plant-edit-section">
-          <label for="plantEditNameInput">Nome da usina</label>
-          <div class="plant-edit-inline">
-            <input type="text" id="plantEditNameInput" placeholder="Nome da usina" />
-            <button type="button" onclick="savePlantName()" title="Salvar nome da usina" aria-label="Salvar nome da usina">
-              <i class="fa-solid fa-check"></i>
-            </button>
-          </div>
-          <div id="plantEditNameFeedback" class="plant-edit-feedback" aria-live="polite"></div>
-        </div>
-        <div class="plant-edit-section" id="plantEditRatedSection">
-          <label for="plantEditRatedInput">Rated Power (kWp)</label>
-          <div class="plant-edit-inline">
-            <input type="number" id="plantEditRatedInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
-            <button type="button" onclick="savePlantRatedPower()" title="Salvar rated power" aria-label="Salvar rated power">
-              <i class="fa-solid fa-check"></i>
-            </button>
-          </div>
-          <div id="plantEditRatedFeedback" class="plant-edit-feedback" aria-live="polite"></div>
-        </div>
-        <hr class="plant-edit-divider" />
-        <div class="plant-edit-section">
-          <label>Dispositivos</label>
-          <div id="plantEditDevicesList" class="plant-edit-devices-list" tabindex="-1" aria-live="polite"></div>
-        </div>
-      </div>
-    </div>
-  `);
-
-  return document.getElementById("plantEditModal");
-}
-
-function wirePlantEditModalOnce() {
-  if (_plantEditModalWired) return;
-
-  const modal = getOrCreatePlantEditModal();
-  if (!modal) return;
-
-  modal.querySelector(".plant-edit-modal__backdrop")?.addEventListener("click", closePlantEditModal);
-  document.getElementById("plantEditNameInput")?.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      savePlantName();
-    }
-  });
-
-  document.getElementById("plantEditRatedInput")?.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      savePlantRatedPower();
-    }
-  });
-
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !modal.classList.contains("hidden")) {
-      closePlantEditModal();
-    }
-  });
-
-  _plantEditModalWired = true;
-}
-
-function plantEditSetFeedback(el, message = "", type = "") {
-  if (!el) return;
-  el.textContent = message;
-  el.classList.remove("ok", "err");
-  if (type) el.classList.add(type);
-}
-
-function formatPlantEditDeviceMeta(device) {
-  const parts = [];
-  const deviceId = device?.device_id ?? device?.id;
-  const original = device?.original_name || device?.device_default_name || device?.name;
-  const cabin = device?.cabin || device?.cabin_name || device?.electrocenter || device?.electrocenter_name;
-
-  if (deviceId != null) parts.push(`ID ${deviceId}`);
-  if (original) parts.push(`Original: ${original}`);
-  if (device?.is_active != null) parts.push(device.is_active ? "Ativo" : "Inativo");
-  if (cabin) parts.push(`Cabine: ${cabin}`);
-
-  return parts.join(" • ");
-}
-
-function renderPlantEditDeviceRows(devices) {
-  const list = document.getElementById("plantEditDevicesList");
-  if (!list) return;
-
-  list.innerHTML = "";
-  const items = Array.isArray(devices) ? devices : [];
-
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "plant-edit-empty";
-    empty.textContent = "Nenhum dispositivo encontrado.";
-    list.appendChild(empty);
-    return;
-  }
-
-  items.forEach(device => {
-    const deviceId = device?.device_id;
-    const row = document.createElement("div");
-    row.className = "plant-edit-device-row";
-    row.dataset.deviceId = String(deviceId ?? "");
-
-    const info = document.createElement("div");
-    info.className = "plant-edit-device-info";
-
-    const type = document.createElement("span");
-    type.className = "plant-edit-device-type";
-    type.textContent = device?.device_type || "Device";
-    type.title = type.textContent;
-
-    const meta = document.createElement("span");
-    meta.className = "plant-edit-device-meta";
-    meta.textContent = formatPlantEditDeviceMeta(device);
-    meta.title = meta.textContent;
-
-    info.append(type, meta);
-
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = "plant-edit-device-name";
-    input.placeholder = "Nome do dispositivo";
-    input.value = device?.display_name || device?.device_name || device?.name || "";
-    input.addEventListener("keydown", event => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        saveDeviceName(deviceId);
-      }
-    });
-
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "plant-edit-device-save";
-    button.title = "Salvar nome do dispositivo";
-    button.setAttribute("aria-label", "Salvar nome do dispositivo");
-    button.innerHTML = '<i class="fa-solid fa-check"></i>';
-    button.addEventListener("click", () => saveDeviceName(deviceId));
-
-    const feedback = document.createElement("span");
-    feedback.className = "plant-edit-device-feedback";
-    feedback.setAttribute("aria-live", "polite");
-
-    row.append(info, input, button, feedback);
-    list.appendChild(row);
-  });
-}
-
-async function loadPlantDevices(plantId) {
-  const list = document.getElementById("plantEditDevicesList");
-  if (!list) return;
-
-  list.innerHTML = '<div class="plant-edit-empty">Carregando dispositivos...</div>';
-
-  try {
-    const devices = await fetchPlantDeviceOptions(plantId);
-    if (String(currentEditPlantId) !== String(plantId)) return;
-    renderPlantEditDeviceRows(devices);
-  } catch (err) {
-    console.error("[PlantEdit] erro ao carregar dispositivos:", err);
-    list.innerHTML = '<div class="plant-edit-empty plant-edit-empty--error">Erro ao carregar dispositivos.</div>';
-  }
-}
-
-function openPlantEditModal(event, plantId, plantName, options = {}) {
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  const modal = getOrCreatePlantEditModal();
-  if (!modal) return;
-
-  wirePlantEditModalOnce();
-
-  currentEditPlantId = plantId;
-  currentEditPlantName = String(plantName ?? "");
-  _plantEditLastFocus = document.activeElement;
-
-  const nameInput = document.getElementById("plantEditNameInput");
-  const nameFeedback = document.getElementById("plantEditNameFeedback");
-  const devicesList = document.getElementById("plantEditDevicesList");
-  const title = document.getElementById("plantEditModalTitle");
-  const mode = options.mode || "plant";
-  const plantSection = nameInput?.closest(".plant-edit-section");
-  const devicesSection = devicesList?.closest(".plant-edit-section");
-  const divider = modal.querySelector(".plant-edit-divider");
-
-  if (nameInput) nameInput.value = currentEditPlantName;
-
-  const ratedInput = document.getElementById("plantEditRatedInput");
-  const ratedFeedback = document.getElementById("plantEditRatedFeedback");
-  const ratedSection = document.getElementById("plantEditRatedSection");
-
-  // Buscar rated power atual da planta no array lastValidPlants
-  const currentPlant = lastValidPlants.find(p =>
-    String(p.power_plant_id ?? p.plant_id ?? p.id) === String(plantId)
-  );
-  const currentRated = currentPlant?.capacity_dc ?? currentPlant?.rated_power_kwp ?? currentPlant?.rated_power_kw ?? "";
-  if (ratedInput) ratedInput.value = currentRated !== "" && currentRated != null ? Number(currentRated) : "";
-  plantEditSetFeedback(ratedFeedback);
-
-  // Esconder rated section no modo "devices"
-  if (ratedSection) ratedSection.style.display = mode === "devices" ? "none" : "";
-
-  if (title) title.textContent = mode === "devices" ? "Gerenciar dispositivos" : "Editar usina";
-  if (plantSection) plantSection.style.display = mode === "devices" ? "none" : "";
-  if (devicesSection) devicesSection.style.display = mode === "plant" ? "none" : "";
-  if (divider) divider.style.display = "none";
-  plantEditSetFeedback(nameFeedback);
-  if (devicesList) devicesList.innerHTML = "";
-
-  modal.classList.remove("hidden");
-  modal.setAttribute("aria-hidden", "false");
-  document.body.classList.add("plant-edit-modal-open");
-
-  window.setTimeout(() => {
-    if (mode === "devices") {
-      devicesList?.focus?.();
-      return;
-    }
-    nameInput?.focus();
-    nameInput?.select();
-  }, 0);
-
-  if (mode !== "plant") loadPlantDevices(plantId);
-}
-
-function closePlantEditModal() {
-  const modal = document.getElementById("plantEditModal");
-  if (!modal) return;
-
-  modal.classList.add("hidden");
-  modal.setAttribute("aria-hidden", "true");
-  document.body.classList.remove("plant-edit-modal-open");
-
-  if (_plantEditLastFocus && document.contains(_plantEditLastFocus)) {
-    _plantEditLastFocus.focus?.();
-  }
-}
-
-function getPlantEditDeviceRow(deviceId) {
-  return Array.from(document.querySelectorAll("#plantEditDevicesList .plant-edit-device-row"))
-    .find(row => row.dataset.deviceId === String(deviceId));
-}
-
-function updatePortfolioPlantName(plantId, plantName) {
-  const idText = String(plantId);
-  document.querySelectorAll(".plant-card[data-plant-id]").forEach(card => {
-    if (String(card.dataset.plantId) !== idText) return;
-    card.dataset.plantName = plantName;
-    const nameEl = card.querySelector(".plant-card__name");
-    if (nameEl) nameEl.textContent = plantName;
-  });
-
-  lastValidPlants.forEach(plant => {
-    const pid = plant?.power_plant_id ?? plant?.plant_id ?? plant?.id;
-    if (String(pid) !== idText) return;
-    plant.power_plant_name = plantName;
-    if (Object.prototype.hasOwnProperty.call(plant, "plant_name")) plant.plant_name = plantName;
-    if (Object.prototype.hasOwnProperty.call(plant, "name")) plant.name = plantName;
-  });
-
-  const listView = document.getElementById("portfolioListView");
-  if (listView && !listView.classList.contains("hidden")) {
-    const plants = typeof portfolioFilterPlants === "function"
-      ? portfolioFilterPlants(lastValidPlants)
-      : lastValidPlants;
-    renderPortfolioTable(plants);
-  }
-}
-
-async function savePlantName() {
-  const nameInput = document.getElementById("plantEditNameInput");
-  const feedback = document.getElementById("plantEditNameFeedback");
-  const button = document.querySelector(".plant-edit-inline button");
-  const newName = (nameInput?.value || "").trim();
-
-  if (!currentEditPlantId) {
-    plantEditSetFeedback(feedback, "Usina invalida.", "err");
-    return;
-  }
-  if (!newName) {
-    plantEditSetFeedback(feedback, "Informe um nome.", "err");
-    nameInput?.focus();
-    return;
-  }
-
-  if (button) button.disabled = true;
-  plantEditSetFeedback(feedback, "Salvando...");
-
-  try {
-    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/name`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plant_name: newName })
-    });
-    const data = await res.json().catch(() => ({}));
-    const parsed = normalizeApiPayload(data) || {};
-
-    if (!res.ok || parsed.ok === false) {
-      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
-    }
-
-    const savedName = parsed.power_plant_name || parsed.plant_name || newName;
-    currentEditPlantName = savedName;
-    if (nameInput) nameInput.value = savedName;
-    updatePortfolioPlantName(currentEditPlantId, savedName);
-    plantEditSetFeedback(feedback, "Salvo.", "ok");
-  } catch (err) {
-    console.error("[PlantEdit] erro ao salvar nome da usina:", err);
-    plantEditSetFeedback(feedback, err?.message || "Erro ao salvar.", "err");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-async function savePlantRatedPower() {
-  const ratedInput = document.getElementById("plantEditRatedInput");
-  const feedback = document.getElementById("plantEditRatedFeedback");
-  const button = ratedInput?.closest(".plant-edit-inline")?.querySelector("button");
-  const rawValue = (ratedInput?.value ?? "").trim();
-
-  if (!currentEditPlantId) {
-    plantEditSetFeedback(feedback, "Usina inválida.", "err");
-    return;
-  }
-  if (rawValue === "" || isNaN(Number(rawValue)) || Number(rawValue) < 0) {
-    plantEditSetFeedback(feedback, "Informe um valor válido (>= 0).", "err");
-    ratedInput?.focus();
-    return;
-  }
-
-  if (button) button.disabled = true;
-  plantEditSetFeedback(feedback, "Salvando...");
-
-  try {
-    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/name`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ capacity_dc: Number(rawValue) })
-    });
-    const data = await res.json().catch(() => ({}));
-    const parsed = normalizeApiPayload(data) || {};
-
-    if (!res.ok || parsed.ok === false) {
-      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
-    }
-
-    const savedValue = parsed.capacity_dc;
-    if (ratedInput && savedValue != null) ratedInput.value = savedValue;
-
-    // Atualizar o card no portfólio sem reload
-    const idText = String(currentEditPlantId);
-    lastValidPlants.forEach(plant => {
-      const pid = plant?.power_plant_id ?? plant?.plant_id ?? plant?.id;
-      if (String(pid) !== idText) return;
-      plant.capacity_dc = savedValue;
-      plant.rated_power_kwp = savedValue;
-      plant.rated_power_kw = savedValue;
-    });
-    // Re-render dos cards para refletir o novo rated
-    if (typeof _portfolioCurrentView !== "undefined" && _portfolioCurrentView === "card") {
-      renderPortfolioCards(typeof portfolioFilterPlants === "function"
-        ? portfolioFilterPlants(lastValidPlants) : lastValidPlants);
-    }
-
-    plantEditSetFeedback(feedback, "Salvo.", "ok");
-  } catch (err) {
-    console.error("[PlantEdit] erro ao salvar rated power:", err);
-    plantEditSetFeedback(feedback, err?.message || "Erro ao salvar.", "err");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-async function saveDeviceName(deviceId) {
-  const row = getPlantEditDeviceRow(deviceId);
-  const input = row?.querySelector(".plant-edit-device-name");
-  const feedback = row?.querySelector(".plant-edit-device-feedback");
-  const button = row?.querySelector(".plant-edit-device-save");
-  const newName = (input?.value || "").trim();
-
-  if (!currentEditPlantId || !row) return;
-  if (!newName) {
-    plantEditSetFeedback(feedback, "Informe um nome.", "err");
-    input?.focus();
-    return;
-  }
-
-  if (button) button.disabled = true;
-  plantEditSetFeedback(feedback, "Salvando...");
-
-  try {
-    const res = await apiFetch(`/plants/${encodeURIComponent(currentEditPlantId)}/devices/${encodeURIComponent(deviceId)}/name`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display_name: newName })
-    });
-    const data = await res.json().catch(() => ({}));
-    const parsed = normalizeApiPayload(data) || {};
-
-    if (!res.ok || parsed.ok === false) {
-      throw new Error(parsed.error || `Falha ao salvar (${res.status})`);
-    }
-
-    const savedName = parsed.display_name || newName;
-    if (input) input.value = savedName;
-    plantEditSetFeedback(feedback, "Salvo.", "ok");
-  } catch (err) {
-    console.error("[PlantEdit] erro ao salvar nome do dispositivo:", err);
-    plantEditSetFeedback(feedback, err?.message || "Erro.", "err");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-function getPlantPageUrl(plantId, { hash = "", action = "" } = {}) {
-  const params = new URLSearchParams({ plant_id: String(plantId) });
-  if (action) params.set("action", action);
-  return `plant.html?${params.toString()}${hash || ""}`;
-}
-
-function navigateToPlantPage(plantId, options = {}) {
-  if (plantId == null) return;
-  window.location.href = getPlantPageUrl(plantId, options);
-}
-
-function ensurePortfolioPlantActionMenu() {
-  let menu = document.getElementById("portfolioPlantActionMenu");
-  if (!menu) {
-    menu = document.createElement("div");
-    menu.id = "portfolioPlantActionMenu";
-    menu.className = "portfolio-plant-action-menu hidden";
-    menu.setAttribute("role", "menu");
-    document.body.appendChild(menu);
-  }
-
-  if (!_portfolioActionMenuWired) {
-    menu.addEventListener("click", event => event.stopPropagation());
-    document.addEventListener("click", event => {
-      if (menu.classList.contains("hidden")) return;
-      if (menu.contains(event.target) || _portfolioActionMenuButton?.contains?.(event.target)) return;
-      closePortfolioPlantActionMenu();
-    });
-    document.addEventListener("keydown", event => {
-      if (event.key === "Escape") closePortfolioPlantActionMenu();
-    });
-    window.addEventListener("resize", closePortfolioPlantActionMenu);
-    window.addEventListener("scroll", closePortfolioPlantActionMenu, true);
-    _portfolioActionMenuWired = true;
-  }
-
-  return menu;
-}
-
-function positionPortfolioPlantActionMenu(menu, button) {
-  if (!menu || !button) return;
-
-  const rect = button.getBoundingClientRect();
-  menu.classList.remove("hidden");
-
-  const width = menu.offsetWidth || 260;
-  const height = menu.offsetHeight || 320;
-  const margin = 12;
-
-  let left = rect.left;
-  let top = rect.bottom + 8;
-
-  if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
-  if (top + height > window.innerHeight - margin) top = rect.top - height - 8;
-
-  menu.style.left = `${Math.max(margin, left)}px`;
-  menu.style.top = `${Math.max(margin, top)}px`;
-}
-
-function buildPortfolioPlantActionItems() {
-  return [
-    { action: "open", icon: "fa-up-right-from-square", label: "Abrir usina / Ver supervisório" },
-    { action: "edit", icon: "fa-pen-to-square", label: "Editar dados da usina" },
-    { action: "devices", icon: "fa-microchip", label: "Gerenciar dispositivos" },
-    { type: "separator" },
-    { action: "inverters", icon: "fa-bolt", label: "Gerenciar inversores / strings" },
-    { action: "relay", icon: "fa-tower-broadcast", label: "Gerenciar relé" },
-    { action: "multimeter", icon: "fa-gauge-high", label: "Gerenciar multimedidor" },
-    { action: "trackers", icon: "fa-satellite-dish", label: "Gerenciar trackers" },
-    { type: "separator" },
-    { action: "events", icon: "fa-triangle-exclamation", label: "Ver eventos/alarmes" },
-    { action: "datastudio", icon: "fa-flask-vial", label: "Abrir Data Studio da usina" },
-    { action: "command", icon: "fa-terminal", label: "Console de comandos" }
-  ];
-}
-
-function renderPortfolioPlantActionMenu(menu, plantId, plantName) {
-  menu.innerHTML = "";
-  const header = document.createElement("div");
-  header.className = "portfolio-plant-action-menu__header";
-  header.textContent = plantName || `Usina ${plantId}`;
-  menu.appendChild(header);
-
-  buildPortfolioPlantActionItems().forEach(item => {
-    if (item.type === "separator") {
-      const sep = document.createElement("div");
-      sep.className = "portfolio-plant-action-menu__separator";
-      sep.setAttribute("role", "separator");
-      menu.appendChild(sep);
-      return;
-    }
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "portfolio-plant-action-menu__item";
-    btn.setAttribute("role", "menuitem");
-    btn.dataset.action = item.action;
-    btn.innerHTML = `<i class="fa-solid ${item.icon}" aria-hidden="true"></i><span>${escapeHtml(item.label)}</span>`;
-    btn.addEventListener("click", () => runPortfolioPlantAction(item.action, plantId, plantName));
-    menu.appendChild(btn);
-  });
-}
-
-function openPortfolioPlantActionMenu(event, plantId, plantName) {
-  event?.preventDefault();
-  event?.stopPropagation();
-
-  const button = event?.currentTarget;
-  const menu = ensurePortfolioPlantActionMenu();
-  const sameButtonOpen =
-    _portfolioActionMenuButton === button &&
-    !menu.classList.contains("hidden");
-
-  closePortfolioPlantActionMenu();
-  if (sameButtonOpen) return;
-
-  _portfolioActionMenuButton = button;
-  _portfolioActionMenuContext = { plantId, plantName };
-  renderPortfolioPlantActionMenu(menu, plantId, plantName);
-  button?.setAttribute("aria-expanded", "true");
-  positionPortfolioPlantActionMenu(menu, button);
-}
-
-function closePortfolioPlantActionMenu() {
-  const menu = document.getElementById("portfolioPlantActionMenu");
-  if (menu) {
-    menu.classList.add("hidden");
-    menu.innerHTML = "";
-  }
-  _portfolioActionMenuButton?.setAttribute("aria-expanded", "false");
-  _portfolioActionMenuButton = null;
-  _portfolioActionMenuContext = null;
-}
-
-function openPortfolioEventsForPlant(plantId) {
-  wireEventsFiltersOnce();
-  populateEventsPlantSelect(lastValidPlants);
-
-  const ui = getEventsUIElements();
-  if (ui.plantSelect) ui.plantSelect.value = String(plantId);
-  if (ui.equipmentSelect) ui.equipmentSelect.value = "all";
-  if (ui.desc) ui.desc.value = "";
-  if (ui.typeSelect) ui.typeSelect.value = "all";
-  if (ui.statusSelect) ui.statusSelect.value = "all";
-  if (ui.severitySelect) ui.severitySelect.value = "all";
-  ensureDefaultEventsDateTimes();
-
-  EVENTS_STATE.page = 1;
-  showView("events");
-  void refreshEventsEquipmentOptionsForPlant(plantId);
-}
-
-function openPortfolioDataStudioForPlant(plantId) {
-  showView("datastudio");
-  wireDataStudioOnce();
-  populateDataStudioPlantSelect(lastValidPlants);
-
-  const ui = getDataStudioUIElements();
-  if (ui.plantSelect) ui.plantSelect.value = String(plantId);
-  if (ui.dataKindSelect) ui.dataKindSelect.value = "all";
-  if (ui.sourceSelect) ui.sourceSelect.value = "all";
-  if (ui.searchInput) ui.searchInput.value = "";
-
-  DATASTUDIO_STATE.selectedPlantId = String(plantId);
-  DATASTUDIO_STATE.selectedTags = [];
-  DATASTUDIO_STATE.availableTags = [];
-  DATASTUDIO_STATE.selectionId = null;
-  DATASTUDIO_STATE.chartData = null;
-  DATASTUDIO_STATE.selectedDataKind = "all";
-  DATASTUDIO_STATE.selectedSource = "all";
-  DATASTUDIO_STATE.selectedContext = "all";
-  DATASTUDIO_STATE.searchText = "";
-  DATASTUDIO_STATE.catalogOpen = true;
-  DATASTUDIO_STATE.catalogConfirmed = false;
-  DATASTUDIO_STATE.forceHeroState = false;
-
-  if (ui.contextSelect) {
-    ui.contextSelect.innerHTML = "";
-    const opt = document.createElement("option");
-    opt.value = "all";
-    opt.textContent = "Todos contextos";
-    ui.contextSelect.appendChild(opt);
-    ui.contextSelect.value = "all";
-  }
-
-  renderDataStudioTagsTable([]);
-  renderDataStudioChart(null);
-  updateSelectedTagsCounter();
-  updateDataStudioExportButton();
-  updateDataStudioStageUI();
-  fetchDataStudioTags();
-}
-
-function runPortfolioPlantAction(action, plantId, plantName) {
-  closePortfolioPlantActionMenu();
-
-  switch (action) {
-    case "open":
-      navigateToPlantPage(plantId);
-      break;
-    case "edit":
-      openPlantEditModal(null, plantId, plantName, { mode: "plant" });
-      break;
-    case "devices":
-      openPlantEditModal(null, plantId, plantName, { mode: "devices" });
-      break;
-    case "inverters":
-      navigateToPlantPage(plantId, { hash: "#sec-inverters" });
-      break;
-    case "relay":
-      navigateToPlantPage(plantId, { hash: "#sec-relay" });
-      break;
-    case "multimeter":
-      navigateToPlantPage(plantId, { hash: "#sec-multimeter" });
-      break;
-    case "trackers":
-      navigateToPlantPage(plantId, { hash: "#sec-trackers" });
-      break;
-    case "events":
-      openPortfolioEventsForPlant(plantId);
-      break;
-    case "datastudio":
-      openPortfolioDataStudioForPlant(plantId);
-      break;
-    case "command":
-      navigateToPlantPage(plantId, { action: "command" });
-      break;
-  }
-}
 
 function portfolioSetView(view) {
   _portfolioCurrentView = view;
@@ -4171,11 +3796,9 @@ function updatePortfolioCardAlarms() {
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
       || null;
     const isOff = card.classList.contains("plant-card--offline");
-    const kind = card.dataset.plantKind || "";
-    const isStandby = !sev && kind === "standby";
-    card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}${isStandby ? " standby-card" : ""}`;
+    card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}`;
     const icon = card.querySelector(".plant-card__icon");
-    if (icon) icon.className = sev ? `plant-card__icon alarm-${sev}` : `plant-card__icon${isStandby ? " standby-icon" : ""}`;
+    if (icon) icon.className = sev ? `plant-card__icon alarm-${sev}` : "plant-card__icon";
   });
 }
 
@@ -4195,7 +3818,7 @@ function renderPortfolioCards(plants) {
 
   validPlants.forEach(plant => {
     const plantId = plant.power_plant_id ?? plant.plant_id ?? plant.id;
-    const plantName = String(plant.power_plant_name ?? plant.plant_name ?? plant.name ?? "\u2014");
+    const plantName = plant.power_plant_name ?? plant.plant_name ?? plant.name ?? "\u2014";
 
     const alarmSeverity = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId))
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantName)) || null;
@@ -4221,10 +3844,8 @@ function renderPortfolioCards(plants) {
 
     const offlineClass = isOffline ? " plant-card--offline" : "";
     const alarmSuffix  = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
-    const standbyIcon  = (!alarmSeverity && plantState.kind === "standby") ? " standby-icon" : "";
-    const iconClass    = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : `plant-card__icon${standbyIcon}`;
-    const standbyCard  = (!alarmSeverity && plantState.kind === "standby") ? " standby-card" : "";
-    const cardClass    = `plant-card${offlineClass}${alarmSuffix}${standbyCard}`;
+    const iconClass    = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
+    const cardClass    = `plant-card${offlineClass}${alarmSuffix}`;
     const canvasId = "mini-chart-" + plantId;
 
     const card = document.createElement("div");
@@ -4233,12 +3854,11 @@ function renderPortfolioCards(plants) {
     card.setAttribute("tabindex", "0");
     card.dataset.plantId = plantId;
     card.dataset.plantName = plantName;
-    card.dataset.plantKind = plantState.kind;
 
     card.innerHTML = `
       <div class="plant-card__top">
         <div class="${iconClass}"><i class="fa-solid fa-seedling"></i></div>
-        <div class="plant-card__name">${escapeHtml(plantName)}</div>
+        <div class="plant-card__name">${plantName}</div>
       </div>
       <div class="plant-card__stats">
         <div class="plant-card__stat">
@@ -4277,26 +3897,19 @@ function renderPortfolioCards(plants) {
         </div>
       </div>
       <div class="plant-card__status">
-        <button class="plant-card__edit-btn" type="button" data-plant-id="${escapeHtml(plantId)}" title="Ações da usina" aria-label="Ações da usina" aria-haspopup="menu" aria-expanded="false">
-          <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <path d="M10.5 3.5 L2.5 11.5 L2 15.5 L6 15 L14 7 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" fill="currentColor" fill-opacity="0.12"/>
-            <path d="M8.5 5.5 L12 9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-            <path d="M13 2.5 L15 4.5 L14 7 L10.5 3.5 Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="0.3"/>
-          </svg>
-        </button>
         <div class="${statusDotClass}"></div>
         <span class="plant-card__status-text">${statusText}</span>
       </div>
+      <button
+        class="plant-card__edit-btn"
+        title="Editar usina"
+        data-edit-plant-id="${plantId}"
+        aria-label="Editar usina"
+        style="display:none;"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+      </button>
     `;
-
-    card.querySelector(".plant-card__edit-btn")?.addEventListener("click", event => {
-      openPortfolioPlantActionMenu(event, plantId, card.dataset.plantName || plantName);
-    });
-    card.querySelector(".plant-card__edit-btn")?.addEventListener("keydown", event => {
-      if (event.key === "Enter" || event.key === " ") {
-        openPortfolioPlantActionMenu(event, plantId, card.dataset.plantName || plantName);
-      }
-    });
 
     const openPlant = () => {
       if (plantId != null) window.location.href = `plant.html?plant_id=${encodeURIComponent(plantId)}`;
@@ -4305,6 +3918,17 @@ function renderPortfolioCards(plants) {
     card.addEventListener("keydown", e => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPlant(); }
     });
+
+    const _u = JSON.parse(localStorage.getItem("user") || "{}");
+    const _canEdit = _u.is_superuser === true || _u.role_key === "admin_customer";
+    const _editBtn = card.querySelector(".plant-card__edit-btn");
+    if (_editBtn && _canEdit) {
+      _editBtn.style.display = "";
+      _editBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openPlantEditModal(plantId, plantName, ratedPower);
+      });
+    }
 
     grid.appendChild(card);
     chartTargets.push({ canvasId, plantId });
@@ -4544,6 +4168,601 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
   });
 
   _portfolioMiniCharts.set(plantId, chart);
+}
+
+// =============================================================================
+// MODAL EDITAR USINA
+// =============================================================================
+let _PLANT_EDIT_ID = null;
+
+// ─── Gerenciar Usina Modal ───────────────────────────────────────────────────
+
+function switchPlantEditTab(tab) {
+  document.querySelectorAll(".pem-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".pem-tab-panel").forEach(p => p.classList.add("hidden"));
+  const panel = document.getElementById(
+    tab === "info" ? "pemTabInfo" : tab === "devices" ? "pemTabDevices" : "pemTabCabins"
+  );
+  if (panel) panel.classList.remove("hidden");
+  if (tab === "devices" && _PLANT_EDIT_ID) _pemLoadDevices(_PLANT_EDIT_ID);
+  if (tab === "cabins"  && _PLANT_EDIT_ID) _pemLoadCabins(_PLANT_EDIT_ID);
+}
+
+function openPlantEditModal(plantId, plantName, ratedPower) {
+  _PLANT_EDIT_ID = plantId;
+  const nameInput  = document.getElementById("plantEditNameInput");
+  const ratedInput = document.getElementById("plantEditRatedInput");
+  if (nameInput)  nameInput.value  = plantName  || "";
+  if (ratedInput) ratedInput.value = ratedPower != null ? Number(ratedPower).toFixed(1) : "";
+  ["plantEditNameFeedback","plantEditRatedFeedback","pemAddDeviceFeedback","pemAddCabinFeedback"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = ""; el.className = "plant-edit-feedback"; }
+  });
+  switchPlantEditTab("info");
+  const modal = document.getElementById("plantEditModal");
+  if (modal) { modal.classList.remove("hidden"); modal.setAttribute("aria-hidden","false"); document.body.classList.add("plant-edit-modal-open"); }
+}
+
+function closePlantEditModal() {
+  const modal = document.getElementById("plantEditModal");
+  if (modal) { modal.classList.add("hidden"); modal.setAttribute("aria-hidden","true"); document.body.classList.remove("plant-edit-modal-open"); }
+  _PLANT_EDIT_ID = null;
+}
+
+async function _pemLoadDevices(plantId) {
+  const list = document.getElementById("pemDevicesList");
+  if (!list) return;
+  list.innerHTML = `<div class="plant-edit-empty">Carregando…</div>`;
+  try {
+    // Carregar device types para o select (uma vez)
+    const selEl = document.getElementById("pemDeviceTypeSelect");
+    if (selEl && selEl.options.length <= 1) {
+      try {
+        const dtRes  = await apiFetch(`/plants/${plantId}/device-types`);
+        const dtData = await dtRes.json();
+        (dtData?.items || []).forEach(dt => {
+          const opt = document.createElement("option");
+          opt.value       = dt.id;
+          opt.textContent = dt.name;
+          selEl.appendChild(opt);
+        });
+      } catch(_) {}
+    }
+    // Carregar dispositivos
+    const res   = await apiFetch(`/plants/${plantId}/devices/options`);
+    const data  = await res.json();
+    const items = data?.items || [];
+    if (!items.length) { list.innerHTML = `<div class="plant-edit-empty">Nenhum dispositivo.</div>`; return; }
+    const canCmd = _canSendCommand();
+    list.innerHTML = items.map(d => `
+      <div class="plant-edit-device-row" data-device-id="${d.device_id}">
+        <div class="plant-edit-device-info">
+          <span class="plant-edit-device-type">${d.device_type || "—"}</span>
+          <span class="plant-edit-device-meta">#${d.device_id}</span>
+        </div>
+        <div class="plant-edit-inline">
+          <input class="plant-edit-device-name" type="text"
+            value="${(d.device_name || "").replace(/"/g,'&quot;')}"
+            placeholder="Nome do dispositivo"/>
+          <button class="plant-edit-device-save" type="button" title="Salvar nome">
+            <i class="fa-solid fa-check"></i>
+          </button>
+          ${canCmd ? _pemRenderCommandControl(d.device_type || "", d.device_id) : ""}
+          <button class="pem-del-device-btn" type="button" title="Excluir dispositivo"
+            data-device-id="${d.device_id}">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+        <div class="plant-edit-device-feedback" id="pem-devfb-${d.device_id}"></div>
+      </div>`).join("");
+    _pemWireCommandButtons(list);
+    list.querySelectorAll(".plant-edit-device-row").forEach(row => {
+      const did     = row.dataset.deviceId;
+      const inp     = row.querySelector(".plant-edit-device-name");
+      const saveBtn = row.querySelector(".plant-edit-device-save");
+      const delBtn  = row.querySelector(".pem-del-device-btn");
+      const fb      = row.querySelector(".plant-edit-device-feedback");
+      saveBtn?.addEventListener("click", async () => {
+        const n = inp.value.trim();
+        if (!n) { fb.textContent = "Nome vazio."; fb.className = "plant-edit-device-feedback err"; return; }
+        saveBtn.disabled = true; fb.textContent = "Salvando…"; fb.className = "plant-edit-device-feedback";
+        try {
+          const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices/${did}/name`, {
+            method: "PATCH", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({display_name: n})
+          });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-device-feedback ok";
+        } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; }
+        finally    { saveBtn.disabled = false; }
+      });
+      delBtn?.addEventListener("click", async () => {
+        if (!confirm(`Excluir dispositivo #${did}? Esta ação desativa o dispositivo.`)) return;
+        delBtn.disabled = true; fb.textContent = "Excluindo…"; fb.className = "plant-edit-device-feedback";
+        try {
+          const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices/${did}`, { method: "DELETE" });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          fb.textContent = "✓ Removido!"; fb.className = "plant-edit-device-feedback ok";
+          setTimeout(() => row.remove(), 900);
+        } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; delBtn.disabled = false; }
+      });
+    });
+  } catch(e) {
+    console.error("[_pemLoadDevices]", e);
+    list.innerHTML = `<div class="plant-edit-empty plant-edit-empty--error">Erro ao carregar.</div>`;
+  }
+}
+
+async function _pemLoadCabins(plantId) {
+  const list = document.getElementById("pemCabinsList");
+  if (!list) return;
+  list.innerHTML = `<div class="plant-edit-empty">Carregando…</div>`;
+  try {
+    const res  = await apiFetch(`/plants/${plantId}/cabin-groups`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const items = data?.items || [];
+    if (!items.length) { list.innerHTML = `<div class="plant-edit-empty">Nenhuma cabine.</div>`; return; }
+    list.innerHTML = items.map(c => `
+      <div class="plant-edit-device-row">
+        <div class="plant-edit-device-info">
+          <span class="plant-edit-device-type">${c.name}</span>
+          <span class="plant-edit-device-meta">${c.inverter_count} inv.</span>
+        </div>
+      </div>`).join("");
+  } catch(e) {
+    console.error("[_pemLoadCabins]", e);
+    list.innerHTML = `<div class="plant-edit-empty plant-edit-empty--error">Erro ao carregar cabines.</div>`;
+  }
+}
+
+async function pemAddDevice() {
+  if (!_PLANT_EDIT_ID) return;
+  const selEl  = document.getElementById("pemDeviceTypeSelect");
+  const nameEl = document.getElementById("pemDeviceNameInput");
+  const fb     = document.getElementById("pemAddDeviceFeedback");
+  const dtId   = selEl?.value;
+  const name   = nameEl?.value?.trim();
+  if (!dtId) { fb.textContent = "Selecione o tipo."; fb.className = "plant-edit-feedback err"; return; }
+  if (!name) { fb.textContent = "Nome obrigatório."; fb.className = "plant-edit-feedback err"; return; }
+  fb.textContent = "Adicionando…"; fb.className = "plant-edit-feedback";
+  try {
+    const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({device_type_id: parseInt(dtId), name, display_name: name})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+    fb.textContent = `✓ Dispositivo #${d.device_id} adicionado.`; fb.className = "plant-edit-feedback ok";
+    if (nameEl) nameEl.value = "";
+    _pemLoadDevices(_PLANT_EDIT_ID);
+  } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
+}
+
+async function pemAddCabin() {
+  if (!_PLANT_EDIT_ID) return;
+  const nameEl = document.getElementById("pemCabinNameInput");
+  const fb     = document.getElementById("pemAddCabinFeedback");
+  const name   = nameEl?.value?.trim();
+  if (!name) { fb.textContent = "Nome obrigatório."; fb.className = "plant-edit-feedback err"; return; }
+  fb.textContent = "Adicionando…"; fb.className = "plant-edit-feedback";
+  try {
+    const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/cabin-groups`, {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({name, code: name})
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+    fb.textContent = `✓ Cabine "${d.name}" criada.`; fb.className = "plant-edit-feedback ok";
+    if (nameEl) nameEl.value = "";
+    _pemLoadCabins(_PLANT_EDIT_ID);
+  } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
+}
+
+async function savePlantName() {
+  if (!_PLANT_EDIT_ID) return;
+  const inp = document.getElementById("plantEditNameInput");
+  const fb  = document.getElementById("plantEditNameFeedback");
+  const n   = inp?.value?.trim();
+  if (!n) { fb.textContent = "Nome vazio."; fb.className = "plant-edit-feedback err"; return; }
+  fb.textContent = "Salvando…"; fb.className = "plant-edit-feedback";
+  try {
+    const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/name`, {
+      method: "PATCH", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({plant_name: n})
+    });
+    if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+    fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-feedback ok";
+  } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
+}
+
+async function savePlantRatedPower() {
+  if (!_PLANT_EDIT_ID) return;
+  const inp = document.getElementById("plantEditRatedInput");
+  const fb  = document.getElementById("plantEditRatedFeedback");
+  const val = parseFloat(inp?.value);
+  if (isNaN(val) || val < 0) { fb.textContent = "Valor inválido."; fb.className = "plant-edit-feedback err"; return; }
+  fb.textContent = "Salvando…"; fb.className = "plant-edit-feedback";
+  try {
+    const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/name`, {
+      method: "PATCH", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({capacity_dc: val})
+    });
+    if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+    fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-feedback ok";
+  } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
+}
+
+// =============================================================================
+// DEVICE COMMAND INFRASTRUCTURE — PEM context (resumo.html)
+// (Versão adaptada de plant.js; usa _PLANT_EDIT_ID em vez de PLANT_ID)
+// =============================================================================
+
+const _PEM_CMD_STATE = new Map();
+
+function _pemCmdKey(deviceType, deviceId) {
+  return `${String(deviceType || "")}:${String(deviceId ?? "")}`;
+}
+function _pemCmdGetState(deviceType, deviceId, fallback = "off") {
+  return _PEM_CMD_STATE.get(_pemCmdKey(deviceType, deviceId)) || fallback;
+}
+function _pemCmdSetState(deviceType, deviceId, state) {
+  if (state !== "on" && state !== "off") return;
+  _PEM_CMD_STATE.set(_pemCmdKey(deviceType, deviceId), state);
+}
+function _pemCmdApplyVisual(deviceType, deviceId, state) {
+  const key = _pemCmdKey(deviceType, deviceId);
+  document.querySelectorAll(`.device-command-control[data-device-key="${key}"]`).forEach(el => {
+    el.classList.remove("is-on", "is-off", "is-reset-flash");
+    el.classList.add(state === "on" ? "is-on" : "is-off");
+  });
+}
+
+function _pemRenderCommandControl(deviceType, deviceId) {
+  const safeType = String(deviceType || "");
+  const safeId   = String(deviceId ?? "");
+  const state    = _pemCmdGetState(safeType, safeId, "off");
+  const key      = _pemCmdKey(safeType, safeId);
+  return `
+    <div class="device-command-control ${state === "on" ? "is-on" : "is-off"}"
+         data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}">
+      <button type="button" class="device-command-trigger"
+              data-device-key="${key}" data-device-type="${safeType}" data-device-id="${safeId}"
+              aria-label="Comandos do dispositivo">
+        <span class="device-command-switch" aria-hidden="true">
+          <svg class="device-command-switch-track" viewBox="0 0 72 40" preserveAspectRatio="none" focusable="false" aria-hidden="true">
+            <rect class="device-command-switch-track__outer" x="2" y="4" width="68" height="32" rx="16"></rect>
+            <rect class="device-command-switch-track__inner" x="4.5" y="6.5" width="63" height="27" rx="13.5"></rect>
+            <path class="device-command-switch-track__pulse" d="M14 21h10l4-6 6 12 5-8h18"></path>
+          </svg>
+          <span class="device-command-switch-thumb">
+            <svg class="device-command-switch-glyph" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+              <use href="#device-command-switch-glyph"></use>
+            </svg>
+          </span>
+        </span>
+      </button>
+    </div>`;
+}
+
+function _pemWireCommandButtons(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll(".device-command-trigger").forEach(btn => {
+    if (btn.dataset.wiredPemCmd === "true") return;
+    btn.dataset.wiredPemCmd = "true";
+    btn.addEventListener("click", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      _pemOpenConsole({ deviceType: btn.dataset.deviceType || "", deviceId: btn.dataset.deviceId || "" });
+    });
+  });
+}
+
+function _pemEnsureAuthModal() {
+  if (document.getElementById("deviceCommandAuthModal")) return;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <div id="deviceCommandAuthModal" class="device-command-modal hidden">
+      <div class="device-command-modal-card">
+        <h3>Autenticação</h3>
+        <p id="deviceCommandAuthLabel">Confirme usuário e senha</p>
+        <input id="deviceCommandUser" type="text" placeholder="Usuário" autocomplete="username" />
+        <input id="deviceCommandPass" type="password" placeholder="Senha" autocomplete="current-password" />
+        <div class="device-command-modal-actions">
+          <button id="deviceCommandCancelBtn" type="button">Cancelar</button>
+          <button id="deviceCommandConfirmBtn" type="button">Confirmar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+}
+
+function _pemEnsureConsole() {
+  if (document.getElementById("cmdConsoleOverlay")) return;
+  const el = document.createElement("div");
+  el.innerHTML = `
+    <div id="cmdConsoleOverlay" class="cmd-console-overlay hidden" role="dialog" aria-modal="true" aria-label="Console de Comandos">
+      <div class="cmd-console">
+        <div class="cmd-console__header">
+          <div class="cmd-console__title-group">
+            <div class="cmd-console__icon"><i class="fa-solid fa-terminal"></i></div>
+            <div>
+              <div class="cmd-console__label">Console de Comandos</div>
+              <div class="cmd-console__device-name" id="cmdConsoleDeviceName">—</div>
+            </div>
+          </div>
+          <button class="cmd-console__close" id="cmdConsoleClose" aria-label="Fechar console">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+        <div class="cmd-console__state-row">
+          <span class="cmd-console__state-dot is-unknown" id="cmdConsoleStateDot"></span>
+          <span class="cmd-console__state-text" id="cmdConsoleStateText">Estado desconhecido</span>
+        </div>
+        <div class="cmd-console__cmds">
+          <button class="cmd-console__cmd cmd-console__cmd--on" id="cmdConsoleBtnOn">
+            <i class="fa-solid fa-power-off"></i>
+            <span class="cmd-console__cmd-label">ON</span>
+            <span class="cmd-console__cmd-desc">Ligar equipamento</span>
+          </button>
+          <button class="cmd-console__cmd cmd-console__cmd--off" id="cmdConsoleBtnOff">
+            <i class="fa-solid fa-stop"></i>
+            <span class="cmd-console__cmd-label">OFF</span>
+            <span class="cmd-console__cmd-desc">Desligar equipamento</span>
+          </button>
+          <button class="cmd-console__cmd cmd-console__cmd--reset" id="cmdConsoleBtnReset">
+            <i class="fa-solid fa-rotate"></i>
+            <span class="cmd-console__cmd-label">RESET</span>
+            <span class="cmd-console__cmd-desc">Reiniciar equipamento</span>
+          </button>
+        </div>
+        <div class="cmd-console__power-section">
+          <div class="cmd-console__power-label"><i class="fa-solid fa-sliders"></i> Setar Potência Ativa</div>
+          <div class="cmd-console__power-row">
+            <input id="cmdConsolePowerInput" class="cmd-console__power-input" type="number" min="0" step="0.1" placeholder="kW" aria-label="Potência em kW" />
+            <span class="cmd-console__power-unit">kW</span>
+            <button class="cmd-console__power-btn" id="cmdConsoleBtnSetPower">
+              <i class="fa-solid fa-paper-plane"></i> Setar
+            </button>
+          </div>
+        </div>
+        <div class="cmd-console__feedback hidden" id="cmdConsoleFeedback">
+          <div class="cmd-console__feedback-inner">
+            <span class="cmd-console__feedback-icon" id="cmdConsoleFeedbackIcon"></span>
+            <span class="cmd-console__feedback-text" id="cmdConsoleFeedbackText"></span>
+          </div>
+        </div>
+        <div class="cmd-console__footer">
+          <i class="fa-solid fa-lock"></i>
+          Todos os comandos requerem autenticação antes de serem executados.
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  document.getElementById("cmdConsoleOverlay").addEventListener("click", e => {
+    if (e.target === e.currentTarget) _pemCloseConsole();
+  });
+  document.getElementById("cmdConsoleClose").addEventListener("click", _pemCloseConsole);
+}
+
+function _pemOpenConsole({ deviceType, deviceId }) {
+  _pemEnsureConsole();
+  _pemEnsureAuthModal();
+  const overlay    = document.getElementById("cmdConsoleOverlay");
+  const nameEl     = document.getElementById("cmdConsoleDeviceName");
+  const dotEl      = document.getElementById("cmdConsoleStateDot");
+  const textEl     = document.getElementById("cmdConsoleStateText");
+  const feedbackEl = document.getElementById("cmdConsoleFeedback");
+  if (!overlay) return;
+
+  nameEl.textContent = `${String(deviceType || "").toUpperCase()} — ID ${deviceId}`;
+  const state = _pemCmdGetState(deviceType, deviceId, "off");
+  dotEl.className = "cmd-console__state-dot " + (state === "on" ? "is-on" : "is-off");
+  textEl.textContent = state === "on" ? "ESTADO ATUAL: LIGADO" : "ESTADO ATUAL: DESLIGADO";
+  if (feedbackEl) feedbackEl.classList.add("hidden");
+
+  // Reclona botões para limpar handlers anteriores
+  ["cmdConsoleBtnOn","cmdConsoleBtnOff","cmdConsoleBtnReset","cmdConsoleBtnSetPower"].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) { const c = btn.cloneNode(true); btn.parentNode.replaceChild(c, btn); }
+  });
+  const pwrInput = document.getElementById("cmdConsolePowerInput");
+  if (pwrInput) pwrInput.value = "";
+
+  const dispatch = (action, value) => {
+    _pemCloseConsole();
+    _pemAuthFlow({ deviceType, deviceId, action, value });
+  };
+  document.getElementById("cmdConsoleBtnOn").addEventListener("click",    () => dispatch("on"));
+  document.getElementById("cmdConsoleBtnOff").addEventListener("click",   () => dispatch("off"));
+  document.getElementById("cmdConsoleBtnReset").addEventListener("click", () => dispatch("reset"));
+  document.getElementById("cmdConsoleBtnSetPower").addEventListener("click", () => {
+    const input = document.getElementById("cmdConsolePowerInput");
+    const val = input ? parseFloat(input.value) : NaN;
+    if (isNaN(val) || val < 0) { if (input) input.focus(); return; }
+    dispatch("set_power", val);
+  });
+
+  overlay.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function _pemCloseConsole() {
+  const overlay = document.getElementById("cmdConsoleOverlay");
+  if (overlay) overlay.classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+function _pemAuthFlow({ deviceType, deviceId, action, value }) {
+  _pemEnsureAuthModal();
+  const auth       = document.getElementById("deviceCommandAuthModal");
+  const authLabel  = document.getElementById("deviceCommandAuthLabel");
+  const cancelBtn  = document.getElementById("deviceCommandCancelBtn");
+  const confirmBtn = document.getElementById("deviceCommandConfirmBtn");
+  const userInput  = document.getElementById("deviceCommandUser");
+  const passInput  = document.getElementById("deviceCommandPass");
+  if (!auth || !confirmBtn || !cancelBtn) return;
+
+  userInput.value = ""; passInput.value = "";
+  authLabel.textContent = `${String(deviceType).toUpperCase()} ${deviceId} • ${action === "set_power" ? `SET POWER → ${value} kW` : action.toUpperCase()}`;
+  auth.classList.remove("hidden");
+
+  const closeAuth = () => auth.classList.add("hidden");
+  cancelBtn.onclick = closeAuth;
+
+  function showFeedback({ success, message }) {
+    _pemEnsureConsole();
+    const overlay2   = document.getElementById("cmdConsoleOverlay");
+    const feedbackEl = document.getElementById("cmdConsoleFeedback");
+    const iconEl     = document.getElementById("cmdConsoleFeedbackIcon");
+    const textEl2    = document.getElementById("cmdConsoleFeedbackText");
+    const dotEl      = document.getElementById("cmdConsoleStateDot");
+    const stateTextEl= document.getElementById("cmdConsoleStateText");
+    const nameEl2    = document.getElementById("cmdConsoleDeviceName");
+
+    if (overlay2) { overlay2.classList.remove("hidden"); document.body.style.overflow = "hidden"; }
+    if (nameEl2) nameEl2.textContent = `${String(deviceType).toUpperCase()} — ID ${deviceId}`;
+    if (success && (action === "on" || action === "off")) {
+      _pemCmdSetState(deviceType, deviceId, action);
+      _pemCmdApplyVisual(deviceType, deviceId, action);
+      if (dotEl) dotEl.className = "cmd-console__state-dot " + (action === "on" ? "is-on" : "is-off");
+      if (stateTextEl) stateTextEl.textContent = `ESTADO ATUAL: ${action === "on" ? "LIGADO" : "DESLIGADO"}`;
+    }
+    if (feedbackEl && iconEl && textEl2) {
+      feedbackEl.classList.remove("hidden", "is-success", "is-error");
+      feedbackEl.classList.add(success ? "is-success" : "is-error");
+      iconEl.innerHTML = success ? `<i class="fa-solid fa-circle-check"></i>` : `<i class="fa-solid fa-circle-xmark"></i>`;
+      textEl2.textContent = message;
+    }
+  }
+
+  confirmBtn.onclick = async () => {
+    const username = userInput.value.trim();
+    const password = passInput.value;
+    if (!username || !password) { authLabel.textContent = "Preencha usuário e senha."; return; }
+    confirmBtn.disabled = true; confirmBtn.textContent = "Aguarde...";
+    try {
+      if (!_PLANT_EDIT_ID) throw new Error("plant_id não encontrado");
+      const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices/${deviceId}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action, username, password, requested_by: username,
+          ...(action === "set_power" && value != null ? { value } : {})
+        })
+      });
+      let data = {};
+      try { data = await r.json(); } catch (_) {}
+      closeAuth();
+      if (r.ok && data.ok) {
+        showFeedback({ success: true, message: action === "set_power" ? `Potência setada para ${value} kW com sucesso.` : `Comando ${action.toUpperCase()} enviado com sucesso.` });
+      } else {
+        showFeedback({ success: false, message: data.error || (r.status === 401 ? "Credenciais inválidas." : `Falha. (${r.status})`) });
+      }
+    } catch (err) {
+      closeAuth();
+      showFeedback({ success: false, message: `Erro: ${err.message}` });
+    } finally {
+      confirmBtn.disabled = false; confirmBtn.textContent = "Confirmar";
+    }
+  };
+}
+
+document.addEventListener("DOMContentLoaded",()=>{
+  document.querySelector(".plant-edit-modal__backdrop")?.addEventListener("click", closePlantEditModal);
+
+  // Botão "+" — só aparece para superuser / admin_customer
+  const _btnAdd = document.getElementById("btnAddPlant");
+  if (_btnAdd) {
+    const _usr = JSON.parse(localStorage.getItem("user") || "{}");
+    if (_usr.is_superuser === true || _usr.role_key === "admin_customer") {
+      _btnAdd.classList.remove("hidden");
+      _btnAdd.addEventListener("click", openPlantCreateModal);
+    }
+    // Fechar modal de criação com backdrop
+    document.getElementById("plantCreateModal")
+      ?.querySelector(".plant-edit-modal__backdrop")
+      ?.addEventListener("click", closePlantCreateModal);
+  }
+});
+
+// ─────────────────────────────────────────────────
+// CRIAR USINA
+// ─────────────────────────────────────────────────
+function openPlantCreateModal() {
+  const modal = document.getElementById("plantCreateModal");
+  if (!modal) return;
+  ["plantCreateNameInput","plantCreateDcInput","plantCreateAcInput",
+   "plantCreateLocationInput","plantCreateCustomerInput"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const fb = document.getElementById("plantCreateFeedback");
+  if (fb) { fb.textContent = ""; fb.className = "plant-edit-feedback"; }
+
+  const _u = JSON.parse(localStorage.getItem("user") || "{}");
+  const customerSection = document.getElementById("plantCreateCustomerSection");
+  if (customerSection) customerSection.style.display = _u.is_superuser ? "" : "none";
+
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("plant-edit-modal-open");
+  document.getElementById("plantCreateNameInput")?.focus();
+}
+
+function closePlantCreateModal() {
+  const modal = document.getElementById("plantCreateModal");
+  if (modal) { modal.classList.add("hidden"); modal.setAttribute("aria-hidden","true"); }
+  document.body.classList.remove("plant-edit-modal-open");
+}
+
+async function createNewPlant() {
+  const nameEl   = document.getElementById("plantCreateNameInput");
+  const dcEl     = document.getElementById("plantCreateDcInput");
+  const acEl     = document.getElementById("plantCreateAcInput");
+  const locEl    = document.getElementById("plantCreateLocationInput");
+  const custEl   = document.getElementById("plantCreateCustomerInput");
+  const fb       = document.getElementById("plantCreateFeedback");
+  const saveBtn  = document.getElementById("plantCreateSaveBtn");
+
+  const name = nameEl?.value?.trim();
+  if (!name) {
+    if (fb) { fb.textContent = "Nome da usina é obrigatório."; fb.className = "plant-edit-feedback err"; }
+    nameEl?.focus();
+    return;
+  }
+
+  const payload = { plant_name: name };
+  if (dcEl?.value)   payload.capacity_dc = parseFloat(dcEl.value);
+  if (acEl?.value)   payload.capacity_ac = parseFloat(acEl.value);
+  if (locEl?.value)  payload.location    = locEl.value.trim();
+  if (custEl?.value) payload.customer_id = parseInt(custEl.value, 10);
+
+  if (fb)      { fb.textContent = "Criando…"; fb.className = "plant-edit-feedback"; }
+  if (saveBtn) saveBtn.disabled = true;
+
+  try {
+    const res = await apiFetch("/plants", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+    if (fb) {
+      fb.textContent = `✓ Usina "${data.plant_name}" criada (ID ${data.plant_id}).`;
+      fb.className = "plant-edit-feedback ok";
+    }
+    setTimeout(async () => {
+      closePlantCreateModal();
+      try { await loadPortfolio(); } catch(_) {}
+    }, 1200);
+  } catch(e) {
+    if (fb) { fb.textContent = e.message || "Erro ao criar usina."; fb.className = "plant-edit-feedback err"; }
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
 }
 
 // wirePortfolioControls is now called synchronously inside the main DOMContentLoaded listener (above).
