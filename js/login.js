@@ -94,7 +94,9 @@ form.addEventListener("submit", async (e) => {
       id: user.id,
       username: user.username,
       customer_id: user.customer_id,
-      is_superuser: user.is_superuser === true || user.is_superuser === 1
+      is_superuser: user.is_superuser === true || user.is_superuser === 1,
+      role_key: user.role_key || "viewer",
+      permissions: user.permissions || {}
     };
 
     // 🔥 AQUI É ONDE O LOGIN "FICA SALVO"
