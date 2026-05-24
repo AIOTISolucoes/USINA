@@ -313,8 +313,15 @@
 
       <div class="ds-v2-topbar-controls">
         <div class="ds-v2-ctrl-group">
-          <span class="ds-v2-ctrl-label">USINA</span>
-          <select id="dsPlantSelect"></select>
+          <span class="ds-v2-ctrl-label">USINAS</span>
+          <div class="ds-plant-multiselect" id="dsPlantMultiselect">
+            <button class="ds-plant-multiselect__btn" type="button" id="dsPlantMultiselectBtn">
+              <span id="dsPlantMultiselectLabel">Selecione usinas</span>
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+            <div class="ds-plant-multiselect__dropdown" id="dsPlantMultiselectDropdown"></div>
+          </div>
+          <select id="dsPlantSelect" style="display:none"></select>
         </div>
 
         <div class="ds-v2-ctrl-group">
@@ -404,228 +411,29 @@
       </div>
     </div>
 
-    <!-- ZONA 3: Corpo principal (3 colunas) -->
-    <div class="ds-v2-body">
-
-      <!-- COLUNA ESQUERDA: Catálogo -->
-      <aside class="ds-v2-catalog" id="dsCatalogSection">
-        <div class="ds-v2-catalog-header">
-          <h3>Catálogo de Medidas</h3>
-          <button class="ds-v2-catalog-collapse" title="Recolher" type="button">«</button>
-        </div>
-
-        <div class="ds-v2-catalog-search">
-          <i class="fa-solid fa-magnifying-glass"></i>
-          <input id="dsSearchInput" type="text" placeholder="Buscar medida ou dispositivo..." />
-          <button class="ds-v2-filter-icon" title="Filtros" type="button">
-            <i class="fa-solid fa-sliders"></i>
-          </button>
-        </div>
-
-        <div class="ds-v2-cat-pills">
-          <button class="ds-v2-pill active" data-cat="all" type="button">Todos</button>
-          <button class="ds-v2-pill" data-cat="planta" type="button">Planta</button>
-          <button class="ds-v2-pill" data-cat="inversor" type="button">Inversores</button>
-          <button class="ds-v2-pill" data-cat="weather" type="button">Weather</button>
-          <button class="ds-v2-pill" data-cat="relay" type="button">Relé</button>
-          <button class="ds-v2-pill" data-cat="meter" type="button">Multimedidor</button>
-          <button class="ds-v2-pill" data-cat="alarm" type="button">⚠ Alarmes</button>
-        </div>
-
-        <div class="ds-v2-catalog-filters">
-          <div class="ds-v2-filter-row">
-            <div class="ds-v2-filter-group">
-              <label>Contexto</label>
-              <select id="dsContextSelect" class="ds-chip-select">
-                <option value="all">Todos contextos</option>
-              </select>
-            </div>
-            <div class="ds-v2-filter-group">
-              <label>Tipo</label>
-              <select id="dsDataKindSelect" class="ds-chip-select">
-                <option value="all">Todos tipos</option>
-                <option value="analog">Analógico</option>
-                <option value="discrete">Alarmes</option>
-              </select>
-            </div>
-          </div>
-          <div class="ds-v2-filter-row">
-            <div class="ds-v2-filter-group">
-              <label>Origem</label>
-              <select id="dsSourceSelect" class="ds-chip-select">
-                <option value="all">Todas origens</option>
-                <option value="historico">Histórico</option>
-                <option value="consolidado">Consolidado</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="ds-v2-catalog-meta">
-          <span id="dsContextInfo" class="ds-context-info"></span>
-          <div>
-            <span class="ds-v2-found-count">— medidas encontradas</span>
-            <span class="ds-v2-auto-status">Atualizacao automatica</span>
-            <button id="dsTagsApplyBtn" class="ds-v2-link-btn" title="Recarregar catalogo" type="button">Recarregar</button>
-          </div>
-        </div>
-
-        <div class="ds-v2-catalog-table-wrap">
-          <table id="dsTagsTable" class="ds-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Contexto</th>
-                <th>Descrição</th>
-                <th>Origem</th>
-                <th>Tipo</th>
-                <th>Unidade</th>
-                <th>Plant</th>
-                <th>Pathname</th>
-              </tr>
-            </thead>
-            <tbody id="dsTagsTbody"></tbody>
-          </table>
-        </div>
-
-        <div class="ds-v2-catalog-footer">
-          <span>Selecionadas: <strong id="dsSelectedCount">0</strong></span>
-          <div>
-            <button id="dsTagsClearBtn" class="btn-clear" type="button">Limpar</button>
-            <button id="dsConfirmSelectionBtn" class="btn-apply" type="button">Adicionar medidas ⊕</button>
-          </div>
-        </div>
-      </aside>
-
-      <!-- COLUNA CENTRAL: Gráfico -->
-      <div class="ds-v2-chart-col">
-
-        <!-- Empty state -->
-        <div id="dsEmptyState" class="ds-empty-state">
-          <div class="ds-empty-icon"><i class="fa-solid fa-chart-simple"></i></div>
-          <h3>Nenhuma medida selecionada</h3>
-          <p>Use o catálogo à esquerda para escolher medidas e clique em Adicionar medidas.</p>
-        </div>
-
-        <!-- Workspace -->
-        <div id="dsWorkspace" class="ds-workspace hidden">
-
-          <div class="ds-v2-chart-header">
-            <h3>Visualização das Séries</h3>
-            <div class="ds-v2-zoom-shorts">
-              <button class="ds-v2-zs" data-zoom="1h" type="button">1h</button>
-              <button class="ds-v2-zs" data-zoom="6h" type="button">6h</button>
-              <button class="ds-v2-zs" data-zoom="12h" type="button">12h</button>
-              <button class="ds-v2-zs" data-zoom="1d" type="button">1d</button>
-              <button class="ds-v2-zs active" data-zoom="7d" type="button">7d</button>
-              <button class="ds-v2-zs" data-zoom="30d" type="button">30d</button>
-              <button class="ds-v2-zs" data-zoom="all" type="button">Tudo</button>
-            </div>
-            <div class="ds-v2-chart-actions">
-              <button id="dsZoomInBtn" class="ds-zoom-btn" title="Zoom in" type="button">
-                <i class="fa-solid fa-magnifying-glass-plus"></i>
-              </button>
-              <button id="dsZoomOutBtn" class="ds-zoom-btn" title="Zoom out" type="button">
-                <i class="fa-solid fa-magnifying-glass-minus"></i>
-              </button>
-              <button id="dsZoomResetBtn" class="ds-zoom-btn" title="Resetar zoom" type="button">
-                <i class="fa-solid fa-rotate-left"></i>
-              </button>
-              <button id="dsFullscreenBtn" class="ds-zoom-btn" title="Tela cheia do grafico" aria-label="Tela cheia do grafico" aria-pressed="false" type="button">
-                <i class="fa-solid fa-expand"></i>
-              </button>
-              <button id="dsExportBtn" class="ds-export-btn" title="Exportar CSV" disabled type="button">
-                <i class="fa-solid fa-file-csv"></i>
-              </button>
-            </div>
-          </div>
-
-          <div class="ds-v2-chart-hint">
-            <span><i class="fa-solid fa-scroll"></i> Scroll para zoom</span>
-            <span class="ds-v2-hint-sep">·</span>
-            <span><i class="fa-solid fa-hand"></i> Clique e arraste para mover</span>
-            <span class="ds-v2-hint-sep">·</span>
-            <span><i class="fa-solid fa-expand"></i> Ícone de tela cheia no canto superior direito</span>
-          </div>
-
-          <div class="ds-chart-wrap" id="dsChartWrap">
-            <button id="dsFullscreenCloseBtn" class="ds-fullscreen-close" title="Voltar para tamanho normal" aria-label="Voltar para tamanho normal" type="button">
-              <i class="fa-solid fa-compress"></i>
-            </button>
-            <canvas id="dsChart"></canvas>
-          </div>
-
-          <!-- Tabela estatística -->
-          <div class="ds-v2-stats-section">
-            <div class="ds-v2-stats-left">
-              <h4>Resumo estatístico do período selecionado</h4>
-              <div class="ds-v2-stats-table-wrap">
-                <table class="ds-v2-stats-table">
-                  <thead>
-                    <tr>
-                      <th>Série</th>
-                      <th>Unidade</th>
-                      <th>Mínimo</th>
-                      <th>Máximo</th>
-                      <th>Média</th>
-                      <th>Último Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody id="dsStatsTbody">
-                    <tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div class="ds-v2-insights">
-              <h4>Insights rápidos</h4>
-              <div id="dsInsightsList" class="ds-v2-insights-list"></div>
-            </div>
-          </div>
-
-          <!-- Bulk panel (preservar IDs, compacto) -->
-          <div id="dsBulkPanel" class="ds-v2-bulk-inline hidden"></div>
-
-        </div><!-- /dsWorkspace -->
-      </div><!-- /ds-v2-chart-col -->
-
-      <!-- COLUNA DIREITA: Séries -->
-      <aside class="ds-v2-series-panel">
-        <div class="ds-v2-series-header">
-          <h3>Séries selecionadas</h3>
-          <p>Gerenciar as séries do gráfico</p>
-        </div>
-
-        <div id="dsSelectedTagsList" class="ds-v2-series-list"></div>
-
-        <button id="dsOpenTagsBtn" class="ds-v2-add-series-btn" type="button">
-          <i class="fa-solid fa-plus"></i> Adicionar medida
-        </button>
-
-        <div class="ds-v2-axes-section">
-          <h4>Eixos Y configurados</h4>
-          <div class="ds-v2-axes-chips" id="dsAxesChips"></div>
-        </div>
-      </aside>
-
-    </div><!-- /ds-v2-body -->
+    <!-- ZONA 3: Blocos por usina (gerados dinamicamente pelo JS) -->
+    <div id="dsPlantBlocks" class="ds-plant-blocks">
+      <!-- Placeholder quando nenhuma usina selecionada -->
+      <div id="dsNoPlantState" class="ds-empty-state" style="padding:60px 20px">
+        <div class="ds-empty-icon"><i class="fa-solid fa-seedling"></i></div>
+        <h3>Selecione usinas para começar</h3>
+        <p>Use o seletor acima para escolher uma ou mais usinas e visualizar dados.</p>
+      </div>
+    </div>
 
     <!-- ZONA 4: Barra de ações (rodapé) -->
     <div class="ds-v2-bottombar">
-      <button class="ds-v2-bottom-btn ds-v2-bottom-btn--primary" data-action="dsOpenTagsBtn" type="button">
-        <i class="fa-solid fa-circle-plus"></i> Adicionar medidas
-      </button>
       <button class="ds-v2-bottom-btn" data-action="dsApplyTopbarBtn" type="button">
-        <i class="fa-solid fa-star"></i> Salvar seleção
+        <i class="fa-solid fa-play"></i> Aplicar
       </button>
       <button id="dsLoadSeriesBtn" class="ds-v2-bottom-btn" type="button">
         <i class="fa-solid fa-upload"></i> Carregar seleção
       </button>
-      <button class="ds-v2-bottom-btn" id="dsExportBtnBottom" type="button" data-action="dsExportBtn">
+      <button class="ds-v2-bottom-btn" id="dsExportBtnBottom" type="button" id="dsExportBtn">
         <i class="fa-solid fa-download"></i> Exportar CSV
       </button>
-      <button class="ds-v2-bottom-btn ds-v2-bottom-btn--danger" data-action="dsTagsClearBtn" type="button">
-        <i class="fa-solid fa-trash"></i> Limpar
+      <button class="ds-v2-bottom-btn ds-v2-bottom-btn--danger" id="dsClearAllBtn" type="button">
+        <i class="fa-solid fa-trash"></i> Limpar tudo
       </button>
     </div>
 
@@ -802,17 +610,17 @@
       </div>
     </div>
 
-    <!-- DS v2 — comportamentos adicionais (não modificam app.js) -->
+    <!-- DS v2 — comportamentos do topbar (compartilhados) -->
     <script>
     document.addEventListener('DOMContentLoaded', () => {
 
-      // 1. Quick period buttons → atualiza dsStartDateInput e dsEndDateInput
+      // 1. Quick period buttons
       document.querySelectorAll('.ds-v2-quick').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.ds-v2-quick').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           const days = parseInt(btn.dataset.days);
-          if (days < 0) return; // personalizado: não sobrescrever
+          if (days < 0) return;
           const end = new Date();
           const start = new Date();
           if (days > 0) start.setDate(end.getDate() - days);
@@ -826,7 +634,7 @@
         });
       });
 
-      // 2. Mode toggle → sincroniza com select#dsModeSelect
+      // 2. Mode toggle
       document.querySelectorAll('.ds-v2-mode-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('.ds-v2-mode-btn').forEach(b => b.classList.remove('active'));
@@ -836,29 +644,7 @@
         });
       });
 
-      // 3. Category pills → filtra a tabela de tags localmente
-      document.querySelectorAll('.ds-v2-pill').forEach(pill => {
-        pill.addEventListener('click', () => {
-          document.querySelectorAll('.ds-v2-pill').forEach(p => p.classList.remove('active'));
-          pill.classList.add('active');
-          const cat = pill.dataset.cat;
-          if (typeof window.applyDataStudioTagFilters === 'function') {
-            window.applyDataStudioTagFilters();
-            return;
-          }
-          const rows = document.querySelectorAll('#dsTagsTbody tr');
-          rows.forEach(tr => {
-            if (cat === 'all') { tr.style.display = ''; return; }
-            const pathname = tr.querySelector('.ds-pathname-cell')?.textContent || tr.cells?.[7]?.textContent || '';
-            const lower = pathname.toLowerCase();
-            const map = { planta:'plant', inversor:'inv', weather:'weather', relay:'relay', meter:'meter', alarm:'alarm' };
-            const prefix = map[cat] || '';
-            tr.style.display = lower.includes(prefix) ? '' : 'none';
-          });
-        });
-      });
-
-      // 4. Delegação dos botões do rodapé (evita IDs duplicados)
+      // 3. Bottombar delegation
       document.querySelectorAll('[data-action]').forEach(el => {
         el.addEventListener('click', () => {
           const target = document.getElementById(el.dataset.action);
@@ -866,114 +652,44 @@
         });
       });
 
-      // 5. Infobar: mostrar quando dsWorkspace não tiver .hidden
-      const obs = new MutationObserver(() => {
-        const ws = document.getElementById('dsWorkspace');
-        const bar = document.querySelector('.ds-v2-infobar');
-        if (ws && bar) bar.classList.toggle('hidden', ws.classList.contains('hidden'));
-      });
-      const ws = document.getElementById('dsWorkspace');
-      if (ws) obs.observe(ws, { attributes: true, attributeFilter: ['class'] });
-
-      // 6. Catalog collapse toggle
-      const collapseBtn = document.querySelector('.ds-v2-catalog-collapse');
-      if (collapseBtn) {
-        collapseBtn.addEventListener('click', () => {
-          const catalog = document.querySelector('.ds-v2-catalog');
-          if (catalog) {
-            catalog.classList.toggle('ds-v2-catalog--collapsed');
-            collapseBtn.textContent = catalog.classList.contains('ds-v2-catalog--collapsed') ? '»' : '«';
-          }
-        });
-      }
-
-      // 7. Topbar "Aplicar": confirma seleção + salva/plota
-      // (mudar datas reseta catalogConfirmed no app.js, então precisamos re-confirmar antes de salvar)
+      // 4. Topbar "Aplicar" → salva todas as usinas
       const applyTopbarBtn = document.getElementById('dsApplyTopbarBtn');
       if (applyTopbarBtn) {
         applyTopbarBtn.addEventListener('click', () => {
-          const confirmBtn = document.getElementById('dsConfirmSelectionBtn');
-          const saveBtn = document.getElementById('dsSaveSelectionBtn');
-          // Re-confirma a seleção (define catalogConfirmed=true) antes de salvar
-          if (confirmBtn) confirmBtn.click();
-          // Se a confirmação passou (sem alert de "sem medidas"), dispara o save
-          if (saveBtn) setTimeout(() => saveBtn.click(), 0);
+          if (typeof window.applyAllPlants === 'function') window.applyAllPlants();
         });
       }
 
-      // 8. Infobar: atualizar período e usina ao mudar filtros
+      // 5. Infobar: update shared info
       function updateInfobar() {
         const si = document.getElementById('dsStartDateInput');
         const ei = document.getElementById('dsEndDateInput');
-        const plant = document.getElementById('dsPlantSelect');
         const period = document.getElementById('dsInfoPeriod');
         const plantInfo = document.getElementById('dsInfoPlant');
         const resolution = document.getElementById('dsInfoResolution');
         const agg = document.getElementById('dsAggregationSelect');
         if (period && si && ei) period.textContent = (si.value || '—') + ' → ' + (ei.value || '—');
-        if (plantInfo && plant) plantInfo.textContent = plant.options[plant.selectedIndex]?.text || '—';
+        if (plantInfo) {
+          const label = document.getElementById('dsPlantMultiselectLabel');
+          plantInfo.textContent = (label && label.textContent !== 'Selecione usinas')
+            ? label.textContent : '—';
+        }
         if (resolution && agg) resolution.textContent = agg.options[agg.selectedIndex]?.text || '—';
       }
-      ['dsStartDateInput','dsEndDateInput','dsPlantSelect','dsAggregationSelect'].forEach(id => {
+      window._dsUpdateInfobar = updateInfobar;
+      ['dsStartDateInput','dsEndDateInput','dsAggregationSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', updateInfobar);
       });
 
-      // 8. Estatísticas: preencher #dsStatsTbody após gráfico renderizar
-      window.addEventListener('load', () => {
-        const orig = window.renderDataStudioChart;
-        if (typeof orig === 'function') {
-          window.renderDataStudioChart = function(payload) {
-            orig.call(this, payload);
-            _fillDsStats(payload);
-            _fillDsAxesChips();
-            updateInfobar();
-          };
-        }
-      });
+      // 6. Infobar visibility: show when any plant has workspace visible
+      setInterval(() => {
+        const bar = document.querySelector('.ds-v2-infobar');
+        if (!bar) return;
+        const anyWorkspace = document.querySelector('.ds-workspace:not(.hidden)');
+        bar.classList.toggle('hidden', !anyWorkspace);
+      }, 500);
     });
-
-    function _fillDsStats(payload) {
-      const tbody = document.getElementById('dsStatsTbody');
-      if (!tbody) return;
-      const series = payload?.series || payload?.items || [];
-      if (!series.length) { tbody.innerHTML = '<tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>'; return; }
-      const colors = ['#4da3ff','#39e58c','#ffd84d','#ff8a65','#b39ddb'];
-      tbody.innerHTML = series.map((s, i) => {
-        const pts = (s.points || s.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v != null && isFinite(v));
-        const min = pts.length ? Math.min(...pts).toFixed(2) : '—';
-        const max = pts.length ? Math.max(...pts).toFixed(2) : '—';
-        const avg = pts.length ? (pts.reduce((a,b) => a+b,0)/pts.length).toFixed(2) : '—';
-        const last = pts.length ? pts[pts.length-1].toFixed(2) : '—';
-        const color = colors[i % colors.length];
-        return '<tr>' +
-          '<td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';margin-right:6px;"></span>'+(s.label || s.pathname || 'Série '+(i+1))+'</td>' +
-          '<td>'+(s.unit || '—')+'</td><td>'+min+'</td><td>'+max+'</td><td>'+avg+'</td><td>'+last+'</td>' +
-        '</tr>';
-      }).join('');
-
-      const il = document.getElementById('dsInsightsList');
-      if (il && series.length) {
-        const first = series[0];
-        const pts = (first.points || first.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v!=null&&isFinite(v));
-        const peak = pts.length ? Math.max(...pts).toFixed(1) : '—';
-        il.innerHTML =
-          '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Pico de <strong>'+(first.label||'Série 1')+'</strong>: <strong>'+peak+' '+(first.unit||'')+'</strong></span></div>' +
-          '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Total de séries: <strong>'+series.length+'</strong></span></div>';
-      }
-    }
-
-    function _fillDsAxesChips() {
-      const el = document.getElementById('dsAxesChips');
-      if (!el || typeof DATASTUDIO_CHART === 'undefined' || !DATASTUDIO_CHART) return;
-      const scales = DATASTUDIO_CHART.options?.scales || {};
-      const colors = ['#4da3ff','#39e58c','#ffd84d','#ff8a65','#b39ddb'];
-      let i = 0;
-      el.innerHTML = Object.entries(scales)
-        .filter(([k]) => k.startsWith('y'))
-        .map(([k]) => '<span class="ds-v2-axis-chip" style="border-color:'+colors[i++] || '#888'+'">'+k.toUpperCase()+'</span>')
-        .join('');
-    }
     </script>
 
     <script src="js/app.js"></script>
@@ -1016,5 +732,41 @@
       <path d="M7.3 6.8a6.7 6.7 0 1 0 9.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
     </symbol>
   </svg>
+  <!-- ROBÔ ASSISTENTE — fica fora do .layout pois usa position:fixed -->
+  <div id="robotAssistant" class="robot-assistant">
+
+    <!-- Balão de fala (sai para a direita no desktop) -->
+    <div class="robot-bubble" id="robotBubble">
+      <div class="robot-bubble-inner">
+        <span class="robot-bubble-text" id="robotBubbleText"></span>
+        <span class="robot-bubble-cursor" id="robotBubbleCursor">▌</span>
+      </div>
+      <button class="robot-bubble-expand" id="robotBubbleExpand">
+        <i class="fa-solid fa-chevron-right"></i> Ver mais
+      </button>
+      <div class="robot-bubble-tail"></div>
+    </div>
+
+    <!-- Painel de relatório (também sai para a direita no desktop) -->
+    <div class="robot-report hidden" id="robotReport">
+      <div class="robot-report-header">
+        <span class="robot-report-title">
+          <i class="fa-solid fa-clipboard-list"></i> Diagnóstico
+        </span>
+        <button class="robot-report-close" id="robotReportClose">×</button>
+      </div>
+      <div class="robot-report-list" id="robotReportList"></div>
+    </div>
+
+    <!-- Avatar -->
+    <div class="robot-avatar" id="robotAvatar" title="Diagnóstico do sistema">
+      <img id="robotImg" src="img/roboaiotiidle.png" alt="Bot" class="robot-img" />
+    </div>
+
+    <!-- Badge de contagem -->
+    <span class="robot-badge hidden" id="robotBadge">0</span>
+
+  </div>
+
   </body>
   </html>
