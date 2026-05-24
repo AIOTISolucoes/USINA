@@ -43,7 +43,8 @@ function apiFetch(path, options = {}) {
 
   return fetch(`${API_BASE}${path}`, {
     ...options,
-    headers
+    headers,
+    cache: "no-store"
   });
 }
 
@@ -102,6 +103,7 @@ let DATASTUDIO_STATE = {
   startDate: "",
   endDate: "",
   selectedPlantId: null,
+  selectedPlantIds: [],        // multi-plant: array de IDs selecionados
 
   selectedDataKind: "all", // all | analog | discrete
   selectedSource: "all", // all | historico | consolidado
@@ -114,6 +116,8 @@ let DATASTUDIO_STATE = {
   selectedTags: [],
 
   selectionId: null,
+  selectionIdsByPlant: {},     // multi-plant: { plantId: selectionId }
+  seriesByPlant: {},           // multi-plant: { plantId: seriesPayload }
 
   aggregationMode: "historico", // historico | consolidado
   aggregationType: "avg", // avg | integral | median | max | mode | propagation | sum | none
@@ -125,7 +129,8 @@ let DATASTUDIO_STATE = {
   catalogConfirmed: false
 };
 
-let DATASTUDIO_CHART = null;
+let DATASTUDIO_CHART = {};  // multi-plant: { plantId: ChartInstance }
+const DS_PLANT_PALETTE = ["#4da3ff", "#39e58c", "#ffd84d", "#ff8a65", "#b39ddb"];
 let DATASTUDIO_TAGS_ABORT_CONTROLLER = null;
 
 // Abort controller pra evitar race condition
@@ -1849,6 +1854,19 @@ function sortPortfolioPlants(plants) {
   return validPlants;
 }
 
+function getPlantCardStatus(plant) {
+  if (plant.comm_status === 'offline' || plant.plant_status_color === 'gray') {
+    return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
+  }
+  if (plant.comm_status === 'partial') {
+    const rpt = Number(plant.inverter_reporting ?? 0);
+    const stale = Number(plant.inverter_stale ?? 0);
+    const txt = `Comunicação parcial (${rpt}/${rpt + stale})`;
+    return { colorClass: 'plant-card--warning', badge: txt, badgeClass: 'badge--partial' };
+  }
+  return { colorClass: '', badge: null, badgeClass: null };
+}
+
 function renderPortfolioTable(plants) {
   const tbody = document.getElementById("portfolioTbody");
   if (!tbody) return;
@@ -1873,7 +1891,9 @@ function renderPortfolioTable(plants) {
 
     // Linha cinza se planta sem dados ou status 28
     const plantState = getPortfolioPlantVisualState(plant);
-    if (plantState.isOffline) tr.classList.add("portfolio-row--offline");
+    const commStatus = getPlantCardStatus(plant);
+    const isCommOffline = commStatus.colorClass === 'plant-card--offline';
+    if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
 
     const alarmSeverity =
       normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId)) ||
@@ -1883,6 +1903,13 @@ function renderPortfolioTable(plants) {
       ? `plant-icon plant-icon--${alarmSeverity}`
       : "plant-icon plant-icon--ok";
 
+    const commBadgeHtml = commStatus.badge
+      ? `<span class="${commStatus.badgeClass}" style="margin-left:8px">${commStatus.badge}</span>`
+      : '';
+    const activePowerTd = isCommOffline
+      ? '<td class="metric-active metric-zero">—</td>'
+      : `<td class="metric-active${Number(plant.active_power_kw ?? 0) === 0 ? ' metric-zero' : ''}">${Number(plant.active_power_kw ?? 0).toFixed(1)} kW</td>`;
+
     tr.innerHTML = `
       <td>
         <button class="plant-cell-btn" title="Abrir usina ${valueOrDash(plantName)}">
@@ -1891,11 +1918,12 @@ function renderPortfolioTable(plants) {
               <i class="fa-solid fa-seedling"></i>
             </span>
             <span class="plant-name-text">${valueOrDash(plantName)}</span>
+            ${commBadgeHtml}
           </span>
         </button>
       </td>
       <td class="metric-neutral">${Number(plant.rated_power_kw ?? 0).toFixed(1)} kWp</td>
-      <td class="metric-active${Number(plant.active_power_kw ?? 0) === 0 ? ' metric-zero' : ''}">${Number(plant.active_power_kw ?? 0).toFixed(1)} kW</td>
+      ${activePowerTd}
       <td class="metric-active">${Number(plant.energy_today_kwh ?? 0).toFixed(1)} kWh</td>
       <td>${plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m²" : "—"}</td>
       <td>${plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "—"}</td>
@@ -2076,128 +2104,658 @@ function dsCategoryMatches(tag, category) {
   return group === (map[cat] || cat);
 }
 
+// =============================================================================
+// DATA STUDIO — PER-PLANT STATE & FUNCTIONS
+// =============================================================================
+let DATASTUDIO_PLANTS = {};
+// Key: String(plantId), Value: per-plant state object
+
+function _initPlantState(plantId) {
+  const plantName = dsGetPlantNameById(plantId) || `Usina ${plantId}`;
+  return {
+    plantId: Number(plantId),
+    plantName,
+    catalogTags: [],
+    availableTags: [],
+    selectedTags: [],
+    selectedContext: "all",
+    selectedCategory: "all",
+    searchText: "",
+    selectionId: null,
+    chartData: null,
+    catalogOpen: true,
+    catalogConfirmed: false,
+    chartInstance: null,
+    tagsRequestSeq: 0,
+    tagsAbortController: null
+  };
+}
+
+function dsGetPlantNameById(plantId) {
+  const sel = document.getElementById("dsPlantSelect");
+  if (!sel) return null;
+  const opt = sel.querySelector(`option[value="${plantId}"]`);
+  return opt ? opt.textContent : null;
+}
+
+function getPlantUIElements(plantId) {
+  return {
+    catalogSection: document.getElementById(`dsCatalogSection_${plantId}`),
+    searchInput: document.getElementById(`dsSearchInput_${plantId}`),
+    contextSelect: document.getElementById(`dsContextSelect_${plantId}`),
+    dataKindSelect: document.getElementById(`dsDataKindSelect_${plantId}`),
+    sourceSelect: document.getElementById(`dsSourceSelect_${plantId}`),
+    tagsTableBody: document.getElementById(`dsTagsTbody_${plantId}`),
+    selectedCount: document.getElementById(`dsSelectedCount_${plantId}`),
+    selectedTagsList: document.getElementById(`dsSelectedTagsList_${plantId}`),
+    emptyState: document.getElementById(`dsEmptyState_${plantId}`),
+    workspace: document.getElementById(`dsWorkspace_${plantId}`),
+    chartWrap: document.getElementById(`dsChartWrap_${plantId}`),
+    chartCanvas: document.getElementById(`dsChart_${plantId}`),
+    foundCount: document.getElementById(`dsFoundCount_${plantId}`),
+    contextInfo: document.getElementById(`dsContextInfo_${plantId}`)
+  };
+}
+
 function getDataStudioActiveCategory() {
-  const active = document.querySelector(".ds-v2-pill.active");
-  return dsSafeTrim(active?.dataset?.cat || DATASTUDIO_STATE.selectedCategory || "all") || "all";
+  return "all"; // now per-plant, kept for compat
 }
 
-function setDataStudioActiveCategory(category) {
-  const nextCategory = dsSafeTrim(category || "all") || "all";
-  DATASTUDIO_STATE.selectedCategory = nextCategory;
+// =============================================================================
+// DATA STUDIO — PER-PLANT FUNCTIONS (replaces old singleton functions)
+// =============================================================================
 
-  document.querySelectorAll(".ds-v2-pill").forEach((pill) => {
-    pill.classList.toggle("active", (pill.dataset.cat || "all") === nextCategory);
-  });
+/**
+ * Generates the full 3-column HTML block for a single plant.
+ */
+function _plantBlockHTML(plantId, plantName, plantColor, plantIdx) {
+  const pid = plantId;
+  return `
+  <div class="ds-plant-block" data-plant="${pid}" id="dsPlantBlock_${pid}">
+    <div class="ds-plant-block__header">
+      <span class="ds-plant-block__dot" style="background:${plantColor}"></span>
+      <strong>${plantName}</strong>
+      <span class="ds-plant-block__tag-count" id="dsSelectedCount_${pid}">0 medidas</span>
+      <button class="ds-plant-block__fs-exit" data-action="exitFullscreen" data-plant="${pid}" type="button" title="Sair da tela cheia">
+        <i class="fa-solid fa-compress"></i> Sair
+      </button>
+    </div>
+
+    <div class="ds-v2-body">
+      <!-- LEFT: catalog -->
+      <aside class="ds-v2-catalog" id="dsCatalogSection_${pid}">
+        <div class="ds-v2-catalog-header">
+          <h3>Catálogo de Medidas</h3>
+          <button class="ds-v2-catalog-collapse" data-action="toggleCatalog" data-plant="${pid}" type="button">−</button>
+        </div>
+
+        <div class="ds-v2-catalog-filters">
+          <div class="ds-v2-pills" id="dsCategoryPills_${pid}">
+            <button class="ds-v2-pill active" data-cat="all" data-plant="${pid}" type="button">Todas</button>
+            <button class="ds-v2-pill" data-cat="planta" data-plant="${pid}" type="button">Planta</button>
+            <button class="ds-v2-pill" data-cat="inversor" data-plant="${pid}" type="button">Inversores</button>
+            <button class="ds-v2-pill" data-cat="weather" data-plant="${pid}" type="button">Clima</button>
+            <button class="ds-v2-pill" data-cat="meter" data-plant="${pid}" type="button">Medidores</button>
+            <button class="ds-v2-pill" data-cat="relay" data-plant="${pid}" type="button">Relés</button>
+            <button class="ds-v2-pill" data-cat="alarm" data-plant="${pid}" type="button">Alarmes</button>
+          </div>
+          <input type="text" class="ds-v2-search" id="dsSearchInput_${pid}" placeholder="Buscar medida..." data-plant="${pid}">
+          <select class="ds-v2-filter-select" id="dsContextSelect_${pid}" data-plant="${pid}">
+            <option value="all">Todos contextos</option>
+          </select>
+        </div>
+
+        <div class="ds-v2-found-count" id="dsFoundCount_${pid}">0 medidas encontradas</div>
+        <div class="ds-v2-context-info hidden" id="dsContextInfo_${pid}"></div>
+
+        <div class="ds-v2-catalog-table-wrap">
+          <table class="ds-table" id="dsTagsTable_${pid}">
+            <thead>
+              <tr>
+                <th style="width:30px"></th>
+                <th>Contexto</th>
+                <th>Descrição</th>
+                <th style="display:none">Fonte</th>
+                <th style="display:none">Tipo</th>
+                <th>Unidade</th>
+                <th style="display:none">Usina</th>
+                <th style="display:none">Pathname</th>
+              </tr>
+            </thead>
+            <tbody id="dsTagsTbody_${pid}">
+              <tr><td colspan="8" style="text-align:center;opacity:.5">Selecione filtros para carregar medidas</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="ds-v2-catalog-actions">
+          <button class="ds-v2-catalog-confirm" data-action="confirmCatalog" data-plant="${pid}" type="button">
+            Confirmar seleção
+          </button>
+        </div>
+      </aside>
+
+      <!-- CENTER: chart area -->
+      <div class="ds-v2-chart-col">
+        <div class="ds-empty-state" id="dsEmptyState_${pid}">
+          <div class="ds-empty-icon"><i class="fa-solid fa-chart-line"></i></div>
+          <h3>Selecione medidas no catálogo</h3>
+          <p>Escolha medidas à esquerda e confirme para visualizar o gráfico.</p>
+        </div>
+
+        <div class="ds-workspace hidden" id="dsWorkspace_${pid}">
+          <div class="ds-chart-wrap" id="dsChartWrap_${pid}">
+            <canvas id="dsChart_${pid}" class="ds-plant-canvas"></canvas>
+          </div>
+          <div class="ds-chart-toolbar">
+            <button class="ds-chart-toolbar__btn" data-action="zoomIn" data-plant="${pid}" type="button" title="Zoom +"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+            <button class="ds-chart-toolbar__btn" data-action="zoomOut" data-plant="${pid}" type="button" title="Zoom −"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+            <button class="ds-chart-toolbar__btn" data-action="zoomReset" data-plant="${pid}" type="button" title="Resetar zoom"><i class="fa-solid fa-arrows-rotate"></i></button>
+            <button class="ds-chart-toolbar__btn" data-action="fullscreen" data-plant="${pid}" type="button" title="Tela cheia"><i class="fa-solid fa-expand"></i></button>
+          </div>
+
+          <div class="ds-v2-stats-section">
+            <div class="ds-v2-stats-left">
+              <h4>Resumo estatístico</h4>
+              <div class="ds-v2-stats-table-wrap">
+                <table class="ds-v2-stats-table">
+                  <thead><tr><th>Série</th><th>Unidade</th><th>Mínimo</th><th>Máximo</th><th>Média</th><th>Último Valor</th></tr></thead>
+                  <tbody id="dsStatsTbody_${pid}">
+                    <tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="ds-v2-insights">
+              <h4>Insights</h4>
+              <div id="dsInsightsList_${pid}" class="ds-v2-insights-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: selected series panel -->
+      <aside class="ds-v2-series-panel">
+        <div class="ds-v2-series-header">
+          <h3>Séries selecionadas</h3>
+        </div>
+        <div class="ds-v2-series-list" id="dsSelectedTagsList_${pid}"></div>
+      </aside>
+    </div>
+  </div>`;
 }
 
-function updateDataStudioFoundCount(count, text) {
-  const { foundCount } = getDataStudioUIElements();
-  if (!foundCount) return;
+/**
+ * Renders plant blocks for all currently selected plants.
+ */
+function renderPlantBlocks() {
+  const container = document.getElementById("dsPlantBlocks");
+  if (!container) return;
 
-  if (text) {
-    foundCount.textContent = text;
+  const ids = DATASTUDIO_STATE.selectedPlantIds;
+  const noPlantState = document.getElementById("dsNoPlantState");
+
+  if (!ids.length) {
+    // Destroy charts, clear container, show empty state
+    Object.keys(DATASTUDIO_PLANTS).forEach(pid => {
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} }
+    });
+    DATASTUDIO_PLANTS = {};
+    DATASTUDIO_CHART = {};
+    container.innerHTML = "";
+    if (noPlantState) container.appendChild(noPlantState);
+    if (noPlantState) noPlantState.style.display = "";
     return;
   }
 
+  // Remove blocks for plants no longer selected
+  Object.keys(DATASTUDIO_PLANTS).forEach(pid => {
+    if (!ids.includes(Number(pid))) {
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} }
+      delete DATASTUDIO_PLANTS[pid];
+      delete DATASTUDIO_CHART[pid];
+      const el = document.getElementById(`dsPlantBlock_${pid}`);
+      if (el) el.remove();
+    }
+  });
+
+  // Hide empty state
+  if (noPlantState) noPlantState.style.display = "none";
+
+  // Add blocks for newly selected plants
+  ids.forEach((pid, idx) => {
+    const pidStr = String(pid);
+    if (DATASTUDIO_PLANTS[pidStr]) return; // already exists
+
+    DATASTUDIO_PLANTS[pidStr] = _initPlantState(pid);
+    const plantName = dsGetPlantNameById(pid) || `Usina ${pid}`;
+    const plantColor = DS_PLANT_PALETTE[idx % DS_PLANT_PALETTE.length];
+    const html = _plantBlockHTML(pidStr, plantName, plantColor, idx);
+    container.insertAdjacentHTML("beforeend", html);
+  });
+}
+
+/**
+ * Called when the multi-select plant checkboxes change.
+ */
+function onSelectedPlantsChanged() {
+  renderPlantBlocks();
+
+  const ids = DATASTUDIO_STATE.selectedPlantIds;
+
+  // Fetch tags for each newly added plant
+  ids.forEach(pid => {
+    const ps = DATASTUDIO_PLANTS[String(pid)];
+    if (ps && !ps.catalogTags.length) {
+      fetchDataStudioTagsForPlant(String(pid));
+    }
+  });
+
+  _syncMultiselectLabel();
+  if (typeof window._dsUpdateInfobar === "function") window._dsUpdateInfobar();
+}
+
+// --- Per-plant filter / UI functions ---
+
+function setActiveCategoryForPlant(plantId, category) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  const cat = dsSafeTrim(category || "all") || "all";
+  ps.selectedCategory = cat;
+
+  const pills = document.getElementById(`dsCategoryPills_${plantId}`);
+  if (pills) {
+    pills.querySelectorAll(".ds-v2-pill").forEach(p => {
+      p.classList.toggle("active", (p.dataset.cat || "all") === cat);
+    });
+  }
+}
+
+function updateFoundCountForPlant(plantId, count, text) {
+  const el = document.getElementById(`dsFoundCount_${plantId}`);
+  if (!el) return;
+  if (text) { el.textContent = text; return; }
   const n = Number(count) || 0;
   const plural = n === 1 ? "" : "s";
-  foundCount.textContent = `${n} medida${plural} encontrada${plural}`;
+  el.textContent = `${n} medida${plural} encontrada${plural}`;
 }
 
-function applyDataStudioTagFilters() {
-  const catalog = Array.isArray(DATASTUDIO_STATE.catalogTags) ? DATASTUDIO_STATE.catalogTags : [];
-  const selectedContext = dsSafeTrim(DATASTUDIO_STATE.selectedContext) || "all";
-  const selectedCategory = getDataStudioActiveCategory();
-  const searchText = dsSafeTrim(DATASTUDIO_STATE.searchText);
+function updateContextInfoForPlant(plantId) {
+  const el = document.getElementById(`dsContextInfo_${plantId}`);
+  if (!el) return;
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  const ctx = dsSafeTrim(ps?.selectedContext) || "all";
+  el.textContent = ctx !== "all"
+    ? `Exibindo medidas de: ${ctx}`
+    : "Exibindo medidas de: todos contextos";
+  el.classList.remove("hidden");
+}
 
-  DATASTUDIO_STATE.selectedCategory = selectedCategory;
+function applyTagFiltersForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return [];
 
-  const filteredTags = catalog.filter((tag) => {
-    return dsContextMatches(tag?.context, selectedContext) &&
-           dsCategoryMatches(tag, selectedCategory) &&
-           dsTagMatchesSearch(tag, searchText);
+  const catalog = Array.isArray(ps.catalogTags) ? ps.catalogTags : [];
+  const selectedContext = dsSafeTrim(ps.selectedContext) || "all";
+  const selectedCategory = dsSafeTrim(ps.selectedCategory) || "all";
+  const searchText = dsSafeTrim(ps.searchText);
+
+  const filtered = catalog.filter(tag =>
+    dsContextMatches(tag?.context, selectedContext) &&
+    dsCategoryMatches(tag, selectedCategory) &&
+    dsTagMatchesSearch(tag, searchText)
+  );
+
+  ps.availableTags = filtered;
+  updateContextInfoForPlant(plantId);
+  updateFoundCountForPlant(plantId, filtered.length);
+  renderDataStudioTagsTableForPlant(plantId, filtered);
+  return filtered;
+}
+
+function populateContextSelectForPlant(plantId, tags) {
+  const sel = document.getElementById(`dsContextSelect_${plantId}`);
+  if (!sel) return;
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  const prev = dsSafeTrim(sel.value || ps?.selectedContext) || "all";
+  const contexts = Array.from(new Set(
+    (Array.isArray(tags) ? tags : []).map(t => dsSafeTrim(t?.context)).filter(Boolean)
+  ));
+
+  sel.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "all";
+  allOpt.textContent = "Todos contextos";
+  sel.appendChild(allOpt);
+
+  contexts.forEach(ctx => {
+    const opt = document.createElement("option");
+    opt.value = ctx;
+    opt.textContent = ctx;
+    sel.appendChild(opt);
   });
 
-  DATASTUDIO_STATE.availableTags = filteredTags;
-  updateDataStudioContextInfo();
-  updateDataStudioFoundCount(filteredTags.length);
-  renderDataStudioTagsTable(filteredTags);
-  return filteredTags;
+  sel.value = contexts.includes(prev) ? prev : "all";
+  if (ps) ps.selectedContext = sel.value || "all";
 }
 
-function dsSortTags(tags) {
-  const order = {
-    plant: 0,
-    weather: 1,
-    meter: 2,
-    relay: 3,
-    inverter: 4,
-    alarm: 5,
-    outro: 9
-  };
+// --- Per-plant tag selection ---
 
-  return [...(Array.isArray(tags) ? tags : [])].sort((a, b) => {
-    const ga = dsTagGroup(a);
-    const gb = dsTagGroup(b);
+function isTagSelectedForPlant(plantId, tagOrPath) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return false;
+  const key = selectedTagKey(tagOrPath);
+  if (!key || key.endsWith(":")) return false;
+  return ps.selectedTags.some(t => selectedTagKey(t) === key);
+}
 
-    if ((order[ga] ?? 9) !== (order[gb] ?? 9)) {
-      return (order[ga] ?? 9) - (order[gb] ?? 9);
+function addSelectedTagForPlant(plantId, tag) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps || !tag || !dsSafeTrim(tag.pathname)) return false;
+  if (isTagSelectedForPlant(plantId, tag)) return true;
+  if (ps.selectedTags.length >= 50) {
+    window.alert("Você pode selecionar no máximo 50 medidas por usina.");
+    return false;
+  }
+  ps.selectedTags.push(tag);
+  updateStageUIForPlant(plantId);
+  return true;
+}
+
+function removeSelectedTagForPlant(plantId, tagOrPath) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  const key = selectedTagKey(tagOrPath);
+  ps.selectedTags = ps.selectedTags.filter(t => selectedTagKey(t) !== key);
+  updateStageUIForPlant(plantId);
+}
+
+function updateSelectedTagsCounterForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  const count = ps ? ps.selectedTags.length : 0;
+  const el = document.getElementById(`dsSelectedCount_${plantId}`);
+  if (el) el.textContent = `${count} medida${count === 1 ? "" : "s"}`;
+}
+
+function renderSelectedTagsListForPlant(plantId) {
+  const list = document.getElementById(`dsSelectedTagsList_${plantId}`);
+  if (!list) return;
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+
+  list.innerHTML = "";
+  const tags = Array.isArray(ps.selectedTags) ? ps.selectedTags : [];
+
+  if (!tags.length) {
+    list.classList.add("hidden");
+    return;
+  }
+
+  list.classList.remove("hidden");
+  tags.forEach((tag, idx) => {
+    const chip = document.createElement("div");
+    chip.className = "ds-selected-tag-chip";
+
+    const chipColor = DS_SERIES_PALETTE[idx % DS_SERIES_PALETTE.length];
+    chip.style.setProperty("--ds-chip-color", chipColor);
+
+    const labelFull = `${valueOrDash(tag?.context)} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
+    const labelShort = `${valueOrDash(dsAbbrevContext(tag?.context))} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
+    chip.innerHTML = `
+      <span class="ds-selected-tag-chip__dot"></span>
+      <span class="ds-selected-tag-chip__text" title="${labelFull}">${labelShort}</span>
+      <button type="button" class="ds-selected-tag-chip__remove" data-action="removeTag" data-plant="${plantId}" data-path="${dsSafeTrim(tag?.pathname).replaceAll('"','&quot;')}" aria-label="Remover medida">×</button>
+    `;
+    list.appendChild(chip);
+  });
+}
+
+function updateStageUIForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+
+  const emptyState = document.getElementById(`dsEmptyState_${plantId}`);
+  const workspace = document.getElementById(`dsWorkspace_${plantId}`);
+  const catalogSection = document.getElementById(`dsCatalogSection_${plantId}`);
+
+  const hasSelection = ps.selectedTags.length > 0;
+  const showWorkspace = hasSelection && ps.catalogConfirmed;
+
+  if (emptyState) emptyState.classList.toggle("hidden", showWorkspace);
+  if (workspace) workspace.classList.toggle("hidden", !showWorkspace);
+  if (catalogSection) catalogSection.classList.toggle("ds-v2-catalog--collapsed", ps.catalogOpen === false);
+
+  renderSelectedTagsListForPlant(plantId);
+  updateSelectedTagsCounterForPlant(plantId);
+}
+
+// --- Per-plant tags table ---
+
+function renderDataStudioTagsTableForPlant(plantId, tags) {
+  const tbody = document.getElementById(`dsTagsTbody_${plantId}`);
+  if (!tbody) return;
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+
+  const rows = Array.isArray(tags) ? tags : [];
+  tbody.innerHTML = "";
+  updateFoundCountForPlant(plantId, rows.length);
+
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="8" style="text-align:center;opacity:.8;">Nenhuma medida encontrada</td>';
+    tbody.appendChild(tr);
+    updateSelectedTagsCounterForPlant(plantId);
+    return;
+  }
+
+  rows.forEach(tag => {
+    const pathname = dsSafeTrim(tag?.pathname || tag?.path_name || tag?.tag);
+    if (!pathname) return;
+
+    const tr = document.createElement("tr");
+    tr.classList.add("ds-table-row-clickable");
+    const checked = isTagSelectedForPlant(plantId, tag) ? "checked" : "";
+
+    const isAlarm = (tag?.data_kind === "discrete") || (tag?.description || "").startsWith("\u26a0");
+    const isPlant = (tag?.context || "").toUpperCase().startsWith("PLANT") || (tag?.pathname || "").startsWith("PLANT.");
+    const isWeather = (tag?.device_type || "").toLowerCase().includes("weather") || (tag?.pathname || "").toLowerCase().includes("weather");
+    const isMeter = (tag?.device_type || "").toLowerCase().includes("meter") || (tag?.context || "").toLowerCase().includes("medidor") || (tag?.context || "").toLowerCase().includes("meter");
+    const isRelay = (tag?.device_type || "").toLowerCase().includes("relay") || (tag?.pathname || "").startsWith("RELAY_");
+
+    const svgInverter = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="3" width="10" height="7" rx="1.5" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><path d="M4 3V2a2 2 0 014 0v1" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><line x1="4" y1="6.5" x2="8" y2="6.5" stroke="rgba(57,229,140,.6)" stroke-width="1"/></svg>';
+    const svgPlant = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10V5M3 7l3-3 3 3" stroke="rgba(55,138,221,.9)" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/><rect x="7" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/></svg>';
+    const svgWeather = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="5" r="2.5" stroke="rgba(239,159,39,.8)" stroke-width="1.2"/><line x1="6" y1="1" x2="6" y2="2" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="6" y1="8" x2="6" y2="9" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="3" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="9" y1="5" x2="10" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/></svg>';
+    const svgMeter = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="8" rx="1.5" stroke="rgba(212,83,126,.8)" stroke-width="1.2"/><path d="M3.5 7.5 C3.5 5.5 8.5 5.5 8.5 7.5" stroke="rgba(212,83,126,.7)" stroke-width="1" fill="none"/><line x1="6" y1="7.5" x2="5" y2="5.5" stroke="rgba(212,83,126,.9)" stroke-width="1" stroke-linecap="round"/></svg>';
+    const svgRelay = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2.5" width="10" height="7" rx="1.3" stroke="rgba(57,229,140,.8)" stroke-width="1.1"/><line x1="3" y1="8" x2="8.5" y2="8" stroke="rgba(57,229,140,.75)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="8" x2="5" y2="5" stroke="rgba(57,229,140,.85)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="5" x2="8.5" y2="5" stroke="rgba(57,229,140,.35)" stroke-width=".9" stroke-dasharray="2 1.3" stroke-linecap="round"/></svg>';
+    const svgAlarm = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5L1.5 9.5h9L6 1.5z" stroke="rgba(239,159,39,.9)" stroke-width="1.2" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="rgba(239,159,39,.9)" stroke-width="1" stroke-linecap="round"/><circle cx="6" cy="9" r=".6" fill="rgba(239,159,39,.9)"/></svg>';
+
+    let iconSvg = svgInverter, iconClass = "analog";
+    if (isAlarm) { iconSvg = svgAlarm; iconClass = "discrete"; }
+    else if (isPlant) { iconSvg = svgPlant; iconClass = "plant"; }
+    else if (isWeather) { iconSvg = svgWeather; }
+    else if (isMeter) { iconSvg = svgMeter; }
+    else if (isRelay) { iconSvg = svgRelay; }
+
+    const unitHtml = tag?.unit ? `<span class="ds-unit-badge">${tag.unit}</span>` : '<span style="opacity:.35">\u2014</span>';
+
+    tr.innerHTML = `
+      <td><input type="checkbox" data-ds-pathname="${pathname.replaceAll('"','&quot;')}" data-plant="${plantId}" ${checked}></td>
+      <td style="min-width:90px;max-width:130px;white-space:normal;word-break:break-word;line-height:1.3;font-size:11px;">
+        <div class="ds-tag-context-cell">
+          <span class="ds-tag-icon ds-tag-icon--${iconClass}">${iconSvg}</span>
+          <span title="${(tag?.context||'').replace(/"/g,'&quot;')}">${valueOrDash(dsAbbrevContext(tag?.context))}</span>
+        </div>
+      </td>
+      <td style="white-space:normal;line-height:1.35;font-size:11px;">${valueOrDash(tag?.description)}</td>
+      <td style="display:none;">${valueOrDash(tag?.source)}</td>
+      <td style="display:none;">${valueOrDash(tag?.data_kind)}</td>
+      <td>${unitHtml}</td>
+      <td style="display:none;">${valueOrDash(tag?.power_plant_name || tag?.power_plant_id)}</td>
+      <td class="ds-pathname-cell" title="${pathname.replaceAll('"','&quot;')}" style="display:none;">${valueOrDash(pathname)}</td>
+    `;
+
+    const checkbox = tr.querySelector("input[type='checkbox']");
+    const syncRowState = () => tr.classList.toggle("is-selected", Boolean(checkbox?.checked));
+
+    const applySelection = (checkedState) => {
+      if (checkedState) {
+        const ok = addSelectedTagForPlant(plantId, {
+          id: tag?.id ?? null, tag_id: tag?.id ?? null,
+          device_type: tag?.device_type ?? null, device_id: tag?.device_id ?? null,
+          point_name: tag?.point_name ?? null,
+          power_plant_id: tag?.power_plant_id ?? null,
+          power_plant_name: tag?.power_plant_name ?? null,
+          context: dsSafeTrim(tag?.context) || "PLANT",
+          pathname, source: dsSafeTrim(tag?.source) || "historico",
+          data_kind: dsSafeTrim(tag?.data_kind) || "analog",
+          unit: tag?.unit ?? null, description: tag?.description ?? null
+        });
+        if (!ok && checkbox) checkbox.checked = false;
+      } else {
+        removeSelectedTagForPlant(plantId, tag);
+      }
+      syncRowState();
+    };
+
+    checkbox?.addEventListener("change", ev => applySelection(Boolean(ev.target.checked)));
+    tr.addEventListener("click", ev => {
+      if (ev.target?.closest("input, button, a")) return;
+      if (!checkbox) return;
+      checkbox.checked = !checkbox.checked;
+      applySelection(Boolean(checkbox.checked));
+    });
+
+    syncRowState();
+    tbody.appendChild(tr);
+  });
+
+  updateSelectedTagsCounterForPlant(plantId);
+  updateStageUIForPlant(plantId);
+}
+
+// --- Per-plant catalog actions ---
+
+function confirmCatalogSelectionForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  if (!ps.selectedTags.length) {
+    window.alert("Selecione ao menos uma medida antes de confirmar.");
+    return;
+  }
+  ps.catalogConfirmed = true;
+  ps.catalogOpen = false;
+  updateStageUIForPlant(plantId);
+}
+
+function toggleCatalogForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  if (!ps.catalogOpen) {
+    ps.catalogOpen = true;
+    updateStageUIForPlant(plantId);
+    if (!ps.catalogTags.length) fetchDataStudioTagsForPlant(plantId);
+    return;
+  }
+  ps.catalogOpen = false;
+  updateStageUIForPlant(plantId);
+}
+
+// --- Per-plant API: fetch tags ---
+
+async function fetchDataStudioTagsForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+
+  const requestSeq = (ps.tagsRequestSeq || 0) + 1;
+  ps.tagsRequestSeq = requestSeq;
+
+  if (ps.tagsAbortController) {
+    try { ps.tagsAbortController.abort(); } catch(e){}
+  }
+  ps.tagsAbortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+
+  updateFoundCountForPlant(plantId, null, "Buscando medidas...");
+
+  try {
+    const fetchOptions = ps.tagsAbortController ? { signal: ps.tagsAbortController.signal } : {};
+    const params = new URLSearchParams();
+    params.set("plant_id", String(plantId));
+    params.set("limit", "5000");
+
+    const res = await apiFetch(`/datastudio/tags?${params.toString()}`, fetchOptions);
+    if (!res.ok) throw new Error(`Falha ao buscar medidas (${res.status})`);
+    const data = await res.json();
+    const parsed = dsNormalizeApiBody(data);
+    if (requestSeq !== ps.tagsRequestSeq) return;
+
+    const normalizeTagsResponse = (p) => {
+      if (Array.isArray(p)) return p;
+      if (Array.isArray(p?.items)) return p.items;
+      if (Array.isArray(p?.data)) return p.data;
+      return [];
+    };
+
+    const tags = normalizeTagsResponse(parsed);
+    const plantName = dsGetPlantNameById(plantId);
+    tags.forEach(t => {
+      if (!t.power_plant_name && plantName) t.power_plant_name = plantName;
+      if (!t.power_plant_id) t.power_plant_id = Number(plantId);
+    });
+
+    const sortedTags = dsSortTags(tags);
+    ps.catalogTags = sortedTags;
+    populateContextSelectForPlant(plantId, sortedTags);
+
+    const ctxSel = document.getElementById(`dsContextSelect_${plantId}`);
+    ps.selectedContext = dsSafeTrim(ctxSel?.value || ps.selectedContext || "all");
+    applyTagFiltersForPlant(plantId);
+
+    console.log(`[DataStudio] Plant ${plantId}: ${sortedTags.length} tags loaded`);
+  } catch (err) {
+    if (err?.name === "AbortError") return;
+    if (requestSeq !== ps.tagsRequestSeq) return;
+    console.error(`[DataStudio] erro ao buscar tags plant ${plantId}:`, err);
+    ps.catalogTags = [];
+    ps.availableTags = [];
+    updateContextInfoForPlant(plantId);
+    renderDataStudioTagsTableForPlant(plantId, []);
+  } finally {
+    if (requestSeq === ps.tagsRequestSeq) {
+      ps.tagsAbortController = null;
     }
-
-    const ca = String(a?.context || "");
-    const cb = String(b?.context || "");
-    const c = ca.localeCompare(cb, "pt-BR", { sensitivity: "base", numeric: true });
-    if (c !== 0) return c;
-
-    const da = String(a?.description || a?.point_name || a?.pathname || "");
-    const db = String(b?.description || b?.point_name || b?.pathname || "");
-    return da.localeCompare(db, "pt-BR", { sensitivity: "base", numeric: true });
-  });
+  }
 }
 
-function getDataStudioUIElements() {
-  return {
-    startDateInput: document.getElementById("dsStartDateInput"),
-    endDateInput: document.getElementById("dsEndDateInput"),
-    plantSelect: document.getElementById("dsPlantSelect"),
-    openTagsBtn: document.getElementById("dsOpenTagsBtn"),
-    backToHeroBtn: document.getElementById("dsBackToHeroBtn"),
-    exportBtn: document.getElementById("dsExportBtn"),
-    zoomInBtn: document.getElementById("dsZoomInBtn"),
-    zoomOutBtn: document.getElementById("dsZoomOutBtn"),
-    zoomResetBtn: document.getElementById("dsZoomResetBtn"),
-    fullscreenBtn: document.getElementById("dsFullscreenBtn"),
-    fullscreenCloseBtn: document.getElementById("dsFullscreenCloseBtn"),
+// --- Per-plant chart rendering ---
 
-    catalogSection: document.getElementById("dsCatalogSection"),
-    contextInfo: document.getElementById("dsContextInfo"),
-    foundCount: document.querySelector(".ds-v2-found-count"),
+function renderChartForPlant(plantId, seriesPayload) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
 
-    dataKindSelect: document.getElementById("dsDataKindSelect"),
-    sourceSelect: document.getElementById("dsSourceSelect"),
-    contextSelect: document.getElementById("dsContextSelect"),
-    searchInput: document.getElementById("dsSearchInput"),
-    tagsApplyBtn: document.getElementById("dsTagsApplyBtn"),
-    tagsClearBtn: document.getElementById("dsTagsClearBtn"),
-    confirmSelectionBtn: document.getElementById("dsConfirmSelectionBtn"),
-    tagsTableBody: document.getElementById("dsTagsTbody"),
-    selectedCount: document.getElementById("dsSelectedCount"),
-    selectedTagsList: document.getElementById("dsSelectedTagsList"),
-    emptyState: document.getElementById("dsEmptyState"),
-    workspace: document.getElementById("dsWorkspace"),
+  const canvas = document.getElementById(`dsChart_${plantId}`);
+  if (!canvas || typeof Chart === "undefined") return;
 
-    bulkPanel: document.getElementById("dsBulkPanel"),
-    modeSelect: document.getElementById("dsModeSelect"),
-    aggregationSelect: document.getElementById("dsAggregationSelect"),
-    consolidationSelect: document.getElementById("dsConsolidationSelect"),
-    saveSelectionBtn: document.getElementById("dsSaveSelectionBtn"),
-    loadSeriesBtn: document.getElementById("dsLoadSeriesBtn"),
+  // Destroy old chart for this plant
+  if (ps.chartInstance) {
+    try { ps.chartInstance.destroy(); } catch(e){}
+    ps.chartInstance = null;
+  }
+  delete DATASTUDIO_CHART[plantId];
 
-    chartWrap: document.getElementById("dsChartWrap"),
-    chartCanvas: document.getElementById("dsChart")
-  };
+  const chart = _renderSinglePlantChart(canvas, seriesPayload, 0);
+  if (chart) {
+    ps.chartInstance = chart;
+    DATASTUDIO_CHART[plantId] = chart;
+  }
+
+  _fillDsStatsForPlant(seriesPayload, plantId);
 }
 
+
+// --- Shared utility functions (kept from original) ---
 
 function selectedTagKey(tagOrPath) {
   if (typeof tagOrPath === "string") return `path:${dsSafeTrim(tagOrPath)}`;
@@ -2206,336 +2764,126 @@ function selectedTagKey(tagOrPath) {
   return `path:${dsSafeTrim(tagOrPath?.pathname)}`;
 }
 
-function renderSelectedTagsList() {
-  const { selectedTagsList } = getDataStudioUIElements();
-  if (!selectedTagsList) return;
-
-  selectedTagsList.innerHTML = "";
-  const tags = Array.isArray(DATASTUDIO_STATE.selectedTags) ? DATASTUDIO_STATE.selectedTags : [];
-
-  if (!tags.length) {
-    selectedTagsList.classList.add("hidden");
-    return;
-  }
-
-  selectedTagsList.classList.remove("hidden");
-  tags.forEach((tag) => {
-    const chip = document.createElement("div");
-    chip.className = "ds-selected-tag-chip";
-
-    const colorIdx = DATASTUDIO_STATE.selectedTags.indexOf(tag) % DS_SERIES_PALETTE.length;
-    const chipColor = DS_SERIES_PALETTE[Math.max(0, colorIdx)];
-    chip.style.setProperty('--ds-chip-color', chipColor);
-
-    const labelFull  = `${valueOrDash(tag?.context)} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
-    const labelShort = `${valueOrDash(dsAbbrevContext(tag?.context))} • ${valueOrDash(tag?.point_name || tag?.description || tag?.pathname)}`;
-    chip.innerHTML = `
-      <span class="ds-selected-tag-chip__dot"></span>
-      <span class="ds-selected-tag-chip__text" title="${labelFull}">${labelShort}</span>
-      <button type="button" class="ds-selected-tag-chip__remove" aria-label="Remover medida">×</button>
-    `;
-
-    chip.querySelector(".ds-selected-tag-chip__remove")?.addEventListener("click", () => {
-      removeSelectedTag(tag);
-      renderDataStudioTagsTable(DATASTUDIO_STATE.availableTags);
-      updateSelectedTagsCounter();
-    });
-
-    selectedTagsList.appendChild(chip);
+function dsSortTags(tags) {
+  const order = {
+    plant: 0, weather: 1, meter: 2, relay: 3, inverter: 4, alarm: 5, outro: 9
+  };
+  return [...(Array.isArray(tags) ? tags : [])].sort((a, b) => {
+    const ga = dsTagGroup(a);
+    const gb = dsTagGroup(b);
+    if ((order[ga] ?? 9) !== (order[gb] ?? 9)) return (order[ga] ?? 9) - (order[gb] ?? 9);
+    const ca = String(a?.context || "");
+    const cb = String(b?.context || "");
+    const c = ca.localeCompare(cb, "pt-BR", { sensitivity: "base", numeric: true });
+    if (c !== 0) return c;
+    const da = String(a?.description || a?.point_name || a?.pathname || "");
+    const db = String(b?.description || b?.point_name || b?.pathname || "");
+    return da.localeCompare(db, "pt-BR", { sensitivity: "base", numeric: true });
   });
 }
 
-function populateDataStudioContextSelect(tags) {
-  const { contextSelect } = getDataStudioUIElements();
-  if (!contextSelect) return;
-
-  const prev = dsSafeTrim(contextSelect.value || DATASTUDIO_STATE.selectedContext) || "all";
-  const contexts = Array.from(new Set((Array.isArray(tags) ? tags : [])
-    .map((t) => dsSafeTrim(t?.context))
-    .filter(Boolean)));
-
-  contextSelect.innerHTML = "";
-  const allOpt = document.createElement("option");
-  allOpt.value = "all";
-  allOpt.textContent = "Todos contextos";
-  contextSelect.appendChild(allOpt);
-
-  contexts.forEach((ctx) => {
-    const opt = document.createElement("option");
-    opt.value = ctx;
-    opt.textContent = ctx;
-    contextSelect.appendChild(opt);
-  });
-
-  if (contexts.includes(prev)) contextSelect.value = prev;
-  else contextSelect.value = "all";
-
-  DATASTUDIO_STATE.selectedContext = contextSelect.value || "all";
+// Compat stubs for old functions that may be called from inline scripts
+function getDataStudioUIElements() {
+  return {
+    startDateInput: document.getElementById("dsStartDateInput"),
+    endDateInput: document.getElementById("dsEndDateInput"),
+    plantSelect: document.getElementById("dsPlantSelect"),
+    exportBtn: document.getElementById("dsExportBtn") || document.getElementById("dsExportBtnBottom"),
+    modeSelect: document.getElementById("dsModeSelect"),
+    aggregationSelect: document.getElementById("dsAggregationSelect"),
+    consolidationSelect: document.getElementById("dsConsolidationSelect"),
+    saveSelectionBtn: document.getElementById("dsSaveSelectionBtn"),
+    loadSeriesBtn: document.getElementById("dsLoadSeriesBtn"),
+    plantMultiselect: document.getElementById("dsPlantMultiselect"),
+    plantMultiselectBtn: document.getElementById("dsPlantMultiselectBtn"),
+    plantMultiselectLabel: document.getElementById("dsPlantMultiselectLabel"),
+    plantMultiselectDropdown: document.getElementById("dsPlantMultiselectDropdown"),
+    backToHeroBtn: document.getElementById("dsBackToHeroBtn"),
+    zoomInBtn: document.getElementById("dsZoomInBtn"),
+    zoomOutBtn: document.getElementById("dsZoomOutBtn"),
+    zoomResetBtn: document.getElementById("dsZoomResetBtn"),
+    fullscreenBtn: document.getElementById("dsFullscreenBtn"),
+    fullscreenCloseBtn: document.getElementById("dsFullscreenCloseBtn")
+  };
 }
 
-
+// Compat: old function called in inline script
+function setDataStudioActiveCategory(category) {
+  // no-op in per-plant mode
+}
+function updateDataStudioFoundCount() {}
+function applyDataStudioTagFilters() {}
+function renderSelectedTagsList() {}
+function populateDataStudioContextSelect() {}
 function updateDataStudioStageUI() {
-  const { emptyState, workspace, catalogSection, openTagsBtn } = getDataStudioUIElements();
-  if (!emptyState || !workspace) return;
-
-  const hasSelection = Array.isArray(DATASTUDIO_STATE.selectedTags) && DATASTUDIO_STATE.selectedTags.length > 0;
-  const showWorkspace = hasSelection && DATASTUDIO_STATE.catalogConfirmed && !DATASTUDIO_STATE.forceHeroState;
-
-  if (showWorkspace) {
-    emptyState.classList.add("hidden");
-    workspace.classList.remove("hidden");
-  } else {
-    emptyState.classList.remove("hidden");
-    workspace.classList.add("hidden");
-  }
-
-  if (catalogSection) {
-    catalogSection.classList.toggle("is-open", Boolean(DATASTUDIO_STATE.catalogOpen));
-  }
-
-  if (openTagsBtn && !DATASTUDIO_STATE.loadingTags) {
-    openTagsBtn.textContent = DATASTUDIO_STATE.catalogOpen ? "−" : "+";
-  }
-
-  renderSelectedTagsList();
+  Object.keys(DATASTUDIO_PLANTS).forEach(pid => updateStageUIForPlant(pid));
 }
-
-function isTagSelected(tagOrPath) {
-  const key = selectedTagKey(tagOrPath);
-  if (!key || key.endsWith(":")) return false;
-  return DATASTUDIO_STATE.selectedTags.some((t) => selectedTagKey(t) === key);
-}
-
-function addSelectedTag(tag) {
-  if (!tag || !dsSafeTrim(tag.pathname)) return false;
-  if (isTagSelected(tag)) return true;
-  if (DATASTUDIO_STATE.selectedTags.length >= 50) {
-    window.alert("Você pode selecionar no máximo 50 medidas.");
-    return false;
-  }
-  DATASTUDIO_STATE.selectedTags.push(tag);
-  DATASTUDIO_STATE.forceHeroState = false;
-  updateDataStudioStageUI();
-  return true;
-}
-
-function removeSelectedTag(tagOrPath) {
-  const key = selectedTagKey(tagOrPath);
-  DATASTUDIO_STATE.selectedTags = DATASTUDIO_STATE.selectedTags.filter(
-    (t) => selectedTagKey(t) !== key
-  );
-  updateDataStudioStageUI();
-}
-
+function isTagSelected(tagOrPath) { return false; }
+function addSelectedTag(tag) { return false; }
+function removeSelectedTag(tagOrPath) {}
 function updateSelectedTagsCounter() {
-  const count = String(DATASTUDIO_STATE.selectedTags.length);
-  ["dsSelectedCount", "dsSelectedCountTop", "dsSelectedCountBottom"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = count;
-  });
+  Object.keys(DATASTUDIO_PLANTS).forEach(pid => updateSelectedTagsCounterForPlant(pid));
 }
-
-function renderDataStudioTagsTable(tags) {
-  const { tagsTableBody } = getDataStudioUIElements();
-  if (!tagsTableBody) return;
-
-  const rows = Array.isArray(tags) ? tags : [];
-  tagsTableBody.innerHTML = "";
-  updateDataStudioFoundCount(rows.length);
-
-  if (!rows.length) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = '<td colspan="8" style="text-align:center;opacity:.8;">Nenhuma medida encontrada</td>';
-    tagsTableBody.appendChild(tr);
-    updateSelectedTagsCounter();
-    return;
-  }
-
-  rows.forEach((tag) => {
-    const pathname = dsSafeTrim(tag?.pathname || tag?.path_name || tag?.tag);
-    if (!pathname) return;
-
-    const tr = document.createElement("tr");
-    tr.classList.add("ds-table-row-clickable");
-    const checked = isTagSelected(tag) ? "checked" : "";
-
-    const isAlarm = (tag?.data_kind === 'discrete') || (tag?.description || '').startsWith('âš ');
-    const isPlant = (tag?.context || '').toUpperCase().startsWith('PLANT') ||
-                    (tag?.pathname || '').startsWith('PLANT.');
-    const isWeather = (tag?.device_type || '').toLowerCase().includes('weather') ||
-                      (tag?.pathname || '').toLowerCase().includes('weather');
-    const isMeter   = (tag?.device_type || '').toLowerCase().includes('meter') ||
-                      (tag?.context || '').toLowerCase().includes('medidor') ||
-                      (tag?.context || '').toLowerCase().includes('meter');
-    const isRelay = (tag?.device_type || '').toLowerCase().includes('relay') ||
-                    (tag?.pathname || '').startsWith('RELAY_');
-
-    const svgInverter = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="3" width="10" height="7" rx="1.5" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><path d="M4 3V2a2 2 0 014 0v1" stroke="rgba(57,229,140,.8)" stroke-width="1.2"/><line x1="4" y1="6.5" x2="8" y2="6.5" stroke="rgba(57,229,140,.6)" stroke-width="1"/></svg>`;
-    const svgPlant   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 10V5M3 7l3-3 3 3" stroke="rgba(55,138,221,.9)" stroke-width="1.2" stroke-linecap="round"/><rect x="1" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/><rect x="7" y="1" width="4" height="3" rx="0.8" stroke="rgba(55,138,221,.7)" stroke-width="1"/></svg>`;
-    const svgWeather = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="5" r="2.5" stroke="rgba(239,159,39,.8)" stroke-width="1.2"/><line x1="6" y1="1" x2="6" y2="2" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="6" y1="8" x2="6" y2="9" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="2" y1="5" x2="3" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/><line x1="9" y1="5" x2="10" y2="5" stroke="rgba(239,159,39,.7)" stroke-width="1" stroke-linecap="round"/></svg>`;
-    const svgMeter   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="8" rx="1.5" stroke="rgba(212,83,126,.8)" stroke-width="1.2"/><path d="M3.5 7.5 C3.5 5.5 8.5 5.5 8.5 7.5" stroke="rgba(212,83,126,.7)" stroke-width="1" fill="none"/><line x1="6" y1="7.5" x2="5" y2="5.5" stroke="rgba(212,83,126,.9)" stroke-width="1" stroke-linecap="round"/></svg>`;
-    const svgRelay   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="2.5" width="10" height="7" rx="1.3" stroke="rgba(57,229,140,.8)" stroke-width="1.1"/><line x1="3" y1="8" x2="8.5" y2="8" stroke="rgba(57,229,140,.75)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="8" x2="5" y2="5" stroke="rgba(57,229,140,.85)" stroke-width="1.1" stroke-linecap="round"/><line x1="3" y1="5" x2="8.5" y2="5" stroke="rgba(57,229,140,.35)" stroke-width=".9" stroke-dasharray="2 1.3" stroke-linecap="round"/></svg>`;
-    const svgAlarm   = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1.5L1.5 9.5h9L6 1.5z" stroke="rgba(239,159,39,.9)" stroke-width="1.2" stroke-linejoin="round"/><line x1="6" y1="5" x2="6" y2="7.5" stroke="rgba(239,159,39,.9)" stroke-width="1" stroke-linecap="round"/><circle cx="6" cy="9" r=".6" fill="rgba(239,159,39,.9)"/></svg>`;
-
-    let iconSvg = svgInverter;
-    let iconClass = 'analog';
-    if (isAlarm)        { iconSvg = svgAlarm;   iconClass = 'discrete'; }
-    else if (isPlant)   { iconSvg = svgPlant;   iconClass = 'plant'; }
-    else if (isWeather) { iconSvg = svgWeather; iconClass = 'analog'; }
-    else if (isMeter)   { iconSvg = svgMeter;   iconClass = 'analog'; }
-    else if (isRelay)   { iconSvg = svgRelay;   iconClass = 'analog'; }
-
-    const unitHtml = tag?.unit ? `<span class="ds-unit-badge">${tag.unit}</span>` : '<span style="opacity:.35">â€”</span>';
-    const descHtml = valueOrDash(tag?.description);
-
-    tr.innerHTML = `
-      <td><input type="checkbox" data-ds-pathname="${pathname.replaceAll('"','&quot;')}" ${checked}></td>
-      <td style="min-width:90px;max-width:130px;white-space:normal;word-break:break-word;line-height:1.3;font-size:11px;">
-        <div class="ds-tag-context-cell">
-          <span class="ds-tag-icon ds-tag-icon--${iconClass}">${iconSvg}</span>
-          <span title="${(tag?.context||'').replace(/"/g,'&quot;')}">${valueOrDash(dsAbbrevContext(tag?.context))}</span>
-        </div>
-      </td>
-      <td style="white-space:normal;line-height:1.35;font-size:11px;">${descHtml}</td>
-      <td style="display:none;">${valueOrDash(tag?.source)}</td>
-      <td style="display:none;">${valueOrDash(tag?.data_kind)}</td>
-      <td>${unitHtml}</td>
-      <td style="display:none;">${valueOrDash(tag?.power_plant_id)}</td>
-      <td class="ds-pathname-cell" title="${pathname.replaceAll('"','&quot;')}" style="display:none;">${valueOrDash(pathname)}</td>
-    `;
-
-    const checkbox = tr.querySelector("input[type='checkbox']");
-    const syncRowSelectionState = () => {
-      tr.classList.toggle("is-selected", Boolean(checkbox?.checked));
-    };
-
-    const applySelection = (checkedState) => {
-      if (checkedState) {
-        const ok = addSelectedTag({
-          id: tag?.id ?? null,
-          tag_id: tag?.id ?? null,
-          device_type: tag?.device_type ?? null,
-          device_id: tag?.device_id ?? null,
-          point_name: tag?.point_name ?? null,
-          power_plant_id: tag?.power_plant_id ?? null,
-          context: dsSafeTrim(tag?.context) || "PLANT",
-          pathname,
-          source: dsSafeTrim(tag?.source) || "historico",
-          data_kind: dsSafeTrim(tag?.data_kind) || "analog",
-          unit: tag?.unit ?? null,
-          description: tag?.description ?? null
-        });
-        if (!ok && checkbox) checkbox.checked = false;
-      } else {
-        removeSelectedTag(tag);
-      }
-      updateSelectedTagsCounter();
-      syncRowSelectionState();
-    };
-
-    checkbox?.addEventListener("change", (ev) => {
-      applySelection(Boolean(ev.target.checked));
-    });
-
-    tr.addEventListener("click", (ev) => {
-      if (ev.target?.closest("input, button, a")) return;
-      if (!checkbox) return;
-      checkbox.checked = !checkbox.checked;
-      applySelection(Boolean(checkbox.checked));
-    });
-
-    syncRowSelectionState();
-    tagsTableBody.appendChild(tr);
-  });
-
-  updateSelectedTagsCounter();
-  updateDataStudioStageUI();
-}
-
+function renderDataStudioTagsTable(tags) {}
+function updateDataStudioContextInfo() {}
 
 function setDataStudioLoadingTags(isLoading) {
   DATASTUDIO_STATE.loadingTags = Boolean(isLoading);
-  const { openTagsBtn, tagsApplyBtn, tagsClearBtn } = getDataStudioUIElements();
-  if (DATASTUDIO_STATE.loadingTags) updateDataStudioFoundCount(null, "Buscando medidas...");
-  if (openTagsBtn) {
-    openTagsBtn.disabled = DATASTUDIO_STATE.loadingTags;
-    openTagsBtn.textContent = DATASTUDIO_STATE.loadingTags
-      ? "Carregando..."
-      : (DATASTUDIO_STATE.catalogOpen ? "−" : "+");
-  }
-  if (tagsApplyBtn) tagsApplyBtn.disabled = DATASTUDIO_STATE.loadingTags;
-  if (tagsClearBtn) tagsClearBtn.disabled = DATASTUDIO_STATE.loadingTags;
 }
 
 function setDataStudioSavingSelection(isLoading) {
   DATASTUDIO_STATE.savingSelection = Boolean(isLoading);
-  const { saveSelectionBtn } = getDataStudioUIElements();
-  if (!saveSelectionBtn) return;
-  saveSelectionBtn.disabled = DATASTUDIO_STATE.savingSelection;
-  saveSelectionBtn.textContent = DATASTUDIO_STATE.savingSelection ? "Salvando..." : "Salvar seleção";
+  const btn = document.getElementById("dsSaveSelectionBtn");
+  if (btn) {
+    btn.disabled = DATASTUDIO_STATE.savingSelection;
+    btn.textContent = DATASTUDIO_STATE.savingSelection ? "Salvando..." : "Salvar seleção";
+  }
 }
 
 function setDataStudioLoadingSeries(isLoading) {
   DATASTUDIO_STATE.loadingSeries = Boolean(isLoading);
-  const { loadSeriesBtn } = getDataStudioUIElements();
-  if (!loadSeriesBtn) return;
-  loadSeriesBtn.disabled = DATASTUDIO_STATE.loadingSeries;
-  loadSeriesBtn.textContent = DATASTUDIO_STATE.loadingSeries ? "Carregando..." : "Carregar séries";
+  const btn = document.getElementById("dsLoadSeriesBtn");
+  if (btn) {
+    btn.disabled = DATASTUDIO_STATE.loadingSeries;
+    btn.textContent = DATASTUDIO_STATE.loadingSeries ? "Carregando..." : "Carregar seleção";
+  }
 }
 
 function getDataStudioMainFilters() {
-  const { startDateInput, endDateInput, plantSelect } = getDataStudioUIElements();
+  const startDateInput = document.getElementById("dsStartDateInput");
+  const endDateInput = document.getElementById("dsEndDateInput");
 
   const rawStart = dsSafeTrim(startDateInput?.value || DATASTUDIO_STATE.startDate);
   const rawEnd = dsSafeTrim(endDateInput?.value || DATASTUDIO_STATE.endDate);
-  const plantRaw = dsSafeTrim(plantSelect?.value || DATASTUDIO_STATE.selectedPlantId);
 
   const start_ts_raw = dsIsoStartOfDay(rawStart);
   const end_ts_raw = dsIsoEndOfDay(rawEnd);
   const { startISO, endISO } = dsClampRange(start_ts_raw, end_ts_raw);
 
+  const ids = Array.isArray(DATASTUDIO_STATE.selectedPlantIds) ? DATASTUDIO_STATE.selectedPlantIds : [];
+  const firstId = ids.length ? ids[0] : null;
+
   return {
-    power_plant_id: plantRaw ? Number(plantRaw) : null,
+    power_plant_id: firstId ? Number(firstId) : null,
+    power_plant_ids: ids.map(Number),
     start_ts: startISO,
     end_ts: endISO
   };
 }
 
-function buildDataStudioSelectionPayload() {
+function buildPayloadForPlant(plantId, tags) {
   const filters = getDataStudioMainFilters();
-
-  if (!filters.power_plant_id) {
-    throw new Error("Selecione uma usina para continuar.");
-  }
   if (!filters.start_ts || !filters.end_ts) {
     throw new Error("Preencha um período válido (data inicial e final).");
-  }
-  if (!Array.isArray(DATASTUDIO_STATE.selectedTags) || !DATASTUDIO_STATE.selectedTags.length) {
-    throw new Error("Selecione ao menos uma medida.");
-  }
-  if (DATASTUDIO_STATE.selectedTags.length > 50) {
-    throw new Error("Limite de 50 medidas excedido.");
   }
 
   const allowedAgg = new Set(["none", "avg", "integral", "median", "max", "sum"]);
   const allowedPeriod = new Set(["5min", "daily", "weekly", "monthly", "yearly", "hdaily", "hweekly", "hmonthly", "hyearly"]);
 
-  const aggregationType = allowedAgg.has(DATASTUDIO_STATE.aggregationType)
-    ? DATASTUDIO_STATE.aggregationType
-    : "avg";
-  const consolidationPeriod = allowedPeriod.has(DATASTUDIO_STATE.consolidationPeriod)
-    ? DATASTUDIO_STATE.consolidationPeriod
-    : "5min";
+  const aggregationType = allowedAgg.has(DATASTUDIO_STATE.aggregationType) ? DATASTUDIO_STATE.aggregationType : "avg";
+  const consolidationPeriod = allowedPeriod.has(DATASTUDIO_STATE.consolidationPeriod) ? DATASTUDIO_STATE.consolidationPeriod : "5min";
 
-  const invalidTag = DATASTUDIO_STATE.selectedTags.find(
-    (t) => Number(t?.power_plant_id) !== Number(filters.power_plant_id)
-  );
-
-  if (invalidTag) {
-    throw new Error("Há medidas selecionadas de outra usina. Limpe a seleção e selecione novamente.");
-  }
-
-  const items = DATASTUDIO_STATE.selectedTags.slice(0, 50).map((t, idx) => ({
+  const items = tags.map((t, idx) => ({
     tag_id: t?.id ?? t?.tag_id ?? null,
     pathname: dsSafeTrim(t.pathname),
     display_type: "line",
@@ -2548,45 +2896,34 @@ function buildDataStudioSelectionPayload() {
 
   return {
     selection_name: "Seleção Data Studio",
-    power_plant_id: filters.power_plant_id,
+    power_plant_id: Number(plantId),
     start_ts: filters.start_ts,
     end_ts: filters.end_ts,
     timezone: "America/Fortaleza",
-    historico_aggregation_default:
-      DATASTUDIO_STATE.aggregationMode === "historico" ? aggregationType : "avg",
-    consolidado_period_default:
-      DATASTUDIO_STATE.aggregationMode === "consolidado" ? consolidationPeriod : "5min",
+    historico_aggregation_default: DATASTUDIO_STATE.aggregationMode === "historico" ? aggregationType : "avg",
+    consolidado_period_default: DATASTUDIO_STATE.aggregationMode === "consolidado" ? consolidationPeriod : "5min",
     items
   };
 }
 
-function updateDataStudioContextInfo() {
-  const { contextInfo } = getDataStudioUIElements();
-  if (!contextInfo) return;
-
-  const selectedContext = dsSafeTrim(DATASTUDIO_STATE.selectedContext) || "all";
-  if (selectedContext && selectedContext !== "all") {
-    contextInfo.textContent = `Exibindo medidas de: ${selectedContext}`;
-    contextInfo.classList.remove("hidden");
-  } else {
-    contextInfo.textContent = "Exibindo medidas de: todos contextos";
-    contextInfo.classList.remove("hidden");
-  }
-}
-
 function updateDataStudioExportButton() {
-  const { exportBtn } = getDataStudioUIElements();
+  const exportBtn = document.getElementById("dsExportBtn") || document.getElementById("dsExportBtnBottom");
   if (!exportBtn) return;
-  exportBtn.disabled = !DATASTUDIO_STATE.selectionId;
+  const hasSelections = Object.keys(DATASTUDIO_STATE.selectionIdsByPlant).length > 0 || DATASTUDIO_STATE.selectionId;
+  exportBtn.disabled = !hasSelections;
 }
 
 async function exportDataStudioSelection() {
-  if (!DATASTUDIO_STATE.selectionId) {
+  const selectionEntries = Object.entries(DATASTUDIO_STATE.selectionIdsByPlant);
+  if (!selectionEntries.length && DATASTUDIO_STATE.selectionId) {
+    selectionEntries.push(["single", DATASTUDIO_STATE.selectionId]);
+  }
+  if (!selectionEntries.length) {
     window.alert("Salve uma seleção antes de exportar.");
     return;
   }
 
-  const { exportBtn } = getDataStudioUIElements();
+  const exportBtn = document.getElementById("dsExportBtn") || document.getElementById("dsExportBtnBottom");
   const oldHtml = exportBtn ? exportBtn.innerHTML : "";
 
   try {
@@ -2595,33 +2932,59 @@ async function exportDataStudioSelection() {
       exportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
     }
 
-    const url = `${API_BASE}/datastudio/export?selection_id=${encodeURIComponent(DATASTUDIO_STATE.selectionId)}`;
-
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const headers = {};
     if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
 
-    const res = await fetch(url, { headers });
+    // Fetch CSV from each plant and merge into a single file
+    const csvParts = [];
+    let globalHeader = null;
 
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Falha ao exportar (${res.status}) ${txt}`);
+    for (const [plantId, selId] of selectionEntries) {
+      const url = `${API_BASE}/datastudio/export?selection_id=${encodeURIComponent(selId)}`;
+      const res = await fetch(url, { headers });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Falha ao exportar (${res.status}) ${txt}`);
+      }
+
+      const csvText = await res.text();
+      const lines = csvText.split(/\r?\n/).filter(l => l.trim() !== "");
+
+      if (!lines.length) continue;
+
+      if (globalHeader === null) {
+        // First plant: keep header + add "Usina" column
+        globalHeader = "Usina," + lines[0];
+        csvParts.push(globalHeader);
+        const plantName = dsGetPlantNameById(plantId) || `Usina ${plantId}`;
+        const safeName = plantName.replace(/"/g, '""');
+        for (let i = 1; i < lines.length; i++) {
+          csvParts.push(`"${safeName}",${lines[i]}`);
+        }
+      } else {
+        // Subsequent plants: skip header, add data rows with plant name
+        const plantName = dsGetPlantNameById(plantId) || `Usina ${plantId}`;
+        const safeName = plantName.replace(/"/g, '""');
+        for (let i = 1; i < lines.length; i++) {
+          csvParts.push(`"${safeName}",${lines[i]}`);
+        }
+      }
     }
 
-    const blob = await res.blob();
-
-    let filename = `datastudio_export_${DATASTUDIO_STATE.selectionId}.csv`;
-    const contentDisposition = res.headers.get("Content-Disposition");
-    const match = contentDisposition && contentDisposition.match(/filename="([^"]+)"/i);
-    if (match && match[1]) {
-      filename = match[1];
+    if (!csvParts.length) {
+      window.alert("Nenhum dado para exportar.");
+      return;
     }
 
+    const mergedCsv = csvParts.join("\n");
+    const blob = new Blob([mergedCsv], { type: "text/csv;charset=utf-8" });
     const blobUrl = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
-    a.download = filename;
+    a.download = `datastudio_export_${new Date().toISOString().slice(0,10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2638,95 +3001,28 @@ async function exportDataStudioSelection() {
 }
 
 function zoomDataStudioChart(factor = 1.2) {
-  if (!DATASTUDIO_CHART || typeof DATASTUDIO_CHART.zoom !== "function") return;
-
-  try {
-    DATASTUDIO_CHART.zoom({ x: factor, y: factor });
-  } catch (err) {
-    console.warn("[DataStudio] erro ao aplicar zoom:", err);
-  }
+  const charts = DATASTUDIO_CHART && typeof DATASTUDIO_CHART === "object" ? Object.values(DATASTUDIO_CHART) : [];
+  charts.forEach(chart => {
+    try { if (typeof chart.zoom === "function") chart.zoom({ x: factor, y: factor }); }
+    catch (err) { console.warn("[DataStudio] erro ao aplicar zoom:", err); }
+  });
 }
 
 function resetDataStudioChartZoom() {
-  if (!DATASTUDIO_CHART || typeof DATASTUDIO_CHART.resetZoom !== "function") return;
-
-  try {
-    DATASTUDIO_CHART.resetZoom();
-  } catch (err) {
-    console.warn("[DataStudio] erro ao resetar zoom:", err);
-  }
+  const charts = DATASTUDIO_CHART && typeof DATASTUDIO_CHART === "object" ? Object.values(DATASTUDIO_CHART) : [];
+  charts.forEach(chart => {
+    try { if (typeof chart.resetZoom === "function") chart.resetZoom(); }
+    catch (err) { console.warn("[DataStudio] erro ao resetar zoom:", err); }
+  });
 }
 
 function resizeDataStudioChartSoon() {
-  if (!DATASTUDIO_CHART || typeof DATASTUDIO_CHART.resize !== "function") return;
-
+  const charts = DATASTUDIO_CHART && typeof DATASTUDIO_CHART === "object" ? Object.values(DATASTUDIO_CHART) : [];
+  if (!charts.length) return;
   requestAnimationFrame(() => {
-    try {
-      DATASTUDIO_CHART.resize();
-    } catch (err) {
-      console.warn("[DataStudio] erro ao redimensionar grafico:", err);
-    }
-  });
-}
-
-function setDataStudioChartFullscreen(expanded) {
-  const { chartWrap, fullscreenBtn } = getDataStudioUIElements();
-  if (!chartWrap) return;
-
-  const isExpanded = Boolean(expanded);
-  chartWrap.classList.toggle("ds-chart-fullscreen", isExpanded);
-  document.body.classList.toggle("ds-chart-modal-open", isExpanded);
-
-  if (fullscreenBtn) {
-    fullscreenBtn.classList.toggle("is-active", isExpanded);
-    fullscreenBtn.setAttribute("aria-pressed", isExpanded ? "true" : "false");
-    fullscreenBtn.title = isExpanded ? "Voltar para tamanho normal" : "Tela cheia do grafico";
-    fullscreenBtn.setAttribute("aria-label", fullscreenBtn.title);
-    fullscreenBtn.innerHTML = isExpanded
-      ? '<i class="fa-solid fa-compress"></i>'
-      : '<i class="fa-solid fa-expand"></i>';
-  }
-
-  resizeDataStudioChartSoon();
-  window.setTimeout(resizeDataStudioChartSoon, 180);
-}
-
-function toggleDataStudioChartFullscreen() {
-  const { chartWrap } = getDataStudioUIElements();
-  setDataStudioChartFullscreen(!chartWrap?.classList.contains("ds-chart-fullscreen"));
-}
-
-function wireDataStudioChartPanCursorOnce() {
-  const { chartCanvas, chartWrap } = getDataStudioUIElements();
-  if (!chartCanvas || !chartWrap) return;
-  if (chartCanvas.dataset.dsPanCursorWired === "true") return;
-  chartCanvas.dataset.dsPanCursorWired = "true";
-
-  const stopPanning = () => {
-    chartWrap.classList.remove("is-panning");
-  };
-
-  chartCanvas.addEventListener("pointerdown", (event) => {
-    if (event.button != null && event.button !== 0) return;
-    chartWrap.classList.add("is-panning");
-    try { chartCanvas.setPointerCapture(event.pointerId); } catch (err) {}
-  });
-
-  ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"].forEach((eventName) => {
-    chartCanvas.addEventListener(eventName, stopPanning);
-  });
-
-  window.addEventListener("pointerup", stopPanning);
-}
-
-function wireDataStudioChartFullscreenKeysOnce() {
-  if (window.__dsChartFullscreenKeysWired) return;
-  window.__dsChartFullscreenKeysWired = true;
-
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      setDataStudioChartFullscreen(false);
-    }
+    charts.forEach(chart => {
+      try { if (typeof chart.resize === "function") chart.resize(); } catch (err) {}
+    });
   });
 }
 
@@ -2735,259 +3031,46 @@ function isMobileViewport() {
 }
 
 function clearDataStudioChartActiveState() {
-  if (!DATASTUDIO_CHART) return;
+  const charts = DATASTUDIO_CHART && typeof DATASTUDIO_CHART === "object" ? Object.values(DATASTUDIO_CHART) : [];
+  charts.forEach(chart => {
+    try {
+      chart.setActiveElements([]);
+      if (chart.tooltip && typeof chart.tooltip.setActiveElements === "function") {
+        chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+      }
+      chart.update("none");
+    } catch (err) {}
+  });
+}
 
-  try {
-    DATASTUDIO_CHART.setActiveElements([]);
-    if (DATASTUDIO_CHART.tooltip && typeof DATASTUDIO_CHART.tooltip.setActiveElements === "function") {
-      DATASTUDIO_CHART.tooltip.setActiveElements([], { x: 0, y: 0 });
+function wireDataStudioChartFullscreenKeysOnce() {
+  if (window.__dsChartFullscreenKeysWired) return;
+  window.__dsChartFullscreenKeysWired = true;
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      _exitAllFullscreen();
     }
-    DATASTUDIO_CHART.update("none");
-  } catch (err) {
-    console.warn("[DataStudio] erro ao limpar seleção do gráfico:", err);
-  }
+  });
 }
 
 function wireDataStudioChartOutsideTapOnce() {
   if (window.__dsOutsideTapWired) return;
   window.__dsOutsideTapWired = true;
-
   const clearIfOutside = (event) => {
-    if (!DATASTUDIO_CHART) return;
-    const { chartCanvas } = getDataStudioUIElements();
-    if (!chartCanvas) return;
-    if (!chartCanvas.contains(event.target)) {
+    const container = document.getElementById("dsPlantBlocks");
+    if (container && !container.contains(event.target)) {
       clearDataStudioChartActiveState();
     }
   };
-
   document.addEventListener("touchstart", clearIfOutside, { passive: true });
   document.addEventListener("click", clearIfOutside);
 }
 
-function openDataStudioCatalogInline({ resetFilters = false } = {}) {
-  const { plantSelect, startDateInput, endDateInput } = getDataStudioUIElements();
-
-  DATASTUDIO_STATE.startDate = dsSafeTrim(startDateInput?.value);
-  DATASTUDIO_STATE.endDate = dsSafeTrim(endDateInput?.value);
-  DATASTUDIO_STATE.selectedPlantId = dsSafeTrim(plantSelect?.value) || null;
-
-  const filters = getDataStudioMainFilters();
-  if (!filters.power_plant_id || !filters.start_ts || !filters.end_ts) {
-    window.alert("Selecione usina e período válido antes de abrir as medidas.");
-    return;
-  }
-
-  if (resetFilters) {
-    DATASTUDIO_STATE.selectedDataKind = "all";
-    DATASTUDIO_STATE.selectedSource = "all";
-    DATASTUDIO_STATE.selectedContext = "all";
-    DATASTUDIO_STATE.selectedCategory = "all";
-    DATASTUDIO_STATE.searchText = "";
-
-    const { dataKindSelect, sourceSelect, contextSelect, searchInput } = getDataStudioUIElements();
-    if (dataKindSelect) dataKindSelect.value = "all";
-    if (sourceSelect) sourceSelect.value = "all";
-    if (contextSelect) contextSelect.value = "all";
-    if (searchInput) searchInput.value = "";
-    setDataStudioActiveCategory("all");
-  }
-
-  DATASTUDIO_STATE.catalogOpen = true;
-  DATASTUDIO_STATE.forceHeroState = false;
-  updateDataStudioStageUI();
-  updateDataStudioContextInfo();
-  fetchDataStudioTags();
-}
-
-function toggleDataStudioCatalogInline() {
-  if (!DATASTUDIO_STATE.catalogOpen) {
-    openDataStudioCatalogInline({ resetFilters: !DATASTUDIO_STATE.availableTags.length });
-    return;
-  }
-  DATASTUDIO_STATE.catalogOpen = false;
-  updateDataStudioStageUI();
-}
-
-function confirmDataStudioCatalogSelection() {
-  if (!Array.isArray(DATASTUDIO_STATE.selectedTags) || !DATASTUDIO_STATE.selectedTags.length) {
-    window.alert("Selecione ao menos uma medida antes de confirmar.");
-    return;
-  }
-
-  DATASTUDIO_STATE.catalogConfirmed = true;
-  DATASTUDIO_STATE.forceHeroState = false;
-  DATASTUDIO_STATE.catalogOpen = false;
-  updateDataStudioStageUI();
-
-  setTimeout(() => {
-    const { bulkPanel } = getDataStudioUIElements();
-    bulkPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, 120);
-}
-
-async function fetchDataStudioTags() {
-  const { plantSelect, dataKindSelect, sourceSelect, contextSelect, searchInput } = getDataStudioUIElements();
-
-  const plantId = dsSafeTrim(plantSelect?.value || DATASTUDIO_STATE.selectedPlantId);
-  const dataKind = dsSafeTrim(dataKindSelect?.value || DATASTUDIO_STATE.selectedDataKind);
-  const source = dsSafeTrim(sourceSelect?.value || DATASTUDIO_STATE.selectedSource);
-  const context = dsSafeTrim(contextSelect?.value || DATASTUDIO_STATE.selectedContext);
-  const q = dsSafeTrim(searchInput?.value || DATASTUDIO_STATE.searchText);
-  const requestSeq = (DATASTUDIO_STATE.tagsRequestSeq || 0) + 1;
-  DATASTUDIO_STATE.tagsRequestSeq = requestSeq;
-
-  DATASTUDIO_STATE.selectedPlantId = plantId || null;
-  DATASTUDIO_STATE.selectedDataKind = dataKind || "all";
-  DATASTUDIO_STATE.selectedSource = source || "all";
-  DATASTUDIO_STATE.selectedContext = context || "all";
-  DATASTUDIO_STATE.searchText = q;
-
-  const params = new URLSearchParams();
-  if (plantId) params.set("plant_id", plantId);
-  if (dataKind && dataKind !== "all") params.set("data_kind", dataKind);
-  if (source && source !== "all") params.set("source", source);
-  params.set("limit", "5000");
-
-  const normalizeTagsResponse = (parsed) => {
-    if (Array.isArray(parsed)) return parsed;
-    if (Array.isArray(parsed?.items)) return parsed.items;
-    if (Array.isArray(parsed?.data)) return parsed.data;
-    return [];
-  };
-
-  if (DATASTUDIO_TAGS_ABORT_CONTROLLER) {
-    try { DATASTUDIO_TAGS_ABORT_CONTROLLER.abort(); } catch (err) {}
-  }
-
-  DATASTUDIO_TAGS_ABORT_CONTROLLER =
-    typeof AbortController !== "undefined" ? new AbortController() : null;
-
-  setDataStudioLoadingTags(true);
-
-  try {
-    const qs = params.toString();
-    const fetchOptions = DATASTUDIO_TAGS_ABORT_CONTROLLER
-      ? { signal: DATASTUDIO_TAGS_ABORT_CONTROLLER.signal }
-      : {};
-    const res = await apiFetch(`/datastudio/tags${qs ? `?${qs}` : ""}`, fetchOptions);
-    if (!res.ok) throw new Error(`Falha ao buscar medidas (${res.status})`);
-    const data = await res.json();
-    const parsed = dsNormalizeApiBody(data);
-    if (requestSeq !== DATASTUDIO_STATE.tagsRequestSeq) return;
-
-    const allTags = normalizeTagsResponse(parsed);
-    console.log("[DataStudio] TAGS RECEBIDAS:", allTags.length);
-    console.table(Object.entries(allTags.reduce((acc, tag) => {
-      const g = dsTagGroup(tag);
-      acc[g] = (acc[g] || 0) + 1;
-      return acc;
-    }, {})).map(([grupo, count]) => ({ grupo, count })));
-
-    const sortedTags = dsSortTags(allTags);
-    DATASTUDIO_STATE.catalogTags = sortedTags;
-    populateDataStudioContextSelect(sortedTags);
-
-    const contextAfterPopulate = dsSafeTrim(contextSelect?.value || DATASTUDIO_STATE.selectedContext || "all");
-    DATASTUDIO_STATE.selectedContext = contextAfterPopulate || "all";
-    applyDataStudioTagFilters();
-  } catch (err) {
-    if (err?.name === "AbortError") return;
-    if (requestSeq !== DATASTUDIO_STATE.tagsRequestSeq) return;
-    console.error("[DataStudio] erro ao buscar tags:", err);
-    DATASTUDIO_STATE.catalogTags = [];
-    DATASTUDIO_STATE.availableTags = [];
-    updateDataStudioContextInfo();
-    renderDataStudioTagsTable([]);
-  } finally {
-    if (requestSeq === DATASTUDIO_STATE.tagsRequestSeq) {
-      DATASTUDIO_TAGS_ABORT_CONTROLLER = null;
-      setDataStudioLoadingTags(false);
-    }
-  }
-}
-
-async function saveDataStudioSelection() {
-  setDataStudioSavingSelection(true);
-  try {
-    const payload = buildDataStudioSelectionPayload();
-    const res = await apiFetch("/datastudio/selection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await res.json().catch(() => ({}));
-    const parsed = dsNormalizeApiBody(data);
-
-    if (!res.ok) {
-      const msg = parsed?.message || `Falha ao salvar seleção (${res.status})`;
-      throw new Error(msg);
-    }
-
-    const selectionId = parsed?.selection_id ?? parsed?.id ?? parsed?.selectionId ?? null;
-    DATASTUDIO_STATE.selectionId = selectionId;
-
-    const { loadSeriesBtn } = getDataStudioUIElements();
-    if (loadSeriesBtn) loadSeriesBtn.disabled = false;
-    updateDataStudioExportButton();
-
-    DATASTUDIO_STATE.forceHeroState = false;
-    updateDataStudioStageUI();
-    window.alert(selectionId ? `Seleção salva! ID ${selectionId}` : "Seleção salva com sucesso.");
-
-    if (selectionId) {
-      await fetchDataStudioSeriesBySelection();
-    }
-  } catch (err) {
-    console.error("[DataStudio] erro ao salvar seleção:", err);
-    window.alert(`Não foi possível salvar a seleção: ${err.message || err}`);
-  } finally {
-    setDataStudioSavingSelection(false);
-  }
-}
-
-async function fetchDataStudioSeriesBySelection() {
-  if (!DATASTUDIO_STATE.selectionId) {
-    window.alert("Salve uma seleção antes de carregar séries.");
-    return;
-  }
-
-  setDataStudioLoadingSeries(true);
-  try {
-    const params = new URLSearchParams({ selection_id: String(DATASTUDIO_STATE.selectionId) });
-    const res = await apiFetch(`/datastudio/series?${params.toString()}`);
-    if (!res.ok) throw new Error(`Falha ao carregar séries (${res.status})`);
-
-    const data = await res.json();
-    const parsed = dsNormalizeApiBody(data);
-    DATASTUDIO_STATE.chartData = parsed;
-    updateDataStudioStageUI();
-    renderDataStudioChart(parsed);
-  } catch (err) {
-    console.error("[DataStudio] erro ao carregar séries:", err);
-    window.alert(`Não foi possível carregar séries: ${err.message || err}`);
-    renderDataStudioChart(null);
-  } finally {
-    setDataStudioLoadingSeries(false);
-  }
-}
-
-function renderDataStudioChart(seriesPayload) {
-  const { chartCanvas } = getDataStudioUIElements();
-  if (!chartCanvas || typeof Chart === "undefined") return;
-
-  if (DATASTUDIO_CHART) {
-    DATASTUDIO_CHART.destroy();
-    DATASTUDIO_CHART = null;
-  }
-
+function _renderSinglePlantChart(canvas, seriesPayload, plantIdx) {
   const labels = [];
   const datasets = [];
 
-  const seriesList = Array.isArray(seriesPayload?.series)
-    ? seriesPayload.series
-    : (Array.isArray(seriesPayload?.items) ? seriesPayload.items : []);
+  const seriesList = _extractSeriesList(seriesPayload);
 
   const scales = {
     x: { ticks: { color: "#9fb0bf" }, grid: { color: "rgba(255,255,255,.08)" } },
@@ -2997,32 +3080,21 @@ function renderDataStudioChart(seriesPayload) {
 
   if (seriesList.length) {
     const palette = DS_SERIES_PALETTE;
-
-    // 1. Coletar todos os timestamps únicos de TODAS as séries e ordenar
     const allTsSet = new Set();
-    seriesList.forEach((serie) => {
-      const points = Array.isArray(serie?.points)
-        ? serie.points
-        : (Array.isArray(serie?.data) ? serie.data : []);
-      points.forEach((pt) => {
+    seriesList.forEach(serie => {
+      const points = Array.isArray(serie?.points) ? serie.points : (Array.isArray(serie?.data) ? serie.data : []);
+      points.forEach(pt => {
         const ts = pt?.ts || pt?.timestamp || pt?.x;
         if (ts) allTsSet.add(String(ts));
       });
     });
     const allTsSorted = Array.from(allTsSet).sort();
-    allTsSorted.forEach((ts) => {
-      labels.push(new Date(ts).toLocaleString("pt-BR"));
-    });
+    allTsSorted.forEach(ts => labels.push(new Date(ts).toLocaleString("pt-BR")));
 
-    // 2. Para cada série, mapear valores pelo timestamp (não por índice)
     seriesList.forEach((serie, idx) => {
-      const points = Array.isArray(serie?.points)
-        ? serie.points
-        : (Array.isArray(serie?.data) ? serie.data : []);
-
-      // Mapa ts_string -> value para alinhamento correto
+      const points = Array.isArray(serie?.points) ? serie.points : (Array.isArray(serie?.data) ? serie.data : []);
       const valueByTs = new Map();
-      points.forEach((pt) => {
+      points.forEach(pt => {
         const ts = pt?.ts || pt?.timestamp || pt?.x;
         if (ts != null) {
           let v = pt?.value ?? pt?.y ?? null;
@@ -3046,121 +3118,50 @@ function renderDataStudioChart(seriesPayload) {
 
       datasets.push({
         label: serie?.label || serie?.pathname || `Série ${idx + 1}`,
-        data: allTsSorted.map((ts) => valueByTs.has(ts) ? valueByTs.get(ts) : null),
+        data: allTsSorted.map(ts => valueByTs.has(ts) ? valueByTs.get(ts) : null),
         borderColor: palette[idx % palette.length],
         backgroundColor: palette[idx % palette.length],
-        borderWidth: 2,
-        tension: 0.25,
-        pointRadius: 0,
-        pointHoverRadius: 6,
-        pointHitRadius: 16,
-        fill: false,
-        yAxisID: axisByUnit.get(unitKey) || "y",
+        borderWidth: 2, tension: 0.25,
+        pointRadius: 0, pointHoverRadius: 6, pointHitRadius: 16,
+        fill: false, yAxisID: axisByUnit.get(unitKey) || "y",
         spanGaps: true
       });
     });
   } else {
     labels.push("Sem dados");
     datasets.push({
-      label: "Data Studio",
-      data: [0],
-      borderColor: "#4da3ff",
-      backgroundColor: "#4da3ff",
-      borderWidth: 2,
-      tension: 0.25,
-      pointRadius: 0,
-      pointHoverRadius: 6,
-      pointHitRadius: 16,
-      fill: false,
-      yAxisID: "y"
+      label: "Data Studio", data: [0],
+      borderColor: "#4da3ff", backgroundColor: "#4da3ff",
+      borderWidth: 2, tension: 0.25,
+      pointRadius: 0, pointHoverRadius: 6, pointHitRadius: 16,
+      fill: false, yAxisID: "y"
     });
   }
 
   const mobile = isMobileViewport();
-
-  DATASTUDIO_CHART = new Chart(chartCanvas.getContext("2d"), {
+  return new Chart(canvas.getContext("2d"), {
     type: "line",
     data: { labels, datasets },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        mode: mobile ? "nearest" : "index",
-        intersect: false,
-        axis: "x"
-      },
-      hover: {
-        mode: mobile ? "nearest" : "index",
-        intersect: false
-      },
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: mobile ? "nearest" : "index", intersect: false, axis: "x" },
+      hover: { mode: mobile ? "nearest" : "index", intersect: false },
       elements: {
-        point: {
-          radius: 0,
-          hoverRadius: mobile ? 8 : 6,
-          hitRadius: mobile ? 24 : 16
-        },
-        line: {
-          borderWidth: 2
-        }
+        point: { radius: 0, hoverRadius: mobile ? 8 : 6, hitRadius: mobile ? 24 : 16 },
+        line: { borderWidth: 2 }
       },
       plugins: {
-        legend: {
-          labels: {
-            color: "#dbe7ef",
-            boxWidth: 12,
-            usePointStyle: true,
-            pointStyle: "line"
-          }
-        },
+        legend: { labels: { color: "#dbe7ef", boxWidth: 12, usePointStyle: true, pointStyle: "line" } },
         tooltip: {
-          enabled: true,
-          mode: mobile ? "nearest" : "index",
-          intersect: false,
-          displayColors: true,
-          backgroundColor: "rgba(6, 18, 14, 0.96)",
-          borderColor: "rgba(127,208,85,.22)",
-          borderWidth: 1,
-          titleColor: "#dbe7ef",
-          bodyColor: "#dbe7ef",
-          padding: 10,
-          caretSize: 6
+          enabled: true, mode: mobile ? "nearest" : "index", intersect: false,
+          displayColors: true, backgroundColor: "rgba(6, 18, 14, 0.96)",
+          borderColor: "rgba(127,208,85,.22)", borderWidth: 1,
+          titleColor: "#dbe7ef", bodyColor: "#dbe7ef", padding: 10, caretSize: 6
         },
         zoom: {
-          limits: {
-            x: { minRange: 5 },
-            y: { minRange: 1 }
-          },
-          pan: {
-            enabled: true,
-            mode: "xy",
-            threshold: 2,
-            onPanStart: () => {
-              const { chartWrap } = getDataStudioUIElements();
-              chartWrap?.classList.add("is-panning");
-              return true;
-            },
-            onPanComplete: () => {
-              const { chartWrap } = getDataStudioUIElements();
-              chartWrap?.classList.remove("is-panning");
-            },
-            onPanRejected: () => {
-              const { chartWrap } = getDataStudioUIElements();
-              chartWrap?.classList.remove("is-panning");
-            }
-          },
-          zoom: {
-            wheel: {
-              enabled: true,
-              speed: 0.08
-            },
-            pinch: {
-              enabled: true
-            },
-            drag: {
-              enabled: false
-            },
-            mode: "xy"
-          }
+          limits: { x: { minRange: 5 }, y: { minRange: 1 } },
+          pan: { enabled: true, mode: "xy", threshold: 2 },
+          zoom: { wheel: { enabled: true, speed: 0.08 }, pinch: { enabled: true }, drag: { enabled: false }, mode: "xy" }
         }
       },
       scales
@@ -3168,57 +3169,311 @@ function renderDataStudioChart(seriesPayload) {
   });
 }
 
+function _extractSeriesList(payload) {
+  if (Array.isArray(payload?.series)) return payload.series;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload)) return payload;
+  return [];
+}
+
+function _fillDsStatsForPlant(payload, plantId) {
+  const tbody = document.getElementById(`dsStatsTbody_${plantId}`);
+  if (!tbody) return;
+  const series = _extractSeriesList(payload);
+  if (!series.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="opacity:.5;text-align:center">Sem dados</td></tr>';
+    return;
+  }
+  const colors = DS_SERIES_PALETTE;
+  tbody.innerHTML = series.map((s, i) => {
+    const pts = (s.points || s.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v != null && isFinite(v));
+    const min = pts.length ? Math.min(...pts).toFixed(2) : '\u2014';
+    const max = pts.length ? Math.max(...pts).toFixed(2) : '\u2014';
+    const avg = pts.length ? (pts.reduce((a,b) => a+b,0)/pts.length).toFixed(2) : '\u2014';
+    const last = pts.length ? pts[pts.length-1].toFixed(2) : '\u2014';
+    const color = colors[i % colors.length];
+    return '<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+color+';margin-right:6px;"></span>'+(s.label || s.pathname || 'Série '+(i+1))+'</td><td>'+(s.unit || '\u2014')+'</td><td>'+min+'</td><td>'+max+'</td><td>'+avg+'</td><td>'+last+'</td></tr>';
+  }).join('');
+
+  const il = document.getElementById(`dsInsightsList_${plantId}`);
+  if (il && series.length) {
+    const first = series[0];
+    const pts = (first.points || first.data || []).map(p => Number(p.value ?? p.y ?? null)).filter(v => v!=null&&isFinite(v));
+    const peak = pts.length ? Math.max(...pts).toFixed(1) : '\u2014';
+    il.innerHTML =
+      '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Pico de <strong>'+(first.label||'Série 1')+'</strong>: <strong>'+peak+' '+(first.unit||'')+'</strong></span></div>' +
+      '<div class="ds-v2-insight-item"><i class="fa-solid fa-circle-check" style="color:#39e58c"></i><span>Total de séries: <strong>'+series.length+'</strong></span></div>';
+  }
+}
+
+// Compatibility wrapper
+function renderDataStudioChart(seriesPayload) {
+  if (seriesPayload === null || seriesPayload === undefined) {
+    Object.keys(DATASTUDIO_PLANTS).forEach(pid => {
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} ps.chartInstance = null; }
+      delete DATASTUDIO_CHART[pid];
+    });
+    return;
+  }
+  const plantId = DATASTUDIO_STATE.selectedPlantIds.length ? String(DATASTUDIO_STATE.selectedPlantIds[0]) : "single";
+  renderChartForPlant(plantId, seriesPayload);
+}
+
+// --- Multi-plant save & fetch ---
+
+async function saveDataStudioSelection() {
+  setDataStudioSavingSelection(true);
+  try {
+    const plantIds = Object.keys(DATASTUDIO_PLANTS);
+    if (!plantIds.length) throw new Error("Selecione ao menos uma usina para continuar.");
+
+    const selectionIdsByPlant = {};
+
+    for (const pid of plantIds) {
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (!ps.selectedTags.length) continue;
+
+      const payload = buildPayloadForPlant(pid, ps.selectedTags);
+      const res = await apiFetch("/datastudio/selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json().catch(() => ({}));
+      const parsed = dsNormalizeApiBody(data);
+
+      if (!res.ok) {
+        const msg = parsed?.message || `Falha ao salvar seleção (${res.status})`;
+        throw new Error(msg);
+      }
+
+      const selectionId = parsed?.selection_id ?? parsed?.id ?? parsed?.selectionId ?? null;
+      if (selectionId) {
+        selectionIdsByPlant[pid] = selectionId;
+        ps.selectionId = selectionId;
+      }
+    }
+
+    DATASTUDIO_STATE.selectionIdsByPlant = selectionIdsByPlant;
+    const firstSelId = Object.values(selectionIdsByPlant)[0] || null;
+    DATASTUDIO_STATE.selectionId = firstSelId;
+
+    const loadSeriesBtn = document.getElementById("dsLoadSeriesBtn");
+    if (loadSeriesBtn) loadSeriesBtn.disabled = false;
+    updateDataStudioExportButton();
+
+    const plantCount = Object.keys(selectionIdsByPlant).length;
+    if (!plantCount) {
+      window.alert("Nenhuma usina tem medidas selecionadas.");
+      return;
+    }
+    window.alert(plantCount > 1
+      ? `Seleções salvas para ${plantCount} usinas!`
+      : (firstSelId ? `Seleção salva! ID ${firstSelId}` : "Seleção salva com sucesso."));
+
+    await fetchDataStudioSeriesBySelection();
+  } catch (err) {
+    console.error("[DataStudio] erro ao salvar seleção:", err);
+    window.alert(`Não foi possível salvar a seleção: ${err.message || err}`);
+  } finally {
+    setDataStudioSavingSelection(false);
+  }
+}
+
+async function fetchDataStudioSeriesBySelection() {
+  const selEntries = Object.entries(DATASTUDIO_STATE.selectionIdsByPlant);
+  if (!selEntries.length && DATASTUDIO_STATE.selectionId) {
+    selEntries.push([String(DATASTUDIO_STATE.selectedPlantIds[0] || "single"), DATASTUDIO_STATE.selectionId]);
+  }
+  if (!selEntries.length) {
+    window.alert("Salve uma seleção antes de carregar séries.");
+    return;
+  }
+
+  setDataStudioLoadingSeries(true);
+  try {
+    DATASTUDIO_STATE.seriesByPlant = {};
+
+    for (const [plantId, selId] of selEntries) {
+      const params = new URLSearchParams({ selection_id: String(selId) });
+      const res = await apiFetch(`/datastudio/series?${params.toString()}`);
+      if (!res.ok) throw new Error(`Falha ao carregar séries (${res.status})`);
+
+      const data = await res.json();
+      const parsed = dsNormalizeApiBody(data);
+      DATASTUDIO_STATE.seriesByPlant[plantId] = parsed;
+    }
+
+    // Render chart for each plant
+    for (const [plantId, seriesPayload] of Object.entries(DATASTUDIO_STATE.seriesByPlant)) {
+      const ps = DATASTUDIO_PLANTS[plantId];
+      if (ps) {
+        ps.catalogConfirmed = true;
+        // keep catalog open — don't force close
+        updateStageUIForPlant(plantId);
+      }
+      renderChartForPlant(plantId, seriesPayload);
+    }
+  } catch (err) {
+    console.error("[DataStudio] erro ao carregar séries:", err);
+    window.alert(`Não foi possível carregar séries: ${err.message || err}`);
+  } finally {
+    setDataStudioLoadingSeries(false);
+  }
+}
+
+// --- Apply all plants (called from topbar Aplicar button) ---
+
+window.applyAllPlants = function() {
+  const plantIds = Object.keys(DATASTUDIO_PLANTS);
+  if (!plantIds.length) {
+    window.alert("Selecione ao menos uma usina.");
+    return;
+  }
+
+  let anyTags = false;
+  plantIds.forEach(pid => {
+    const ps = DATASTUDIO_PLANTS[pid];
+    if (ps.selectedTags.length) {
+      ps.catalogConfirmed = true;
+      // keep catalog open — user wants to keep seeing it
+      updateStageUIForPlant(pid);
+      anyTags = true;
+    }
+  });
+
+  if (!anyTags) {
+    window.alert("Selecione medidas em pelo menos uma usina antes de aplicar.");
+    return;
+  }
+
+  saveDataStudioSelection();
+};
+
+function markDataStudioSeriesDirty() {
+  DATASTUDIO_STATE.selectionId = null;
+  DATASTUDIO_STATE.selectionIdsByPlant = {};
+  DATASTUDIO_STATE.seriesByPlant = {};
+  DATASTUDIO_STATE.chartData = null;
+
+  const loadSeriesBtn = document.getElementById("dsLoadSeriesBtn");
+  const saveSelectionBtn = document.getElementById("dsSaveSelectionBtn");
+  if (loadSeriesBtn) { loadSeriesBtn.disabled = true; loadSeriesBtn.textContent = "Carregar séries"; }
+  if (saveSelectionBtn) saveSelectionBtn.disabled = false;
+
+  renderDataStudioChart(null);
+  updateDataStudioExportButton();
+}
+
+// --- Plant select ---
 
 function populateDataStudioPlantSelect(plants) {
-  const { plantSelect } = getDataStudioUIElements();
-  if (!plantSelect) return;
-
+  const plantSelect = document.getElementById("dsPlantSelect");
+  const plantMultiselectDropdown = document.getElementById("dsPlantMultiselectDropdown");
   const list = Array.isArray(plants) ? plants : [];
-  const currentValue =
-  dsSafeTrim(plantSelect.value) ||
-  dsSafeTrim(DATASTUDIO_STATE.selectedPlantId) ||
-  "";
 
-  const nextOptions = [
-    { value: "", text: "Selecione uma usina" },
-    ...list
-      .map((p) => {
+  if (plantSelect) {
+    const currentValue = dsSafeTrim(plantSelect.value) || dsSafeTrim(DATASTUDIO_STATE.selectedPlantId) || "";
+    const nextOptions = [
+      { value: "", text: "Selecione uma usina" },
+      ...list.map(p => {
         const id = p.power_plant_id ?? p.plant_id ?? p.id;
         const name = p.power_plant_name ?? p.name ?? `Usina ${id}`;
         return id == null ? null : { value: String(id), text: String(name) };
-      })
-      .filter(Boolean)
-  ];
+      }).filter(Boolean)
+    ];
 
-  const currentSerialized = [...plantSelect.options].map(o => `${o.value}|${o.textContent}`).join("||");
-  const nextSerialized = nextOptions.map(o => `${o.value}|${o.text}`).join("||");
+    const currentSerialized = [...plantSelect.options].map(o => `${o.value}|${o.textContent}`).join("||");
+    const nextSerialized = nextOptions.map(o => `${o.value}|${o.text}`).join("||");
 
-  if (currentSerialized !== nextSerialized) {
-    plantSelect.innerHTML = "";
-    nextOptions.forEach(({ value, text }) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = text;
-      plantSelect.appendChild(option);
+    if (currentSerialized !== nextSerialized) {
+      plantSelect.innerHTML = "";
+      nextOptions.forEach(({ value, text }) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        plantSelect.appendChild(option);
+      });
+    }
+
+    if (currentValue && nextOptions.some(o => o.value === currentValue)) plantSelect.value = currentValue;
+    else if (!plantSelect.value) plantSelect.value = "";
+    DATASTUDIO_STATE.selectedPlantId = dsSafeTrim(plantSelect.value) || null;
+  }
+
+  if (plantMultiselectDropdown) {
+    const prevSelected = new Set(DATASTUDIO_STATE.selectedPlantIds.map(String));
+    plantMultiselectDropdown.innerHTML = "";
+
+    list.forEach(p => {
+      const id = p.power_plant_id ?? p.plant_id ?? p.id;
+      const name = p.power_plant_name ?? p.name ?? `Usina ${id}`;
+      if (id == null) return;
+
+      const label = document.createElement("label");
+      label.className = "ds-plant-option";
+      const checked = prevSelected.has(String(id)) ? "checked" : "";
+      label.innerHTML = `<input type="checkbox" value="${id}" data-name="${(name||'').replace(/"/g,'&quot;')}" ${checked}> ${name}`;
+      plantMultiselectDropdown.appendChild(label);
+
+      label.querySelector("input").addEventListener("change", () => {
+        _syncMultiselectState();
+      });
     });
+
+    _syncMultiselectLabel();
   }
+}
 
-  if (currentValue && nextOptions.some(o => o.value === currentValue)) {
-    plantSelect.value = currentValue;
-  } else if (!plantSelect.value) {
-    plantSelect.value = "";
-  }
+function _syncMultiselectState() {
+  const dropdown = document.getElementById("dsPlantMultiselectDropdown");
+  if (!dropdown) return;
 
-  DATASTUDIO_STATE.selectedPlantId = dsSafeTrim(plantSelect.value) || null;
+  const checked = dropdown.querySelectorAll("input[type='checkbox']:checked");
+  const newIds = Array.from(checked).map(cb => Number(cb.value));
+  const oldIds = DATASTUDIO_STATE.selectedPlantIds;
 
-  console.log("[DS] plant options:", [...plantSelect.options].map(o => ({
-    value: o.value,
-    text: o.textContent
-  })));
+  const changed = newIds.length !== oldIds.length || newIds.some((id, i) => id !== oldIds[i]);
+  if (!changed) return;
+
+  DATASTUDIO_STATE.selectedPlantIds = newIds;
+  DATASTUDIO_STATE.selectedPlantId = newIds.length ? String(newIds[0]) : null;
+
+  const plantSelect = document.getElementById("dsPlantSelect");
+  if (plantSelect && newIds.length) plantSelect.value = String(newIds[0]);
+
+  // Clear shared state
+  DATASTUDIO_STATE.selectionId = null;
+  DATASTUDIO_STATE.selectionIdsByPlant = {};
+  DATASTUDIO_STATE.seriesByPlant = {};
+  DATASTUDIO_STATE.chartData = null;
+
+  updateDataStudioExportButton();
+  _syncMultiselectLabel();
+
+  // Drive per-plant blocks
+  onSelectedPlantsChanged();
+}
+
+function _syncMultiselectLabel() {
+  const dropdown = document.getElementById("dsPlantMultiselectDropdown");
+  const label = document.getElementById("dsPlantMultiselectLabel");
+  if (!dropdown || !label) return;
+
+  const checked = dropdown.querySelectorAll("input[type='checkbox']:checked");
+  if (!checked.length) { label.textContent = "Selecione usinas"; return; }
+  const names = Array.from(checked).map(cb => cb.dataset.name || `Usina ${cb.value}`);
+  label.textContent = names.join(", ");
+  label.title = names.join(", ");
 }
 
 function syncDataStudioAggregationUI() {
-  const { modeSelect, aggregationSelect, consolidationSelect } = getDataStudioUIElements();
+  const modeSelect = document.getElementById("dsModeSelect");
+  const aggregationSelect = document.getElementById("dsAggregationSelect");
+  const consolidationSelect = document.getElementById("dsConsolidationSelect");
   if (modeSelect) modeSelect.value = DATASTUDIO_STATE.aggregationMode;
   if (aggregationSelect) {
     aggregationSelect.value = DATASTUDIO_STATE.aggregationType;
@@ -3230,32 +3485,6 @@ function syncDataStudioAggregationUI() {
   }
 }
 
-function markDataStudioSeriesDirty() {
-  DATASTUDIO_STATE.selectionId = null;
-  DATASTUDIO_STATE.chartData = null;
-
-  const { loadSeriesBtn, saveSelectionBtn } = getDataStudioUIElements();
-
-  if (loadSeriesBtn) {
-    loadSeriesBtn.disabled = true;
-    loadSeriesBtn.textContent = "Carregar séries";
-  }
-
-  if (saveSelectionBtn) {
-    saveSelectionBtn.disabled = false;
-  }
-
-  renderDataStudioChart(null);
-  updateDataStudioExportButton();
-}
-
-function scheduleDataStudioTagsFetch(delay = 220) {
-  window.clearTimeout(DATASTUDIO_STATE.tagsSearchTimer);
-  DATASTUDIO_STATE.tagsSearchTimer = window.setTimeout(() => {
-    fetchDataStudioTags();
-  }, delay);
-}
-
 function formatDateInputValue(dateObj) {
   const y = dateObj.getFullYear();
   const m = String(dateObj.getMonth() + 1).padStart(2, "0");
@@ -3264,12 +3493,12 @@ function formatDateInputValue(dateObj) {
 }
 
 function autoAdjustDataStudioDateRangeByMode() {
-  const { startDateInput, endDateInput } = getDataStudioUIElements();
+  const startDateInput = document.getElementById("dsStartDateInput");
+  const endDateInput = document.getElementById("dsEndDateInput");
   if (!startDateInput || !endDateInput) return;
 
   const now = new Date();
   const start = new Date(now);
-
   const mode = dsSafeTrim(DATASTUDIO_STATE.aggregationMode || "historico");
   const period = dsSafeTrim(DATASTUDIO_STATE.consolidationPeriod || "5min");
 
@@ -3277,208 +3506,283 @@ function autoAdjustDataStudioDateRangeByMode() {
     start.setDate(now.getDate() - 7);
   } else {
     switch (period) {
-      case "5min":
-        start.setDate(now.getDate() - 1);
-        break;
-      case "daily":
-      case "hdaily":
-        start.setDate(now.getDate() - 30);
-        break;
-      case "weekly":
-      case "hweekly":
-        start.setDate(now.getDate() - 90);
-        break;
-      case "monthly":
-      case "hmonthly":
-        start.setMonth(now.getMonth() - 12);
-        break;
-      case "yearly":
-      case "hyearly":
-        start.setFullYear(now.getFullYear() - 5);
-        break;
-      default:
-        start.setDate(now.getDate() - 30);
-        break;
+      case "5min": start.setDate(now.getDate() - 1); break;
+      case "daily": case "hdaily": start.setDate(now.getDate() - 30); break;
+      case "weekly": case "hweekly": start.setDate(now.getDate() - 90); break;
+      case "monthly": case "hmonthly": start.setMonth(now.getMonth() - 12); break;
+      case "yearly": case "hyearly": start.setFullYear(now.getFullYear() - 5); break;
+      default: start.setDate(now.getDate() - 30); break;
     }
   }
 
   const startStr = formatDateInputValue(start);
   const endStr = formatDateInputValue(now);
-
   startDateInput.value = startStr;
   endDateInput.value = endStr;
-
   DATASTUDIO_STATE.startDate = startStr;
   DATASTUDIO_STATE.endDate = endStr;
 }
 
+// --- Fullscreen per-plant ---
+// Multiple charts can be fullscreen at the same time.
+// "Fullscreen" = expand in-place: hide catalog + series panel, tall canvas.
+// Multiple blocks can be expanded at the same time — they stay in normal flow.
+
+function _setPlantChartFullscreen(plantId, expanded) {
+  const block = document.getElementById(`dsPlantBlock_${plantId}`);
+  if (!block) return;
+  block.classList.toggle("ds-plant-block--expanded", Boolean(expanded));
+  resizeDataStudioChartSoon();
+  window.setTimeout(resizeDataStudioChartSoon, 200);
+}
+
+function _togglePlantChartFullscreen(plantId) {
+  const block = document.getElementById(`dsPlantBlock_${plantId}`);
+  _setPlantChartFullscreen(plantId, !block?.classList.contains("ds-plant-block--expanded"));
+}
+
+function _exitAllFullscreen() {
+  document.querySelectorAll(".ds-plant-block--expanded").forEach(el => {
+    el.classList.remove("ds-plant-block--expanded");
+  });
+  resizeDataStudioChartSoon();
+}
+
+// --- Pan cursor wiring (delegated) ---
+
+function _wireChartPanCursor() {
+  const container = document.getElementById("dsPlantBlocks");
+  if (!container || container.dataset.dsPanWired === "true") return;
+  container.dataset.dsPanWired = "true";
+
+  const stopPanning = () => {
+    document.querySelectorAll(".ds-chart-wrap.is-panning").forEach(el => el.classList.remove("is-panning"));
+  };
+
+  container.addEventListener("pointerdown", ev => {
+    const canvas = ev.target.closest("canvas");
+    if (!canvas) return;
+    const wrap = canvas.closest(".ds-chart-wrap");
+    if (!wrap || (ev.button != null && ev.button !== 0)) return;
+    wrap.classList.add("is-panning");
+    try { ev.target.setPointerCapture(ev.pointerId); } catch(e){}
+  });
+
+  ["pointerup", "pointercancel", "pointerleave", "lostpointercapture"].forEach(evName => {
+    container.addEventListener(evName, ev => {
+      if (ev.target.closest("canvas")) stopPanning();
+    });
+  });
+
+  window.addEventListener("pointerup", stopPanning);
+}
+
+// --- Event delegation on #dsPlantBlocks ---
+
+function _wireDataStudioPlantBlocksDelegation() {
+  const container = document.getElementById("dsPlantBlocks");
+  if (!container || container.dataset.dsDelegated === "true") return;
+  container.dataset.dsDelegated = "true";
+
+  // Click delegation
+  container.addEventListener("click", ev => {
+    const target = ev.target.closest("[data-action]");
+    if (!target) return;
+    const action = target.dataset.action;
+    const plantId = target.dataset.plant;
+    if (!plantId) return;
+
+    switch (action) {
+      case "toggleCatalog":
+        toggleCatalogForPlant(plantId);
+        break;
+      case "confirmCatalog":
+        confirmCatalogSelectionForPlant(plantId);
+        break;
+      case "removeTag": {
+        const path = target.dataset.path;
+        if (path) {
+          removeSelectedTagForPlant(plantId, path);
+          renderDataStudioTagsTableForPlant(plantId, DATASTUDIO_PLANTS[plantId]?.availableTags || []);
+        }
+        break;
+      }
+      case "fullscreen":
+        _togglePlantChartFullscreen(plantId);
+        break;
+      case "exitFullscreen":
+        _setPlantChartFullscreen(plantId, false);
+        break;
+      case "zoomIn": {
+        const ch = DATASTUDIO_CHART[plantId];
+        if (ch && typeof ch.zoom === "function") ch.zoom({ x: 1.2, y: 1.2 });
+        break;
+      }
+      case "zoomOut": {
+        const ch2 = DATASTUDIO_CHART[plantId];
+        if (ch2 && typeof ch2.zoom === "function") ch2.zoom({ x: 0.8, y: 0.8 });
+        break;
+      }
+      case "zoomReset": {
+        const ch3 = DATASTUDIO_CHART[plantId];
+        if (ch3 && typeof ch3.resetZoom === "function") ch3.resetZoom();
+        break;
+      }
+    }
+  });
+
+  // Category pill clicks
+  container.addEventListener("click", ev => {
+    const pill = ev.target.closest(".ds-v2-pill[data-plant]");
+    if (!pill) return;
+    const plantId = pill.dataset.plant;
+    const cat = pill.dataset.cat || "all";
+    setActiveCategoryForPlant(plantId, cat);
+    applyTagFiltersForPlant(plantId);
+  });
+
+  // Search input
+  container.addEventListener("input", ev => {
+    const input = ev.target.closest(".ds-v2-search[data-plant]");
+    if (!input) return;
+    const plantId = input.dataset.plant;
+    const ps = DATASTUDIO_PLANTS[String(plantId)];
+    if (!ps) return;
+    ps.searchText = dsSafeTrim(input.value);
+    if (ps.catalogTags.length) {
+      applyTagFiltersForPlant(plantId);
+    }
+  });
+
+  // Context select change
+  container.addEventListener("change", ev => {
+    const sel = ev.target.closest("select[data-plant]");
+    if (!sel) return;
+    const plantId = sel.dataset.plant;
+    const ps = DATASTUDIO_PLANTS[String(plantId)];
+    if (!ps) return;
+
+    if (sel.id && sel.id.startsWith("dsContextSelect_")) {
+      ps.selectedContext = dsSafeTrim(sel.value) || "all";
+      if (ps.catalogTags.length) applyTagFiltersForPlant(plantId);
+    }
+  });
+}
+
+// --- wireDataStudioOnce (rewritten for per-plant architecture) ---
+
 function wireDataStudioOnce() {
   if (DATASTUDIO_STATE.wired) return;
 
-  const ui = getDataStudioUIElements();
-  if (!ui.openTagsBtn && !ui.startDateInput && !ui.endDateInput) return;
+  const startDateInput = document.getElementById("dsStartDateInput");
+  const endDateInput = document.getElementById("dsEndDateInput");
+  if (!startDateInput && !endDateInput) return;
 
   DATASTUDIO_STATE.wired = true;
 
   const now = new Date();
   const week = new Date();
   week.setDate(now.getDate() - 7);
-  const asDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const asDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-  if (ui.startDateInput && !ui.startDateInput.value) ui.startDateInput.value = asDate(week);
-  if (ui.endDateInput && !ui.endDateInput.value) ui.endDateInput.value = asDate(now);
-
-  DATASTUDIO_STATE.startDate = dsSafeTrim(ui.startDateInput?.value);
-  DATASTUDIO_STATE.endDate = dsSafeTrim(ui.endDateInput?.value);
+  if (startDateInput && !startDateInput.value) startDateInput.value = asDate(week);
+  if (endDateInput && !endDateInput.value) endDateInput.value = asDate(now);
+  DATASTUDIO_STATE.startDate = dsSafeTrim(startDateInput?.value);
+  DATASTUDIO_STATE.endDate = dsSafeTrim(endDateInput?.value);
 
   autoAdjustDataStudioDateRangeByMode();
 
-  ui.startDateInput?.addEventListener("change", (e) => {
+  // Date change listeners
+  startDateInput?.addEventListener("change", e => {
     DATASTUDIO_STATE.startDate = dsSafeTrim(e.target.value);
-    DATASTUDIO_STATE.catalogConfirmed = false;
     markDataStudioSeriesDirty();
   });
-
-  ui.endDateInput?.addEventListener("change", (e) => {
+  endDateInput?.addEventListener("change", e => {
     DATASTUDIO_STATE.endDate = dsSafeTrim(e.target.value);
-    DATASTUDIO_STATE.catalogConfirmed = false;
     markDataStudioSeriesDirty();
   });
 
-  ui.plantSelect?.addEventListener("change", (e) => {
-    const nextPlantId = dsSafeTrim(e.target.value) || null;
-    DATASTUDIO_STATE.selectedPlantId = nextPlantId;
-
-    DATASTUDIO_STATE.selectedTags = [];
-    DATASTUDIO_STATE.catalogTags = [];
-    DATASTUDIO_STATE.availableTags = [];
-    DATASTUDIO_STATE.selectionId = null;
-    DATASTUDIO_STATE.chartData = null;
-    DATASTUDIO_STATE.selectedContext = "all";
-    DATASTUDIO_STATE.selectedCategory = "all";
-    DATASTUDIO_STATE.searchText = "";
-
-    if (ui.contextSelect) {
-      ui.contextSelect.innerHTML = "";
-      const opt = document.createElement("option");
-      opt.value = "all";
-      opt.textContent = "Todos contextos";
-      ui.contextSelect.appendChild(opt);
-      ui.contextSelect.value = "all";
-    }
-
-    if (ui.searchInput) ui.searchInput.value = "";
-    setDataStudioActiveCategory("all");
-
-    renderDataStudioTagsTable([]);
-    renderDataStudioChart(null);
-    updateSelectedTagsCounter();
-    updateDataStudioExportButton();
-    DATASTUDIO_STATE.catalogOpen = Boolean(nextPlantId);
-    DATASTUDIO_STATE.forceHeroState = false;
-    DATASTUDIO_STATE.catalogConfirmed = false;
-    updateDataStudioStageUI();
-    if (nextPlantId) fetchDataStudioTags();
+  // Multi-select dropdown toggle
+  const plantMultiselectBtn = document.getElementById("dsPlantMultiselectBtn");
+  plantMultiselectBtn?.addEventListener("click", e => {
+    e.stopPropagation();
+    const wrapper = document.getElementById("dsPlantMultiselect");
+    if (wrapper) wrapper.classList.toggle("is-open");
   });
 
-  ui.dataKindSelect?.addEventListener("change", (e) => {
-    DATASTUDIO_STATE.selectedDataKind = dsSafeTrim(e.target.value) || "all";
-    fetchDataStudioTags();
+  document.addEventListener("click", e => {
+    const wrapper = document.getElementById("dsPlantMultiselect");
+    if (wrapper && !wrapper.contains(e.target)) wrapper.classList.remove("is-open");
   });
 
-  ui.sourceSelect?.addEventListener("change", (e) => {
-    DATASTUDIO_STATE.selectedSource = dsSafeTrim(e.target.value) || "all";
-    fetchDataStudioTags();
-  });
+  // Aggregation controls
+  const modeSelect = document.getElementById("dsModeSelect");
+  const aggregationSelect = document.getElementById("dsAggregationSelect");
+  const consolidationSelect = document.getElementById("dsConsolidationSelect");
 
-  ui.contextSelect?.addEventListener("change", (e) => {
-    DATASTUDIO_STATE.selectedContext = dsSafeTrim(e.target.value) || "all";
-    if (DATASTUDIO_STATE.catalogTags.length) applyDataStudioTagFilters();
-    else fetchDataStudioTags();
-  });
-
-  ui.searchInput?.addEventListener("input", (e) => {
-    DATASTUDIO_STATE.searchText = dsSafeTrim(e.target.value);
-    if (DATASTUDIO_STATE.catalogTags.length) {
-      applyDataStudioTagFilters();
-    } else {
-      scheduleDataStudioTagsFetch();
-    }
-  });
-
-  document.querySelectorAll(".ds-v2-pill").forEach((pill) => {
-    pill.addEventListener("click", () => {
-      setDataStudioActiveCategory(dsSafeTrim(pill.dataset.cat || "all") || "all");
-      if (DATASTUDIO_STATE.catalogTags.length) applyDataStudioTagFilters();
-    });
-  });
-
-  ui.modeSelect?.addEventListener("change", (e) => {
+  modeSelect?.addEventListener("change", e => {
     DATASTUDIO_STATE.aggregationMode = dsSafeTrim(e.target.value) || "historico";
-
     syncDataStudioAggregationUI();
     autoAdjustDataStudioDateRangeByMode();
     markDataStudioSeriesDirty();
   });
 
-  ui.aggregationSelect?.addEventListener("change", (e) => {
+  aggregationSelect?.addEventListener("change", e => {
     DATASTUDIO_STATE.aggregationType = dsSafeTrim(e.target.value) || "avg";
     markDataStudioSeriesDirty();
   });
 
-  ui.consolidationSelect?.addEventListener("change", (e) => {
+  consolidationSelect?.addEventListener("change", e => {
     DATASTUDIO_STATE.consolidationPeriod = dsSafeTrim(e.target.value) || "5min";
-
     autoAdjustDataStudioDateRangeByMode();
     markDataStudioSeriesDirty();
   });
 
-  ui.openTagsBtn?.addEventListener("click", toggleDataStudioCatalogInline);
-  ui.tagsApplyBtn?.addEventListener("click", fetchDataStudioTags);
-  ui.confirmSelectionBtn?.addEventListener("click", confirmDataStudioCatalogSelection);
+  // Bottombar buttons
+  const loadSeriesBtn = document.getElementById("dsLoadSeriesBtn");
+  const saveSelectionBtn = document.getElementById("dsSaveSelectionBtn");
+  const exportBtn = document.getElementById("dsExportBtn") || document.getElementById("dsExportBtnBottom");
+  const clearAllBtn = document.getElementById("dsClearAllBtn");
 
-  ui.tagsClearBtn?.addEventListener("click", () => {
-    DATASTUDIO_STATE.selectedTags = [];
+  loadSeriesBtn?.addEventListener("click", () => saveDataStudioSelection());
+  saveSelectionBtn?.addEventListener("click", saveDataStudioSelection);
+  exportBtn?.addEventListener("click", exportDataStudioSelection);
+
+  clearAllBtn?.addEventListener("click", () => {
     DATASTUDIO_STATE.selectionId = null;
+    DATASTUDIO_STATE.selectionIdsByPlant = {};
+    DATASTUDIO_STATE.seriesByPlant = {};
     DATASTUDIO_STATE.chartData = null;
-    DATASTUDIO_STATE.forceHeroState = false;
-    DATASTUDIO_STATE.catalogConfirmed = false;
-    DATASTUDIO_STATE.catalogOpen = true;
-    renderDataStudioTagsTable(DATASTUDIO_STATE.availableTags);
+    DATASTUDIO_STATE.selectedPlantIds = [];
+    DATASTUDIO_STATE.selectedPlantId = null;
+
+    // Uncheck all multi-select checkboxes
+    const dropdown = document.getElementById("dsPlantMultiselectDropdown");
+    if (dropdown) dropdown.querySelectorAll("input[type='checkbox']").forEach(cb => { cb.checked = false; });
+    _syncMultiselectLabel();
+
+    // Destroy all plant states and charts
+    Object.keys(DATASTUDIO_PLANTS).forEach(pid => {
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} }
+    });
+    DATASTUDIO_PLANTS = {};
+    DATASTUDIO_CHART = {};
+
+    renderPlantBlocks();
     updateDataStudioExportButton();
-    updateDataStudioStageUI();
   });
 
-  ui.saveSelectionBtn?.addEventListener("click", saveDataStudioSelection);
-  ui.loadSeriesBtn?.addEventListener("click", async () => {
-    await saveDataStudioSelection();
-  });
-  ui.exportBtn?.addEventListener("click", exportDataStudioSelection);
-  ui.zoomInBtn?.addEventListener("click", () => zoomDataStudioChart(1.2));
-  ui.zoomOutBtn?.addEventListener("click", () => zoomDataStudioChart(0.8));
-  ui.zoomResetBtn?.addEventListener("click", resetDataStudioChartZoom);
-  ui.fullscreenBtn?.addEventListener("click", toggleDataStudioChartFullscreen);
-  ui.fullscreenCloseBtn?.addEventListener("click", () => setDataStudioChartFullscreen(false));
-  ui.backToHeroBtn?.addEventListener("click", () => {
-    DATASTUDIO_STATE.forceHeroState = true;
-    DATASTUDIO_STATE.catalogConfirmed = false;
-    DATASTUDIO_STATE.catalogOpen = true;
-    updateDataStudioStageUI();
-    setTimeout(() => {
-      const { catalogSection } = getDataStudioUIElements();
-      catalogSection?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 120);
-  });
+  // Wire event delegation on plant blocks container
+  _wireDataStudioPlantBlocksDelegation();
+  _wireChartPanCursor();
 
   wireDataStudioChartOutsideTapOnce();
-  wireDataStudioChartPanCursorOnce();
   wireDataStudioChartFullscreenKeysOnce();
-
   syncDataStudioAggregationUI();
-  updateSelectedTagsCounter();
   updateDataStudioExportButton();
-  updateDataStudioStageUI();
 }
+
 
 // =============================================================================
 // NAVEGAÇÃO E INICIALIZAÇÃO
@@ -3674,16 +3978,20 @@ async function refreshDashboard() {
       renderPortfolioCards(typeof portfolioFilterPlants === "function"
         ? portfolioFilterPlants(lastValidPlants) : lastValidPlants);
     } else {
-      updatePortfolioCardAlarms();
+      updatePortfolioCardData(typeof portfolioFilterPlants === "function"
+        ? portfolioFilterPlants(lastValidPlants) : lastValidPlants);
+      _refreshMiniChartsIfStale();
     }
   }
 
   await refreshVisibleViewData();
   syncTopSummaryLayout();
+  try { await robotRefresh(); } catch(e) { console.warn("[ROBOT]", e); }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   wireDataStudioOnce();
+  wireRobotAssistant();
 
   // Preenche nome do usuário logado
   try {
@@ -3785,6 +4093,103 @@ function wirePortfolioControls() {
   portfolioSetView(_portfolioCurrentView);
 }
 
+function updatePortfolioCardData(plants) {
+  const grid = document.getElementById("portfolioCardView");
+  if (!grid) return;
+
+  // Build lookup by plantId
+  const plantMap = new Map();
+  (Array.isArray(plants) ? plants : []).forEach(p => {
+    const id = String(p.power_plant_id ?? p.plant_id ?? p.id);
+    plantMap.set(id, p);
+  });
+
+  grid.querySelectorAll(".plant-card[data-plant-id]").forEach(card => {
+    const pid = card.dataset.plantId;
+    const plant = plantMap.get(String(pid));
+    if (!plant) return;
+
+    const plantState = getPortfolioPlantVisualState(plant);
+    const commStatus = getPlantCardStatus(plant);
+    const isCommOffline = commStatus.colorClass === 'plant-card--offline';
+    const activePower = plantState.activePower;
+    const ratedPower = Number(plant.rated_power_kw ?? plant.rated_power_kwp ?? 0);
+    const energyToday = plantState.energyToday;
+    const pr = plant.pr_daily_pct != null ? Number(plant.pr_daily_pct).toFixed(1) + "%" : "\u2014";
+    const irr = plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m\u00B2" : "\u2014";
+    const invAvail = plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "\u2014";
+    const activePowerDisplay = isCommOffline ? '\u2014' : activePower.toFixed(1) + ' kW';
+
+    // Update stat values in-place
+    const statValues = card.querySelectorAll(".plant-card__stat-value");
+    if (statValues[0]) statValues[0].textContent = activePowerDisplay;
+    if (statValues[1]) statValues[1].textContent = ratedPower.toFixed(1) + " kWp";
+    if (statValues[2]) statValues[2].textContent = energyToday.toFixed(1) + " kWh";
+    if (statValues[3]) statValues[3].textContent = pr;
+    if (statValues[4]) statValues[4].textContent = irr;
+    if (statValues[5]) statValues[5].textContent = invAvail;
+
+    // Update status dot + text
+    const isOffline = plantState.isOffline || isCommOffline;
+    let statusDotClass = "plant-card__status-dot";
+    let statusText;
+    if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
+    else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Sem dados"; }
+    else if (plantState.kind === "generating") { statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
+    else { statusDotClass += " standby"; statusText = "Aguardando"; }
+
+    const dot = card.querySelector(".plant-card__status-dot");
+    const txt = card.querySelector(".plant-card__status-text");
+    if (dot) dot.className = statusDotClass;
+    if (txt) txt.textContent = statusText;
+
+    // Update card class (comm > alarm > offline)
+    const pname = card.dataset.plantName || "";
+    const alarmSeverity = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pid))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
+      || null;
+    const commSt = plant.comm_status || '';
+    card.dataset.commStatus = commSt;
+
+    let newCardClass;
+    if (commStatus.badge) {
+      newCardClass = `plant-card ${commStatus.colorClass}`;
+    } else {
+      const offCls = isOffline ? " plant-card--offline" : "";
+      const almCls = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
+      newCardClass = `plant-card${offCls}${almCls}`;
+    }
+    card.className = newCardClass;
+
+    // Update icon
+    const icon = card.querySelector(".plant-card__icon");
+    if (icon) {
+      if (commStatus.badge) icon.className = "plant-card__icon";
+      else icon.className = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
+    }
+
+    // Update comm badge
+    const existingBadge = card.querySelector(".badge--offline, .badge--partial");
+    if (commStatus.badge) {
+      if (existingBadge) {
+        existingBadge.className = commStatus.badgeClass;
+        existingBadge.textContent = commStatus.badge;
+      } else {
+        const top = card.querySelector(".plant-card__top");
+        if (top) {
+          const span = document.createElement("span");
+          span.className = commStatus.badgeClass;
+          span.textContent = commStatus.badge;
+          top.appendChild(span);
+        }
+      }
+    } else if (existingBadge) {
+      existingBadge.remove();
+    }
+  });
+}
+
 function updatePortfolioCardAlarms() {
   const grid = document.getElementById("portfolioCardView");
   if (!grid) return;
@@ -3795,6 +4200,9 @@ function updatePortfolioCardAlarms() {
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
       || null;
+    // comm_status takes visual priority — skip alarm override for comm offline/partial
+    const commSt = card.dataset.commStatus;
+    if (commSt === 'offline' || commSt === 'partial') return;
     const isOff = card.classList.contains("plant-card--offline");
     card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}`;
     const icon = card.querySelector(".plant-card__icon");
@@ -3824,6 +4232,8 @@ function renderPortfolioCards(plants) {
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantName)) || null;
 
     const plantState = getPortfolioPlantVisualState(plant);
+    const commStatus = getPlantCardStatus(plant);
+    const isCommOffline = commStatus.colorClass === 'plant-card--offline';
     const activePower = plantState.activePower;
     const ratedPower = Number(plant.rated_power_kw ?? plant.rated_power_kwp ?? 0);
     const energyToday = plantState.energyToday;
@@ -3831,22 +4241,38 @@ function renderPortfolioCards(plants) {
     const irr = plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m\u00B2" : "\u2014";
     const invAvail = plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "\u2014";
 
-    const isOffline = plantState.isOffline;
+    const isOffline = plantState.isOffline || isCommOffline;
     const isGenerating = plantState.kind === "generating";
     let statusDotClass = "plant-card__status-dot";
     let statusText;
-    if (plantState.kind === "offline") {
+    if (isCommOffline) {
+      statusDotClass += " offline";
+      statusText = "Sem comunicação";
+    }
+    else if (plantState.kind === "offline") {
       statusDotClass += " offline";
       statusText = "Sem dados";
     }
     else if (isGenerating){ statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
     else                  { statusDotClass += " standby";   statusText = "Aguardando"; }
 
-    const offlineClass = isOffline ? " plant-card--offline" : "";
-    const alarmSuffix  = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
-    const iconClass    = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
-    const cardClass    = `plant-card${offlineClass}${alarmSuffix}`;
+    // comm_status takes visual priority over alarm severity
+    let cardClass, iconClass;
+    if (commStatus.badge) {
+      cardClass = `plant-card ${commStatus.colorClass}`;
+      iconClass = "plant-card__icon";
+    } else {
+      const offlineClass = isOffline ? " plant-card--offline" : "";
+      const alarmSuffix  = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
+      iconClass = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
+      cardClass = `plant-card${offlineClass}${alarmSuffix}`;
+    }
     const canvasId = "mini-chart-" + plantId;
+
+    const commBadgeHtml = commStatus.badge
+      ? `<span class="${commStatus.badgeClass}">${commStatus.badge}</span>`
+      : '';
+    const activePowerDisplay = isCommOffline ? '—' : activePower.toFixed(1) + ' kW';
 
     const card = document.createElement("div");
     card.className = cardClass;
@@ -3854,16 +4280,18 @@ function renderPortfolioCards(plants) {
     card.setAttribute("tabindex", "0");
     card.dataset.plantId = plantId;
     card.dataset.plantName = plantName;
+    card.dataset.commStatus = plant.comm_status || '';
 
     card.innerHTML = `
       <div class="plant-card__top">
         <div class="${iconClass}"><i class="fa-solid fa-seedling"></i></div>
         <div class="plant-card__name">${plantName}</div>
+        ${commBadgeHtml}
       </div>
       <div class="plant-card__stats">
         <div class="plant-card__stat">
           <div class="plant-card__stat-label"><i class="fa-solid fa-bolt"></i> Active Power</div>
-          <div class="plant-card__stat-value active">${activePower.toFixed(1)} kW</div>
+          <div class="plant-card__stat-value active">${activePowerDisplay}</div>
         </div>
         <div class="plant-card__stat">
           <div class="plant-card__stat-label"><i class="fa-solid fa-layer-group"></i> Rated</div>
@@ -3988,6 +4416,26 @@ async function _startMiniChartBatch(targets, renderGen) {
         console.warn("[mini-chart] retry falhou:", target.plantId, e?.message || e);
       }
     }
+  }
+}
+
+/**
+ * Re-fetches and re-renders mini-charts whose cache has expired (>5 min).
+ * Called on each refresh cycle so charts update without full re-render.
+ */
+function _refreshMiniChartsIfStale() {
+  const grid = document.getElementById("portfolioCardView");
+  if (!grid) return;
+  const staleTargets = [];
+  grid.querySelectorAll("canvas[id^='mini-chart-']").forEach(canvas => {
+    const plantId = canvas.id.replace("mini-chart-", "");
+    const cached = _miniChartDataCache.get(plantId) || _miniChartDataCache.get(Number(plantId));
+    if (!cached || (Date.now() - cached.ts) >= _MINI_CHART_CACHE_TTL_MS) {
+      staleTargets.push({ canvasId: canvas.id, plantId });
+    }
+  });
+  if (staleTargets.length > 0) {
+    _startMiniChartBatch(staleTargets, _portfolioRenderGen);
   }
 }
 
@@ -4359,6 +4807,31 @@ async function pemAddCabin() {
   } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
 }
 
+function _applyPlantEditLocally(plantId, patch) {
+  const pid = String(plantId);
+  for (const p of lastValidPlants) {
+    const id = String(p.power_plant_id ?? p.plant_id ?? p.id);
+    if (id === pid) { Object.assign(p, patch); break; }
+  }
+  // Re-render table + cards with updated local data
+  renderPortfolioTable(lastValidPlants);
+  if (typeof _portfolioCurrentView !== "undefined" && _portfolioCurrentView === "card") {
+    const filtered = typeof portfolioFilterPlants === "function"
+      ? portfolioFilterPlants(lastValidPlants) : lastValidPlants;
+    updatePortfolioCardData(filtered);
+    // Also update card title if name changed
+    if (patch.power_plant_name) {
+      const grid = document.getElementById("portfolioCardView");
+      if (grid) grid.querySelectorAll(`.plant-card[data-plant-id="${pid}"]`).forEach(card => {
+        card.dataset.plantName = patch.power_plant_name;
+        const nameEl = card.querySelector(".plant-card__name");
+        if (nameEl) nameEl.textContent = patch.power_plant_name;
+      });
+    }
+  }
+  updateSummaryUI(lastValidPlants);
+}
+
 async function savePlantName() {
   if (!_PLANT_EDIT_ID) return;
   const inp = document.getElementById("plantEditNameInput");
@@ -4367,12 +4840,18 @@ async function savePlantName() {
   if (!n) { fb.textContent = "Nome vazio."; fb.className = "plant-edit-feedback err"; return; }
   fb.textContent = "Salvando…"; fb.className = "plant-edit-feedback";
   try {
+    const _u = JSON.parse(localStorage.getItem("user") || "{}");
     const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/name`, {
-      method: "PATCH", headers: {"Content-Type":"application/json"},
+      method: "PATCH",
+      headers: {"Content-Type":"application/json", "X-Username": _u.username || ""},
       body: JSON.stringify({plant_name: n})
     });
-    if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+    const resp = await r.json();
+    if (!r.ok) throw new Error(resp?.error || `HTTP ${r.status}`);
+    // resp comes from RETURNING — confirmed written to DB
+    const savedName = resp?.body?.power_plant_name ?? resp?.power_plant_name ?? n;
     fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-feedback ok";
+    _applyPlantEditLocally(_PLANT_EDIT_ID, { power_plant_name: savedName, plant_name: savedName, name: savedName, display_name: savedName });
   } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
 }
 
@@ -4384,12 +4863,18 @@ async function savePlantRatedPower() {
   if (isNaN(val) || val < 0) { fb.textContent = "Valor inválido."; fb.className = "plant-edit-feedback err"; return; }
   fb.textContent = "Salvando…"; fb.className = "plant-edit-feedback";
   try {
+    const _u = JSON.parse(localStorage.getItem("user") || "{}");
     const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/name`, {
-      method: "PATCH", headers: {"Content-Type":"application/json"},
+      method: "PATCH",
+      headers: {"Content-Type":"application/json", "X-Username": _u.username || ""},
       body: JSON.stringify({capacity_dc: val})
     });
-    if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+    const resp = await r.json();
+    if (!r.ok) throw new Error(resp?.error || `HTTP ${r.status}`);
+    // resp comes from RETURNING — confirmed written to DB
+    const savedDc = resp?.body?.capacity_dc ?? resp?.capacity_dc ?? val;
     fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-feedback ok";
+    _applyPlantEditLocally(_PLANT_EDIT_ID, { rated_power_kw: savedDc, rated_power_kwp: savedDc, capacity_dc: savedDc });
   } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
 }
 
@@ -4766,3 +5251,321 @@ async function createNewPlant() {
 }
 
 // wirePortfolioControls is now called synchronously inside the main DOMContentLoaded listener (above).
+
+// =============================================================================
+// ROBÔ ASSISTENTE DE DIAGNÓSTICO
+// =============================================================================
+const ROBOT_STATE = {
+  issues: [], currentIndex: 0, isTyping: false,
+  typingTimer: null, cycleTimer: null, dismissTimer: null,
+  reportOpen: false, bubbleVisible: false,
+  lastState: null, lastIssueHash: null, userRead: false,
+  avatarTimer: null, avatarState: null,
+};
+const ROBOT_TYPE_SPEED      = 40;
+const ROBOT_CYCLE_PAUSE     = 5000;
+const ROBOT_MAX_CHARS       = 110;
+const ROBOT_DISMISS_DELAY   = 12000;
+const ROBOT_AVATAR_GIF_MS   = 10000; // GIF plays for 10s then switches to static
+
+const ROBOT_AVATAR_MAP = {
+  critical: { gif: "img/roboaiotiredgif.gif",  png: "img/roboaiotired.png"  },
+  warning:  { gif: "img/roboaiotiidlegif.gif", png: "img/roboaiotiidle.png" },
+  gray:     { gif: "img/roboaiotioffgif.gif",  png: "img/roboaiotioff.png"  },
+  ok:       { gif: null,                        png: "img/roboaiotiidle.png" },
+};
+
+async function fetchDiagnosticsSummary() {
+  try {
+    const res = await apiFetch("/diagnostics/summary");
+    if (!res.ok) { console.warn("[ROBOT] HTTP", res.status); return null; }
+    const data = await res.json();
+    if (data && data.body) return typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    return data;
+  } catch (e) { console.error("[ROBOT]", e); return null; }
+}
+
+function robotIssuesHash(issues) {
+  return issues.map(i => `${i.plant_id}:${i.type}:${i.device_id||i.device_name||""}`).join("|");
+}
+
+function robotFormatTs(ts) {
+  if (!ts) return "";
+  try {
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mo} ${hh}:${mm}`;
+  } catch (_) { return ""; }
+}
+
+function robotIssueToText(issue) {
+  if (!issue) return "Tudo operando\nnormalmente \u2713";
+  const plant  = issue.plant_name  || "Usina";
+  const device = issue.device_name ? ` \u2022 ${issue.device_name}` : "";
+  const msg    = issue.message     || "Problema detectado";
+  const ts     = robotFormatTs(issue.ts);
+  const prefix = { alarm:"\u26a0", high_temp:"\ud83c\udf21", offline:"\ud83d\udce1", partial_comm:"\ud83d\udce1" }[issue.type] || "!";
+  return `${prefix} ${plant}${device}\n${msg}${ts ? "\n\ud83d\udd52 " + ts : ""}`;
+}
+
+function robotBuildDeviceUrl(issue) {
+  if (!issue.plant_id) return null;
+  let url = "plant.html?plant_id=" + encodeURIComponent(issue.plant_id);
+  if (issue.device_id) url += "&device_id=" + encodeURIComponent(issue.device_id);
+  if (issue.device_type === "inverter" || issue.type === "high_temp") url += "#sec-inverters";
+  return url;
+}
+
+function robotTypewrite(text, onDone) {
+  const textEl   = document.getElementById("robotBubbleText");
+  const cursorEl = document.getElementById("robotBubbleCursor");
+  if (!textEl || !cursorEl) return;
+  if (ROBOT_STATE.typingTimer) { clearInterval(ROBOT_STATE.typingTimer); ROBOT_STATE.typingTimer = null; }
+  ROBOT_STATE.isTyping = true;
+  cursorEl.classList.remove("hidden");
+  textEl.textContent = "";
+  const txt = text.length > ROBOT_MAX_CHARS ? text.slice(0, ROBOT_MAX_CHARS) + "..." : text;
+  let ci = 0;
+  ROBOT_STATE.typingTimer = setInterval(() => {
+    if (ci < txt.length) { textEl.textContent = txt.slice(0, ++ci); }
+    else {
+      clearInterval(ROBOT_STATE.typingTimer); ROBOT_STATE.typingTimer = null;
+      ROBOT_STATE.isTyping = false; cursorEl.classList.add("hidden");
+      if (onDone) onDone();
+    }
+  }, ROBOT_TYPE_SPEED);
+}
+
+function robotSetBubbleOk() {
+  const textEl   = document.getElementById("robotBubbleText");
+  const cursorEl = document.getElementById("robotBubbleCursor");
+  if (textEl) textEl.textContent = "Ok!";
+  if (cursorEl) cursorEl.classList.add("hidden");
+  robotUpdateExpandBtn(false);
+  ROBOT_STATE.userRead = true;
+}
+
+function robotDismissBubble() {
+  robotSetBubbleOk();
+  if (ROBOT_STATE.dismissTimer) { clearTimeout(ROBOT_STATE.dismissTimer); ROBOT_STATE.dismissTimer = null; }
+}
+
+function robotScheduleDismiss() {
+  if (ROBOT_STATE.dismissTimer) clearTimeout(ROBOT_STATE.dismissTimer);
+  ROBOT_STATE.dismissTimer = setTimeout(() => {
+    if (!ROBOT_STATE.reportOpen && ROBOT_STATE.bubbleVisible) robotDismissBubble();
+  }, ROBOT_DISMISS_DELAY);
+}
+
+function robotGetGlobalState(issues) {
+  if (!issues || !issues.length) return "ok";
+  const hasAlarm = issues.some(i => (i.severity === "high" || i.severity === "critical") && i.type !== "offline" && i.type !== "partial_comm");
+  if (hasAlarm) return "critical";
+  const hasOffline = issues.some(i => i.type === "offline" || i.type === "partial_comm");
+  if (hasOffline && !issues.some(i => i.type === "alarm" || i.type === "high_temp")) return "gray";
+  if (issues.some(i => i.severity === "warning" || i.type === "high_temp")) return "warning";
+  return "warning";
+}
+
+function robotUpdateAvatar(state, overrideSrc) {
+  const img = document.getElementById("robotImg");
+  if (!img) return;
+
+  // Clear pending GIF→static timer
+  if (ROBOT_STATE.avatarTimer) {
+    clearTimeout(ROBOT_STATE.avatarTimer);
+    ROBOT_STATE.avatarTimer = null;
+  }
+
+  // No border/circle around the robot — image speaks for itself
+
+  // Direct override (e.g., roboaiotiok.png for thumbs-up after user reads)
+  if (overrideSrc) {
+    if (!img.src.endsWith(overrideSrc)) img.src = overrideSrc;
+    ROBOT_STATE.avatarState = state + "_override";
+    return;
+  }
+
+  const map = ROBOT_AVATAR_MAP[state] || ROBOT_AVATAR_MAP.ok;
+
+  // Play GIF if state changed and a GIF exists
+  if (map.gif && ROBOT_STATE.avatarState !== state) {
+    img.src = map.gif;
+    ROBOT_STATE.avatarState = state;
+
+    // After 10s → switch to static PNG + squish animation
+    ROBOT_STATE.avatarTimer = setTimeout(() => {
+      ROBOT_STATE.avatarTimer = null;
+      img.src = map.png;
+      img.classList.remove("robot-squish");
+      void img.offsetWidth; // force reflow to restart animation
+      img.classList.add("robot-squish");
+      img.addEventListener("animationend", () => img.classList.remove("robot-squish"), { once: true });
+    }, ROBOT_AVATAR_GIF_MS);
+  } else if (!map.gif && ROBOT_STATE.avatarState !== state) {
+    // No GIF for this state (e.g. "ok") — just set static
+    img.src = map.png;
+    ROBOT_STATE.avatarState = state;
+  }
+  // Same state → keep current image (GIF still playing or already static)
+}
+
+function robotUpdateBubble(state) {
+  const el = document.getElementById("robotBubble");
+  if (!el) return;
+  el.classList.remove("state-ok","state-warning","state-critical","state-gray");
+  el.classList.add("state-" + state);
+}
+
+function robotShowBubble(show) {
+  const el = document.getElementById("robotBubble");
+  if (el) el.classList.toggle("visible", !!show);
+  ROBOT_STATE.bubbleVisible = !!show;
+}
+
+function robotUpdateBadge(n) {
+  const el = document.getElementById("robotBadge");
+  if (!el) return;
+  if (n > 0) { el.textContent = n > 99 ? "99+" : n; el.classList.remove("hidden"); }
+  else el.classList.add("hidden");
+}
+
+function robotUpdateExpandBtn(show) {
+  const el = document.getElementById("robotBubbleExpand");
+  if (el) el.classList.toggle("visible", !!show);
+}
+
+function robotStartCycle() {
+  if (ROBOT_STATE.cycleTimer) { clearTimeout(ROBOT_STATE.cycleTimer); ROBOT_STATE.cycleTimer = null; }
+  const issues = ROBOT_STATE.issues;
+  if (!issues.length) return;
+  if (ROBOT_STATE.reportOpen || ROBOT_STATE.userRead) return;
+  // Show only the most recent/important issue in the bubble (first in the list)
+  robotTypewrite(robotIssueToText(issues[0]), () => robotScheduleDismiss());
+}
+
+function robotRenderReport(issues) {
+  const list = document.getElementById("robotReportList");
+  if (!list) return;
+  if (!issues || !issues.length) {
+    list.innerHTML = '<div class="robot-report-empty">Nenhum problema\ndetectado \u2713</div>';
+    return;
+  }
+  list.innerHTML = issues.map(iss => {
+    const sc = "sev-" + (iss.severity || "info");
+    const deviceUrl = robotBuildDeviceUrl(iss);
+    const hasDevice = iss.device_id && deviceUrl;
+    // Build device line: device_name + cabin
+    let deviceLine = "";
+    if (iss.device_name) {
+      deviceLine = iss.device_name;
+      if (iss.cabin_name) deviceLine += ` \u2022 ${iss.cabin_name}`;
+    } else if (iss.cabin_name) {
+      deviceLine = iss.cabin_name;
+    }
+    const tsStr = robotFormatTs(iss.ts);
+    return `<div class="robot-issue-row" data-href="${deviceUrl || ''}" title="${hasDevice ? 'Ir para o equipamento' : 'Abrir usina'}">
+      <div class="robot-issue-dot ${sc}"></div>
+      <div class="robot-issue-body">
+        <div class="robot-issue-plant">${iss.plant_name||"\u2014"}${tsStr ? ` <span class="robot-issue-ts">${tsStr}</span>` : ""}</div>
+        <div class="robot-issue-msg">${iss.message||"\u2014"}</div>
+        ${deviceLine ? `<div class="robot-issue-device">${deviceLine}</div>` : ""}
+      </div>
+      <i class="fa-solid fa-arrow-up-right-from-square robot-issue-go"></i>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".robot-issue-row[data-href]").forEach(row => {
+    row.addEventListener("click", () => {
+      const href = row.dataset.href;
+      if (href) window.location.href = href;
+    });
+  });
+}
+
+function robotToggleReport(forceOpen) {
+  const panel = document.getElementById("robotReport");
+  if (!panel) return;
+  const open = forceOpen !== undefined ? forceOpen : !ROBOT_STATE.reportOpen;
+  if (open) {
+    robotRenderReport(ROBOT_STATE.issues);
+    panel.classList.remove("hidden");
+    ROBOT_STATE.reportOpen = true;
+    if (ROBOT_STATE.cycleTimer) { clearTimeout(ROBOT_STATE.cycleTimer); ROBOT_STATE.cycleTimer = null; }
+    if (ROBOT_STATE.dismissTimer) { clearTimeout(ROBOT_STATE.dismissTimer); ROBOT_STATE.dismissTimer = null; }
+  } else {
+    panel.classList.add("hidden");
+    ROBOT_STATE.reportOpen = false;
+    // After closing report, user has read — show "Ok!" + thumbs-up
+    robotDismissBubble();
+    robotUpdateAvatar("ok", "img/roboaiotiok.png");
+  }
+}
+
+async function robotRefresh() {
+  const data = await fetchDiagnosticsSummary();
+  if (!data) return;
+  const issues = Array.isArray(data.issues) ? data.issues : [];
+  const newHash = robotIssuesHash(issues);
+  const issuesChanged = newHash !== ROBOT_STATE.lastIssueHash;
+  ROBOT_STATE.lastIssueHash = newHash;
+  ROBOT_STATE.issues = issues;
+  const state = robotGetGlobalState(issues);
+
+  // Always update bubble border color, badge, expand button
+  robotUpdateBubble(state);
+  robotUpdateBadge(issues.length);
+  robotUpdateExpandBtn(issues.length > 1);
+
+  if (!issues.length) {
+    ROBOT_STATE.currentIndex = 0;
+    if (!ROBOT_STATE.bubbleVisible || ROBOT_STATE.lastState !== "ok") {
+      ROBOT_STATE.userRead = false;
+      robotUpdateAvatar("ok");
+      robotShowBubble(true);
+      robotTypewrite("Tudo operando\nnormalmente \u2713", () => robotScheduleDismiss());
+    }
+    ROBOT_STATE.lastState = "ok";
+    return;
+  }
+
+  ROBOT_STATE.lastState = state;
+  robotShowBubble(true);
+  if (ROBOT_STATE.reportOpen) robotRenderReport(issues);
+
+  // Only re-type and update avatar when issues actually changed
+  if (issuesChanged) {
+    ROBOT_STATE.userRead = false;
+    ROBOT_STATE.currentIndex = 0;
+    robotUpdateAvatar(state);
+    robotStartCycle();
+  }
+}
+
+function wireRobotAssistant() {
+  const avatar    = document.getElementById("robotAvatar");
+  const expandBtn = document.getElementById("robotBubbleExpand");
+  const closeBtn  = document.getElementById("robotReportClose");
+  const bubble    = document.getElementById("robotBubble");
+
+  if (avatar) avatar.addEventListener("click", () => robotToggleReport());
+  if (expandBtn) expandBtn.addEventListener("click", e => { e.stopPropagation(); robotToggleReport(true); });
+  if (closeBtn) closeBtn.addEventListener("click", () => robotToggleReport(false));
+  if (bubble) bubble.addEventListener("click", () => {
+    if (ROBOT_STATE.issues.length > 1) robotToggleReport(true);
+    else if (ROBOT_STATE.issues.length === 1) {
+      const url = robotBuildDeviceUrl(ROBOT_STATE.issues[0]);
+      if (url) window.location.href = url;
+    } else {
+      // No issues — dismiss bubble on click
+      robotDismissBubble();
+    }
+  });
+  document.addEventListener("click", e => {
+    const el = document.getElementById("robotAssistant");
+    if (ROBOT_STATE.reportOpen && el && !el.contains(e.target)) robotToggleReport(false);
+  });
+}
