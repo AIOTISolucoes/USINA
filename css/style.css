@@ -53,7 +53,7 @@ body {
   display: grid;
   grid-template-columns: 72px 1fr;
   min-height: 100vh;
-  width: 100vw;
+  width: 100%;
 }
 
 .sidebar {
@@ -240,10 +240,6 @@ body {
     margin: 0 auto;
   }
 
-  .topbar-left,
-  .topbar-right {
-    width: 100%;
-    text-align: center;
-    justify-content: center;
-  }
+  /* REMOVIDO: width:100% em topbar-left/right quebrava o CSS Grid do topbar */
+  /* O layout.css gerencia o topbar mobile via grid-template-columns */
 }
