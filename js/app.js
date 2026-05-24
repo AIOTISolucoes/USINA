@@ -5488,16 +5488,19 @@ function robotRenderReport(issues) {
 
 function robotToggleReport(forceOpen) {
   const panel = document.getElementById("robotReport");
+  const badge = document.getElementById("robotBadge");
   if (!panel) return;
   const open = forceOpen !== undefined ? forceOpen : !ROBOT_STATE.reportOpen;
   if (open) {
     robotRenderReport(ROBOT_STATE.issues);
     panel.classList.remove("hidden");
+    if (badge) badge.classList.add("hidden");
     ROBOT_STATE.reportOpen = true;
     if (ROBOT_STATE.cycleTimer) { clearTimeout(ROBOT_STATE.cycleTimer); ROBOT_STATE.cycleTimer = null; }
     if (ROBOT_STATE.dismissTimer) { clearTimeout(ROBOT_STATE.dismissTimer); ROBOT_STATE.dismissTimer = null; }
   } else {
     panel.classList.add("hidden");
+    if (badge && ROBOT_STATE.issues.length > 0) badge.classList.remove("hidden");
     ROBOT_STATE.reportOpen = false;
     // After closing report, user has read — show "Ok!" + thumbs-up
     robotDismissBubble();
