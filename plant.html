@@ -80,6 +80,10 @@
           <div class="kpi-label">Capacidade</div>
           <strong id="headerCapacity">—</strong>
         </div>
+        <div class="kpi">
+          <div class="kpi-label">Capacity <span style="color:#4ade80;font-weight:700;">(AC)</span></div>
+          <strong id="headerCapacityAc">—</strong>
+        </div>
       </div>
 
       <div class="plant-head-right">
@@ -624,6 +628,33 @@
   </section>
 
 </main>
+
+<!-- Robot assistente (insights analíticos) -->
+<div id="robotAssistant" class="robot-assistant">
+  <div class="robot-bubble" id="robotBubble">
+    <div class="robot-bubble-inner">
+      <span class="robot-bubble-text" id="robotBubbleText"></span>
+      <span class="robot-bubble-cursor" id="robotBubbleCursor">▌</span>
+    </div>
+    <button class="robot-bubble-expand" id="robotBubbleExpand">
+      <i class="fa-solid fa-chevron-right"></i> Ver mais
+    </button>
+    <div class="robot-bubble-tail"></div>
+  </div>
+  <div class="robot-report hidden" id="robotReport">
+    <div class="robot-report-header">
+      <span class="robot-report-title">
+        <i class="fa-solid fa-clipboard-list"></i> Diagnóstico
+      </span>
+      <button class="robot-report-close" id="robotReportClose">×</button>
+    </div>
+    <div class="robot-report-list" id="robotReportList"></div>
+  </div>
+  <div class="robot-avatar" id="robotAvatar" title="Diagnóstico do sistema">
+    <img id="robotImg" src="img/roboaiotiidle.png" alt="Bot" class="robot-img" />
+  </div>
+  <span class="robot-badge hidden" id="robotBadge">0</span>
+</div>
 
 <svg class="device-svg-sprite" aria-hidden="true" focusable="false" width="0" height="0">
   <symbol id="device-command-switch-glyph" viewBox="0 0 24 24">
