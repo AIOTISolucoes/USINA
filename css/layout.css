@@ -351,18 +351,20 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
   padding: 0 20px;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  grid-template-areas: "status gauge metrics";
+  grid-template-columns: 1fr auto auto auto 1fr;
+  grid-template-areas: "status rated gauge ac active";
   align-items: center;
   min-height: 78px;
-  column-gap: 8px;
+  column-gap: 0;
   position: relative;
   z-index: 1;
 }
 
-.psf-status-icons  { grid-area: status; }
-.psf-gauge         { grid-area: gauge; justify-self: center; }
-.psf-metrics-group { grid-area: metrics; justify-self: end; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.psf-status-icons { grid-area: status; justify-self: start; }
+.psf-gauge        { grid-area: gauge; justify-self: center; }
+.psf-rated--dc    { grid-area: rated; justify-self: end; }
+.psf-rated--ac    { grid-area: ac;    justify-self: start; }
+.psf-active       { grid-area: active; justify-self: end; }
 
 .psf-sep {
   height: 40px;
@@ -378,8 +380,9 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
   gap: 4px;
 }
 
-.psf-rated  { padding: 0 16px 0 0; border-right: 1px solid rgba(57,229,140,0.14); }
-.psf-active { padding: 0 0 0 16px; }
+.psf-rated--dc { padding: 0 12px 0 0; }
+.psf-rated--ac { padding: 0 0 0 12px; }
+.psf-active    { padding: 0 0 0 16px; border-left: 1px solid rgba(57,229,140,0.14); }
 
 .psf-rated-label,
 .psf-active-label {
@@ -411,9 +414,21 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
 }
 
 .psf-gauge {
-  display: grid;
-  place-items: center;
-  padding: 0 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+}
+
+.psf-gauge-total-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+  opacity: 0.65;
+  white-space: nowrap;
 }
 
 .psf-gauge-circle {
@@ -487,6 +502,19 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
 .psf-status b {
   color: var(--accent-green);
   font-weight: 700;
+}
+
+.psf-status--alarm {
+  color: #ff4f4f !important;
+}
+.psf-status--alarm svg,
+.psf-status--alarm .psf-no-comm,
+.psf-status--alarm .psf-off-icon {
+  color: #ff4f4f !important;
+  filter: drop-shadow(0 0 4px rgba(255, 79, 79, 0.7)) !important;
+}
+.psf-status--alarm span span {
+  color: #ff4f4f !important;
 }
 
 .psf-active::before,
@@ -1261,26 +1289,25 @@ tbody tr:hover td {
 
   .psf-inner{
     max-width: 100%;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto auto auto auto;
     grid-template-areas:
-      "gauge metrics"
-      "status status";
+      "rated gauge ac active"
+      "status status status status";
     row-gap: 12px;
-    column-gap: 16px;
+    column-gap: 0;
     padding: 12px 16px;
     min-height: unset;
+    justify-content: center;
   }
 
   .psf-gauge{
     grid-area: gauge;
-    justify-self: start;
-    padding: 0;
+    justify-self: center;
+    padding: 0 6px;
   }
-  .psf-metrics-group{
-    grid-area: metrics;
-    justify-self: end;
-    min-width: 0;
-  }
+  .psf-rated--dc{ grid-area: rated; justify-self: end; }
+  .psf-rated--ac{ grid-area: ac;    justify-self: start; }
+  .psf-active   { grid-area: active; }
   .psf-status-icons{
     grid-area: status;
     justify-self: start;
@@ -1327,27 +1354,25 @@ tbody tr:hover td {
   .user-pill{ padding: 4px 8px; }
 
   .psf-inner{
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto auto auto auto;
     grid-template-areas:
-      "gauge metrics"
-      "status status";
+      "rated gauge ac active"
+      "status status status status";
     row-gap: 10px;
+    column-gap: 0;
     padding: 10px 12px;
+    justify-content: center;
   }
 
   .psf-gauge{
     grid-area: gauge;
-    justify-self: start;
-    padding: 0;
+    justify-self: center;
+    padding: 0 6px;
   }
 
-  .psf-metrics-group{
-    grid-area: metrics;
-    justify-self: stretch;
-    width: 100%;
-    min-width: 0;
-    justify-content: flex-end;
-  }
+  .psf-rated--dc{ grid-area: rated; justify-self: end; }
+  .psf-rated--ac{ grid-area: ac;    justify-self: start; }
+  .psf-active   { grid-area: active; }
 
   .psf-gauge-circle{
     width: 74px;
@@ -1509,13 +1534,14 @@ tbody tr:hover td {
   .psf-inner{
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas:
-      "rated gauge active"
-      "status status status";
+      "rated gauge ac"
+      "status status status"
+      "active active active";
     align-items: center;
     text-align: center;
     padding: 12px 10px;
-    column-gap: 10px;
-    row-gap: 12px;
+    column-gap: 0;
+    row-gap: 10px;
   }
 
   .psf-status-icons{
@@ -1525,7 +1551,8 @@ tbody tr:hover td {
   .psf-gauge{
     grid-area: gauge;
     justify-self: center;
-    padding: 0;
+    padding: 0 8px;
+    gap: 2px;
   }
 
   .psf-ring-wrap{
@@ -1537,38 +1564,41 @@ tbody tr:hover td {
     font-size: 12px;
   }
 
-  .psf-metrics-group{
-    display: contents;
-  }
-
-  .psf-rated,
-  .psf-active{
-    width: 100%;
-    text-align: center;
-  }
-
-  .psf-rated{
+  .psf-rated--dc{
     grid-area: rated;
     align-items: flex-end;
     padding: 0 10px 0 0;
     border-right: 1px solid rgba(57,229,140,0.14);
-    border-bottom: 0;
+  }
+
+  .psf-rated--ac{
+    grid-area: ac;
+    align-items: flex-start;
+    padding: 0 0 0 10px;
+    border-left: 1px solid rgba(57,229,140,0.14);
   }
 
   .psf-active{
     grid-area: active;
-    align-items: flex-start;
-    padding: 0 0 0 10px;
+    align-items: center;
+    padding: 0;
+    border-left: none;
+    justify-self: center;
   }
 
-  .psf-rated-label,
-  .psf-rated-value{
+  .psf-rated--dc .psf-rated-label,
+  .psf-rated--dc .psf-rated-value{
     text-align: right;
+  }
+
+  .psf-rated--ac .psf-rated-label,
+  .psf-rated--ac .psf-rated-value{
+    text-align: left;
   }
 
   .psf-active-label,
   .psf-active-value{
-    text-align: left;
+    text-align: center;
   }
 
   .psf-status-icons{
