@@ -1775,10 +1775,12 @@ function updateSummaryUI(plants) {
 
   let totalActivePower = 0;
   let totalRatedPower = 0;
+  let totalCapacityAc = 0;
 
   validPlants.forEach(p => {
     totalActivePower += Number(p?.active_power_kw ?? 0) || 0;
-    totalRatedPower += Number(p?.rated_power_kw ?? p?.rated_power_kwp ?? 0) || 0;
+    totalRatedPower += Number(p?.rated_power_ac_kw ?? p?.rated_power_kw ?? p?.rated_power_kwp ?? 0) || 0;
+    totalCapacityAc += Number(p?.capacity_ac ?? 0) || 0;
   });
 
   const loadPct = totalRatedPower > 0 ? (totalActivePower / totalRatedPower) * 100 : 0;
@@ -1793,10 +1795,12 @@ function updateSummaryUI(plants) {
 
   const elPsfActive = document.getElementById("psfActivePower");
   const elPsfRated = document.getElementById("psfRatedPower");
+  const elPsfRatedAc = document.getElementById("psfRatedAc");
   const elPsfPercent = document.getElementById("psfCapacityPct");
 
   if (elPsfActive) elPsfActive.textContent = totalActivePower.toFixed(1) + " kW";
   if (elPsfRated) elPsfRated.textContent = totalRatedPower.toFixed(1) + " kWp";
+  if (elPsfRatedAc) elPsfRatedAc.textContent = totalCapacityAc > 0 ? totalCapacityAc.toFixed(1) + " kWp" : "—";
   if (elPsfPercent) elPsfPercent.textContent = loadPct.toFixed(1) + "%";
 
   // Update SVG progress ring
@@ -1813,14 +1817,20 @@ function getPortfolioPlantVisualState(plant) {
   const activePower = Number(plant?.active_power_kw ?? 0);
   const energyToday = Number(plant?.energy_today_kwh ?? plant?.daily_energy_kwh ?? 0);
   const irradiance = Number(plant?.irradiance_wm2 ?? 0);
-  const statusNum = Number(plant?.plant_status);
+  const statusColor = plant?.plant_status_color || plant?.plant_status || '';
   const hasAnyData = activePower > 0 || energyToday > 0 || irradiance > 0;
 
   if (activePower > 0) {
     return { priority: 0, kind: "generating", activePower, energyToday, irradiance, isOffline: false };
   }
 
-  if (statusNum === 28 || !hasAnyData) {
+  // Standby: inversores em espera (status_color amarelo) → card amarelo
+  if (statusColor === 'yellow') {
+    return { priority: 1, kind: "standby", activePower, energyToday, irradiance, isOffline: false };
+  }
+
+  // Desligada/sem dados: gray, red sem potência, ou sem dados
+  if (!hasAnyData || statusColor === 'gray' || statusColor === 'red') {
     return { priority: 2, kind: "offline", activePower, energyToday, irradiance, isOffline: true };
   }
 
@@ -1855,8 +1865,16 @@ function sortPortfolioPlants(plants) {
 }
 
 function getPlantCardStatus(plant) {
-  if (plant.comm_status === 'offline' || plant.plant_status_color === 'gray') {
+  // "Sem comunicação" = somente quando NÃO recebemos dados recentes (comunicação real perdida)
+  if (plant.comm_status === 'offline') {
     return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
+  }
+  const lastUpdate = plant.updated_at || plant.last_update;
+  if (lastUpdate) {
+    const age = (Date.now() - new Date(lastUpdate).getTime()) / 60000;
+    if (age > 30) {
+      return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
+    }
   }
   if (plant.comm_status === 'partial') {
     const rpt = Number(plant.inverter_reporting ?? 0);
@@ -1864,6 +1882,8 @@ function getPlantCardStatus(plant) {
     const txt = `Comunicação parcial (${rpt}/${rpt + stale})`;
     return { colorClass: 'plant-card--warning', badge: txt, badgeClass: 'badge--partial' };
   }
+  // plant_status_color 'red'/'gray'/'yellow' com dados frescos = NÃO é perda de comunicação
+  // red = inversores em falha mas comunicando; gray = desligada; yellow = standby
   return { colorClass: '', badge: null, badgeClass: null };
 }
 
@@ -1901,7 +1921,7 @@ function renderPortfolioTable(plants) {
       null;
     const plantIconClass = alarmSeverity
       ? `plant-icon plant-icon--${alarmSeverity}`
-      : "plant-icon plant-icon--ok";
+      : (plantState.kind === "standby" ? "plant-icon plant-icon--standby" : "plant-icon plant-icon--ok");
 
     const commBadgeHtml = commStatus.badge
       ? `<span class="${commStatus.badgeClass}" style="margin-left:8px">${commStatus.badge}</span>`
@@ -4134,7 +4154,7 @@ function updatePortfolioCardData(plants) {
     let statusDotClass = "plant-card__status-dot";
     let statusText;
     if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
-    else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Sem dados"; }
+    else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Desligada"; }
     else if (plantState.kind === "generating") { statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
     else { statusDotClass += " standby"; statusText = "Aguardando"; }
 
@@ -4158,7 +4178,8 @@ function updatePortfolioCardData(plants) {
     } else {
       const offCls = isOffline ? " plant-card--offline" : "";
       const almCls = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
-      newCardClass = `plant-card${offCls}${almCls}`;
+      const stdCls = (!isOffline && !alarmSeverity && plantState.kind === "standby") ? " standby-card" : "";
+      newCardClass = `plant-card${offCls}${almCls}${stdCls}`;
     }
     card.className = newCardClass;
 
@@ -4166,7 +4187,9 @@ function updatePortfolioCardData(plants) {
     const icon = card.querySelector(".plant-card__icon");
     if (icon) {
       if (commStatus.badge) icon.className = "plant-card__icon";
-      else icon.className = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
+      else if (alarmSeverity) icon.className = `plant-card__icon alarm-${alarmSeverity}`;
+      else if (plantState.kind === "standby") icon.className = "plant-card__icon standby-icon";
+      else icon.className = "plant-card__icon";
     }
 
     // Update comm badge
@@ -4251,7 +4274,7 @@ function renderPortfolioCards(plants) {
     }
     else if (plantState.kind === "offline") {
       statusDotClass += " offline";
-      statusText = "Sem dados";
+      statusText = "Desligada";
     }
     else if (isGenerating){ statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
     else                  { statusDotClass += " standby";   statusText = "Aguardando"; }
@@ -4264,8 +4287,10 @@ function renderPortfolioCards(plants) {
     } else {
       const offlineClass = isOffline ? " plant-card--offline" : "";
       const alarmSuffix  = alarmSeverity ? ` alarm-${alarmSeverity}` : "";
-      iconClass = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` : "plant-card__icon";
-      cardClass = `plant-card${offlineClass}${alarmSuffix}`;
+      const standbySuffix = (!isOffline && !alarmSeverity && plantState.kind === "standby") ? " standby-card" : "";
+      iconClass = alarmSeverity ? `plant-card__icon alarm-${alarmSeverity}` :
+                  (plantState.kind === "standby" ? "plant-card__icon standby-icon" : "plant-card__icon");
+      cardClass = `plant-card${offlineClass}${alarmSuffix}${standbySuffix}`;
     }
     const canvasId = "mini-chart-" + plantId;
 
@@ -5272,8 +5297,72 @@ const ROBOT_AVATAR_MAP = {
   critical: { gif: "img/roboaiotiredgif.gif",  png: "img/roboaiotired.png"  },
   warning:  { gif: "img/roboaiotiidlegif.gif", png: "img/roboaiotiidle.png" },
   gray:     { gif: "img/roboaiotioffgif.gif",  png: "img/roboaiotioff.png"  },
-  ok:       { gif: null,                        png: "img/roboaiotiidle.png" },
+  ok:       { gif: null,                        png: "img/roboaiotiok.png"   },
 };
+
+const ROBOT_NOTIF_PREFS_KEY = "robot_notif_prefs";
+const ROBOT_CAT_OPEN_KEY    = "robot_cat_open";
+
+const ROBOT_CATEGORY_META = {
+  temp_sustained:  { label: "Temperatura elevada",   order: 0 },
+  plant_shutdown:  { label: "Usina desligada",        order: 1 },
+  pr_declining:    { label: "PR em queda",            order: 2 },
+  sub_performance: { label: "Sub-performance",        order: 3 },
+  inv_clipping:    { label: "Clipping",               order: 4 },
+  string_zero:     { label: "String zerada",          order: 5 },
+  string_low:      { label: "String abaixo da m\u00e9dia", order: 6 },
+};
+
+const ROBOT_CATEGORY_ICONS = {
+  temp_sustained:  "fa-temperature-high",
+  plant_shutdown:  "fa-power-off",
+  pr_declining:    "fa-arrow-trend-down",
+  sub_performance: "fa-chart-bar",
+  inv_clipping:    "fa-bolt",
+  string_zero:     "fa-circle-xmark",
+  string_low:      "fa-battery-quarter",
+};
+
+function _robotGetNotifPrefs() {
+  try { return JSON.parse(localStorage.getItem(ROBOT_NOTIF_PREFS_KEY) || "{}"); }
+  catch (_) { return {}; }
+}
+
+function _robotSaveNotifPrefs(prefs) {
+  localStorage.setItem(ROBOT_NOTIF_PREFS_KEY, JSON.stringify(prefs));
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  if (user.id || user.username) {
+    apiFetch("/users/notif-prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": user.username || "" },
+      body: JSON.stringify({ prefs })
+    }).catch(() => {});
+  }
+}
+
+function _robotIsMuted() {
+  return _robotGetNotifPrefs().muted === true;
+}
+
+function _robotIsTypeEnabled(type) {
+  const prefs = _robotGetNotifPrefs();
+  if (prefs.muted === true) return false;
+  if (Array.isArray(prefs.disabled_types) && prefs.disabled_types.includes(type)) return false;
+  return true;
+}
+
+function _robotGetOpenCats() {
+  try { return JSON.parse(localStorage.getItem(ROBOT_CAT_OPEN_KEY) || "[]"); }
+  catch (_) { return []; }
+}
+
+function _robotToggleCat(type) {
+  let open = _robotGetOpenCats();
+  if (open.includes(type)) open = open.filter(t => t !== type);
+  else open.push(type);
+  localStorage.setItem(ROBOT_CAT_OPEN_KEY, JSON.stringify(open));
+  return open.includes(type);
+}
 
 async function fetchDiagnosticsSummary() {
   try {
@@ -5303,12 +5392,20 @@ function robotFormatTs(ts) {
 }
 
 function robotIssueToText(issue) {
-  if (!issue) return "Tudo operando\nnormalmente \u2713";
+  if (!issue) return "Sem anomalias\ndetectadas \u2713";
   const plant  = issue.plant_name  || "Usina";
   const device = issue.device_name ? ` \u2022 ${issue.device_name}` : "";
-  const msg    = issue.message     || "Problema detectado";
+  const msg    = issue.message     || "Insight detectado";
   const ts     = robotFormatTs(issue.ts);
-  const prefix = { alarm:"\u26a0", high_temp:"\ud83c\udf21", offline:"\ud83d\udce1", partial_comm:"\ud83d\udce1" }[issue.type] || "!";
+  const prefix = {
+    temp_sustained: "\ud83c\udf21",
+    pr_declining:   "\ud83d\udcc9",
+    plant_shutdown: "\u26d4",
+    inv_clipping:   "\u26a1",
+    string_low:     "\ud83d\udd0b",
+    string_zero:      "\u274c",
+    sub_performance:  "\ud83d\udcca"
+  }[issue.type] || "\ud83d\udcca";
   return `${prefix} ${plant}${device}\n${msg}${ts ? "\n\ud83d\udd52 " + ts : ""}`;
 }
 
@@ -5316,7 +5413,8 @@ function robotBuildDeviceUrl(issue) {
   if (!issue.plant_id) return null;
   let url = "plant.html?plant_id=" + encodeURIComponent(issue.plant_id);
   if (issue.device_id) url += "&device_id=" + encodeURIComponent(issue.device_id);
-  if (issue.device_type === "inverter" || issue.type === "high_temp") url += "#sec-inverters";
+  const invTypes = ["temp_sustained","inv_clipping","string_low","string_zero","sub_performance"];
+  if (issue.device_type === "inverter" || invTypes.includes(issue.type)) url += "#sec-inverters";
   return url;
 }
 
@@ -5357,17 +5455,21 @@ function robotDismissBubble() {
 function robotScheduleDismiss() {
   if (ROBOT_STATE.dismissTimer) clearTimeout(ROBOT_STATE.dismissTimer);
   ROBOT_STATE.dismissTimer = setTimeout(() => {
-    if (!ROBOT_STATE.reportOpen && ROBOT_STATE.bubbleVisible) robotDismissBubble();
+    if (!ROBOT_STATE.reportOpen && ROBOT_STATE.bubbleVisible) {
+      // Auto-dismiss: just hide bubble, do NOT mark as "ok" or change avatar
+      robotShowBubble(false);
+      if (ROBOT_STATE.dismissTimer) { clearTimeout(ROBOT_STATE.dismissTimer); ROBOT_STATE.dismissTimer = null; }
+    }
   }, ROBOT_DISMISS_DELAY);
 }
 
 function robotGetGlobalState(issues) {
   if (!issues || !issues.length) return "ok";
-  const hasAlarm = issues.some(i => (i.severity === "high" || i.severity === "critical") && i.type !== "offline" && i.type !== "partial_comm");
-  if (hasAlarm) return "critical";
-  const hasOffline = issues.some(i => i.type === "offline" || i.type === "partial_comm");
-  if (hasOffline && !issues.some(i => i.type === "alarm" || i.type === "high_temp")) return "gray";
-  if (issues.some(i => i.severity === "warning" || i.type === "high_temp")) return "warning";
+  const nonShutdown = issues.filter(i => i.type !== "plant_shutdown");
+  // Só plant_shutdown → usina desligada → robô cinza/off
+  if (nonShutdown.length === 0) return "gray";
+  // Demais: vermelho (critical) ou amarelo (warning)
+  if (nonShutdown.some(i => i.severity === "critical")) return "critical";
   return "warning";
 }
 
@@ -5452,38 +5554,81 @@ function robotRenderReport(issues) {
   const list = document.getElementById("robotReportList");
   if (!list) return;
   if (!issues || !issues.length) {
-    list.innerHTML = '<div class="robot-report-empty">Nenhum problema\ndetectado \u2713</div>';
+    list.innerHTML = '<div class="robot-report-empty">Sem anomalias\ndetectadas \u2713</div>';
+    _robotRenderPrefsFooter();
     return;
   }
-  list.innerHTML = issues.map(iss => {
-    const sc = "sev-" + (iss.severity || "info");
-    const deviceUrl = robotBuildDeviceUrl(iss);
-    const hasDevice = iss.device_id && deviceUrl;
-    // Build device line: device_name + cabin
-    let deviceLine = "";
-    if (iss.device_name) {
-      deviceLine = iss.device_name;
-      if (iss.cabin_name) deviceLine += ` \u2022 ${iss.cabin_name}`;
-    } else if (iss.cabin_name) {
-      deviceLine = iss.cabin_name;
-    }
-    const tsStr = robotFormatTs(iss.ts);
-    return `<div class="robot-issue-row" data-href="${deviceUrl || ''}" title="${hasDevice ? 'Ir para o equipamento' : 'Abrir usina'}">
-      <div class="robot-issue-dot ${sc}"></div>
-      <div class="robot-issue-body">
-        <div class="robot-issue-plant">${iss.plant_name||"\u2014"}${tsStr ? ` <span class="robot-issue-ts">${tsStr}</span>` : ""}</div>
-        <div class="robot-issue-msg">${iss.message||"\u2014"}</div>
-        ${deviceLine ? `<div class="robot-issue-device">${deviceLine}</div>` : ""}
-      </div>
-      <i class="fa-solid fa-arrow-up-right-from-square robot-issue-go"></i>
+
+  // Agrupar por categoria na ordem definida
+  const groups = {};
+  issues.forEach(iss => {
+    if (!groups[iss.type]) groups[iss.type] = [];
+    groups[iss.type].push(iss);
+  });
+
+  const types = Object.keys(groups).sort((a, b) => {
+    const oa = (ROBOT_CATEGORY_META[a] || { order: 99 }).order;
+    const ob = (ROBOT_CATEGORY_META[b] || { order: 99 }).order;
+    return oa - ob;
+  });
+
+  const openCats = _robotGetOpenCats();
+
+  const html = types.map(type => {
+    const meta  = ROBOT_CATEGORY_META[type] || { label: "Outros" };
+    const icon  = ROBOT_CATEGORY_ICONS[type] || "fa-list";
+    const items = groups[type];
+    const isOpen = openCats.includes(type);
+    const worst = items.some(i => i.severity === "critical") ? "critical"
+                : items.some(i => i.severity === "warning")  ? "warning" : "info";
+
+    const rows = items.map(iss => {
+      const sc = "sev-" + (iss.severity || "info");
+      const deviceUrl = robotBuildDeviceUrl(iss);
+      let deviceLine = iss.device_name || "";
+      if (iss.cabin_name) deviceLine += (deviceLine ? " \u2022 " : "") + iss.cabin_name;
+      const tsStr = robotFormatTs(iss.ts);
+      return `<div class="robot-cat-item" data-href="${deviceUrl || ''}">
+        <span class="robot-issue-dot ${sc}"></span>
+        <div class="robot-cat-item-body">
+          <div class="robot-cat-item-plant">${iss.plant_name || "\u2014"}${tsStr ? ` <span class="robot-issue-ts">${tsStr}</span>` : ""}</div>
+          <div class="robot-cat-item-msg">${iss.message || "\u2014"}</div>
+          ${deviceLine ? `<div class="robot-cat-item-device">${deviceLine}</div>` : ""}
+        </div>
+        ${deviceUrl ? '<i class="fa-solid fa-arrow-up-right-from-square robot-cat-item-go"></i>' : ''}
+      </div>`;
+    }).join("");
+
+    return `<div class="robot-cat-block ${isOpen ? "is-open" : ""}" data-cat="${type}">
+      <button type="button" class="robot-cat-header" data-cat="${type}">
+        <i class="fa-solid ${icon} robot-cat-icon sev-icon-${worst}"></i>
+        <span class="robot-cat-label">${meta.label}</span>
+        <span class="robot-cat-count">${items.length}</span>
+        <i class="fa-solid fa-chevron-down robot-cat-chevron"></i>
+      </button>
+      <div class="robot-cat-items">${rows}</div>
     </div>`;
   }).join("");
-  list.querySelectorAll(".robot-issue-row[data-href]").forEach(row => {
-    row.addEventListener("click", () => {
-      const href = row.dataset.href;
-      if (href) window.location.href = href;
+
+  list.innerHTML = html;
+
+  list.querySelectorAll(".robot-cat-header").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const type  = btn.dataset.cat;
+      const block = list.querySelector(`.robot-cat-block[data-cat="${type}"]`);
+      const nowOpen = _robotToggleCat(type);
+      if (block) block.classList.toggle("is-open", nowOpen);
     });
   });
+
+  list.querySelectorAll(".robot-cat-item[data-href]").forEach(item => {
+    if (item.dataset.href) {
+      item.style.cursor = "pointer";
+      item.addEventListener("click", () => { window.location.href = item.dataset.href; });
+    }
+  });
+
+  _robotRenderPrefsFooter();
 }
 
 function robotToggleReport(forceOpen) {
@@ -5509,9 +5654,15 @@ function robotToggleReport(forceOpen) {
 }
 
 async function robotRefresh() {
+  if (_robotIsMuted()) {
+    _robotApplyMutedState();
+    return;
+  }
+  _robotRemoveMutedState();
   const data = await fetchDiagnosticsSummary();
   if (!data) return;
-  const issues = Array.isArray(data.issues) ? data.issues : [];
+  const issues = (Array.isArray(data.issues) ? data.issues : [])
+    .filter(i => _robotIsTypeEnabled(i.type));
   const newHash = robotIssuesHash(issues);
   const issuesChanged = newHash !== ROBOT_STATE.lastIssueHash;
   ROBOT_STATE.lastIssueHash = newHash;
@@ -5529,7 +5680,7 @@ async function robotRefresh() {
       ROBOT_STATE.userRead = false;
       robotUpdateAvatar("ok");
       robotShowBubble(true);
-      robotTypewrite("Tudo operando\nnormalmente \u2713", () => robotScheduleDismiss());
+      robotTypewrite("Sem anomalias\ndetectadas \u2713", () => robotScheduleDismiss());
     }
     ROBOT_STATE.lastState = "ok";
     return;
@@ -5548,7 +5699,110 @@ async function robotRefresh() {
   }
 }
 
+function _robotApplyMutedState() {
+  robotShowBubble(false);
+  robotUpdateBadge(0);
+  const container = document.getElementById("robotAssistant");
+  if (container) container.classList.add("robot-muted-peek");
+  const img = document.getElementById("robotImg");
+  if (img) {
+    const peek = new Image();
+    peek.onload = () => { img.src = "img/roboaiotipeek.png"; };
+    peek.onerror = () => {}; // imagem não existe ainda → mantém atual
+    peek.src = "img/roboaiotipeek.png";
+  }
+  const panel = document.getElementById("robotReport");
+  if (panel) panel.classList.add("hidden");
+  ROBOT_STATE.reportOpen = false;
+}
+
+function _robotRemoveMutedState() {
+  const container = document.getElementById("robotAssistant");
+  if (container) container.classList.remove("robot-muted-peek");
+  const img = document.getElementById("robotImg");
+  if (img && img.src.includes("roboaiotipeek")) img.src = "img/roboaiotiidle.png";
+}
+
+function _robotRenderPrefsFooter() {
+  const panel = document.getElementById("robotReport");
+  if (!panel) return;
+  let footer = panel.querySelector(".robot-prefs-footer");
+  if (!footer) {
+    footer = document.createElement("div");
+    footer.className = "robot-prefs-footer";
+    panel.appendChild(footer);
+  }
+  const prefs    = _robotGetNotifPrefs();
+  const isMuted  = prefs.muted === true;
+  const disabled = Array.isArray(prefs.disabled_types) ? prefs.disabled_types : [];
+
+  footer.innerHTML = `
+    <button type="button" class="robot-prefs-collapse" id="robotPrefsCollapse">
+      <i class="fa-solid fa-gear"></i> Prefer\u00eancias de notifica\u00e7\u00e3o
+      <i class="fa-solid fa-chevron-down robot-prefs-chevron"></i>
+    </button>
+    <div class="robot-prefs-body" id="robotPrefsBody">
+      <label class="robot-prefs-toggle">
+        <input type="checkbox" id="robotPrefMuteAll" ${isMuted ? "checked" : ""}>
+        <span>Silenciar todas as notifica\u00e7\u00f5es</span>
+      </label>
+      <div class="robot-prefs-types ${isMuted ? "robot-prefs-types--disabled" : ""}">
+        ${Object.entries(ROBOT_CATEGORY_META).map(([type, m]) => {
+          const ico = ROBOT_CATEGORY_ICONS[type] || "fa-list";
+          return `<label class="robot-prefs-toggle robot-prefs-toggle--sub">
+            <input type="checkbox" class="robot-pref-type-cb" data-type="${type}"
+                   ${disabled.includes(type) ? "" : "checked"} ${isMuted ? "disabled" : ""}>
+            <span><i class="fa-solid ${ico}"></i> ${m.label}</span>
+          </label>`;
+        }).join("")}
+      </div>
+    </div>`;
+
+  const collapseBtn = footer.querySelector("#robotPrefsCollapse");
+  collapseBtn?.addEventListener("click", () => footer.classList.toggle("is-open"));
+
+  footer.querySelector("#robotPrefMuteAll")?.addEventListener("change", (e) => {
+    const p = _robotGetNotifPrefs();
+    p.muted = e.target.checked;
+    _robotSaveNotifPrefs(p);
+    _robotRenderPrefsFooter();
+    footer.classList.add("is-open");
+    if (p.muted) { _robotApplyMutedState(); }
+    else { _robotRemoveMutedState(); robotRefresh(); }
+  });
+
+  footer.querySelectorAll(".robot-pref-type-cb").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const p = _robotGetNotifPrefs();
+      let dis = Array.isArray(p.disabled_types) ? p.disabled_types : [];
+      const type = cb.dataset.type;
+      if (cb.checked) dis = dis.filter(t => t !== type);
+      else if (!dis.includes(type)) dis.push(type);
+      p.disabled_types = dis;
+      _robotSaveNotifPrefs(p);
+      robotRefresh();
+    });
+  });
+}
+
 function wireRobotAssistant() {
+  // Sincronizar preferências salvas no backend
+  (async () => {
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      if (!user.username) return;
+      const r = await apiFetch("/users/notif-prefs", {
+        headers: { "X-Username": user.username }
+      });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.prefs && typeof d.prefs === "object") {
+          localStorage.setItem(ROBOT_NOTIF_PREFS_KEY, JSON.stringify(d.prefs));
+        }
+      }
+    } catch (_) {}
+  })();
+
   const avatar    = document.getElementById("robotAvatar");
   const expandBtn = document.getElementById("robotBubbleExpand");
   const closeBtn  = document.getElementById("robotReportClose");
