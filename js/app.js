@@ -395,6 +395,10 @@ function setChipCount(id, value, title = "") {
   if (!el) return;
   el.textContent = String(value);
   if (title) el.title = title;
+  if (id === 'countNoComm' || id === 'countOff') {
+    const statusDiv = el.closest('.psf-status');
+    if (statusDiv) statusDiv.classList.toggle('psf-status--alarm', Number(value) > 0);
+  }
 }
 
 async function fetchInvertersRealtimeByPlant(plantId) {
@@ -1779,7 +1783,7 @@ function updateSummaryUI(plants) {
 
   validPlants.forEach(p => {
     totalActivePower += Number(p?.active_power_kw ?? 0) || 0;
-    totalRatedPower += Number(p?.rated_power_ac_kw ?? p?.rated_power_kw ?? p?.rated_power_kwp ?? 0) || 0;
+    totalRatedPower += Number(p?.capacity_dc ?? 0) || 0;
     totalCapacityAc += Number(p?.capacity_ac ?? 0) || 0;
   });
 
