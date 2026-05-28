@@ -431,18 +431,40 @@
 
     <!-- ZONA 4: Barra de ações (rodapé) -->
     <div class="ds-v2-bottombar">
-      <button class="ds-v2-bottom-btn" data-action="dsApplyTopbarBtn" type="button">
+      <button class="ds-v2-bottom-btn" id="dsApplyBottomBtn" type="button">
         <i class="fa-solid fa-play"></i> Aplicar
       </button>
-      <button id="dsLoadSeriesBtn" class="ds-v2-bottom-btn" type="button">
+      <button id="dsLoadSeriesBtn" class="ds-v2-bottom-btn" type="button" style="display:none">
         <i class="fa-solid fa-upload"></i> Carregar seleção
       </button>
-      <button class="ds-v2-bottom-btn" id="dsExportBtnBottom" type="button" id="dsExportBtn">
+      <button id="dsFavoriteToggleBtn" class="ds-v2-bottom-btn" type="button" style="display:none">
+        <i class="fa-regular fa-star"></i> Favoritar
+      </button>
+      <button id="dsFavoritesListBtn" class="ds-v2-bottom-btn" type="button">
+        <i class="fa-solid fa-star"></i> Meus Favoritos
+      </button>
+      <button class="ds-v2-bottom-btn" id="dsExportAllBtn" type="button">
+        <i class="fa-solid fa-download"></i> Exportar CSV Geral
+      </button>
+      <button class="ds-v2-bottom-btn" id="dsExportBtnBottom" type="button" id="dsExportBtn" style="display:none">
         <i class="fa-solid fa-download"></i> Exportar CSV
       </button>
       <button class="ds-v2-bottom-btn ds-v2-bottom-btn--danger" id="dsClearAllBtn" type="button">
         <i class="fa-solid fa-trash"></i> Limpar tudo
       </button>
+    </div>
+
+    <!-- PAINEL DE FAVORITOS (oculto por padrão) -->
+    <div id="dsFavoritesPanel" class="ds-favorites-panel" style="display:none">
+      <div class="ds-favorites-header">
+        <h4><i class="fa-solid fa-star"></i> Meus Favoritos</h4>
+        <button id="dsFavoritesPanelClose" class="ds-favorites-close" type="button">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div id="dsFavoritesList" class="ds-favorites-list">
+        <p class="ds-favorites-empty">Nenhum favorito salvo ainda.</p>
+      </div>
     </div>
 
     <!-- Elementos ocultos preservados para app.js -->
