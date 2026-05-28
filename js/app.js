@@ -40,6 +40,7 @@ function apiFetch(path, options = {}) {
 
   if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
   if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+  if (user.username) headers["X-Username"] = user.username;
 
   return fetch(`${API_BASE}${path}`, {
     ...options,
@@ -126,7 +127,8 @@ let DATASTUDIO_STATE = {
   chartData: null,
   forceHeroState: false,
   catalogOpen: false,
-  catalogConfirmed: false
+  catalogConfirmed: false,
+  _currentIsFavorite: false
 };
 
 let DATASTUDIO_CHART = {};  // multi-plant: { plantId: ChartInstance }
@@ -2200,6 +2202,17 @@ function _plantBlockHTML(plantId, plantName, plantColor, plantIdx) {
       <span class="ds-plant-block__dot" style="background:${plantColor}"></span>
       <strong>${plantName}</strong>
       <span class="ds-plant-block__tag-count" id="dsSelectedCount_${pid}">0 medidas</span>
+      <div class="ds-plant-block__actions">
+        <button class="ds-plant-action-btn" data-action="favoritePlant" data-plant="${pid}" type="button" title="Favoritar seleção desta usina">
+          <i class="fa-regular fa-star"></i> <span>Favoritar</span>
+        </button>
+        <button class="ds-plant-action-btn" data-action="exportPlant" data-plant="${pid}" type="button" title="Exportar CSV desta usina">
+          <i class="fa-solid fa-download"></i> <span>CSV</span>
+        </button>
+        <button class="ds-plant-action-btn ds-plant-action-btn--danger" data-action="removePlant" data-plant="${pid}" type="button" title="Remover esta usina">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
       <button class="ds-plant-block__fs-exit" data-action="exitFullscreen" data-plant="${pid}" type="button" title="Sair da tela cheia">
         <i class="fa-solid fa-compress"></i> Sair
       </button>
@@ -2545,7 +2558,7 @@ function updateStageUIForPlant(plantId) {
   const catalogSection = document.getElementById(`dsCatalogSection_${plantId}`);
 
   const hasSelection = ps.selectedTags.length > 0;
-  const showWorkspace = hasSelection && ps.catalogConfirmed;
+  const showWorkspace = (hasSelection && ps.catalogConfirmed) || ps.loadedFromFavorite;
 
   if (emptyState) emptyState.classList.toggle("hidden", showWorkspace);
   if (workspace) workspace.classList.toggle("hidden", !showWorkspace);
@@ -2662,7 +2675,7 @@ function renderDataStudioTagsTableForPlant(plantId, tags) {
 
 // --- Per-plant catalog actions ---
 
-function confirmCatalogSelectionForPlant(plantId) {
+async function confirmCatalogSelectionForPlant(plantId) {
   const ps = DATASTUDIO_PLANTS[String(plantId)];
   if (!ps) return;
   if (!ps.selectedTags.length) {
@@ -2672,6 +2685,38 @@ function confirmCatalogSelectionForPlant(plantId) {
   ps.catalogConfirmed = true;
   ps.catalogOpen = false;
   updateStageUIForPlant(plantId);
+
+  // Salvar seleção e plotar gráfico automaticamente
+  try {
+    const payload = buildPayloadForPlant(plantId, ps.selectedTags);
+    const res = await apiFetch("/datastudio/selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    const parsed = dsNormalizeApiBody(data);
+    const selectionId = parsed?.selection_id ?? parsed?.id ?? null;
+    if (selectionId) {
+      ps.selectionId = selectionId;
+      DATASTUDIO_STATE.selectionIdsByPlant[String(plantId)] = selectionId;
+      DATASTUDIO_STATE.selectionId = DATASTUDIO_STATE.selectionId || selectionId;
+    }
+
+    // Buscar e plotar séries
+    if (selectionId) {
+      const seriesRes = await apiFetch(`/datastudio/series?selection_id=${selectionId}`);
+      if (seriesRes.ok) {
+        const seriesData = await seriesRes.json();
+        const seriesParsed = dsNormalizeApiBody(seriesData);
+        DATASTUDIO_STATE.seriesByPlant[String(plantId)] = seriesParsed;
+        renderChartForPlant(String(plantId), seriesParsed);
+      }
+    }
+  } catch (e) {
+    console.error("[DataStudio] erro ao confirmar e plotar:", e);
+    window.alert(`Erro ao carregar gráfico: ${e.message || e}`);
+  }
 }
 
 function toggleCatalogForPlant(plantId) {
@@ -3299,12 +3344,448 @@ async function saveDataStudioSelection() {
       : (firstSelId ? `Seleção salva! ID ${firstSelId}` : "Seleção salva com sucesso."));
 
     await fetchDataStudioSeriesBySelection();
+    updateDsFavoriteToggleBtn();
   } catch (err) {
     console.error("[DataStudio] erro ao salvar seleção:", err);
     window.alert(`Não foi possível salvar a seleção: ${err.message || err}`);
   } finally {
     setDataStudioSavingSelection(false);
   }
+}
+
+// ============================================================
+// DATA STUDIO — FAVORITOS
+// ============================================================
+
+function updateDsFavoriteToggleBtn() {
+  const btn = document.getElementById("dsFavoriteToggleBtn");
+  if (!btn) return;
+  const hasSelectionId = !!DATASTUDIO_STATE.selectionId || Object.keys(DATASTUDIO_STATE.selectionIdsByPlant).length > 0;
+  const hasTags = Object.keys(DATASTUDIO_PLANTS).some(pid => DATASTUDIO_PLANTS[pid]?.selectedTags?.length > 0);
+  btn.disabled = !hasSelectionId && !hasTags;
+
+  const isFav = !!DATASTUDIO_STATE._currentIsFavorite;
+  const icon = btn.querySelector("i");
+  if (icon) {
+    icon.className = isFav ? "fa-solid fa-star" : "fa-regular fa-star";
+  }
+  btn.style.color = isFav ? "#ffd84d" : "";
+  const label = btn.childNodes[btn.childNodes.length - 1];
+  if (label && label.nodeType === 3) {
+    label.textContent = isFav ? " Favoritado" : " Favoritar";
+  }
+}
+
+async function toggleDataStudioFavorite() {
+  let selectionId = DATASTUDIO_STATE.selectionId || Object.values(DATASTUDIO_STATE.selectionIdsByPlant)[0];
+
+  // Se não tem seleção salva ainda, salva automaticamente antes de favoritar
+  if (!selectionId) {
+    const plantIds = Object.keys(DATASTUDIO_PLANTS);
+    const anyTags = plantIds.some(pid => DATASTUDIO_PLANTS[pid]?.selectedTags?.length > 0);
+    if (!anyTags) {
+      window.alert("Selecione medidas antes de favoritar.");
+      return;
+    }
+    await saveDataStudioSelection();
+    selectionId = DATASTUDIO_STATE.selectionId || Object.values(DATASTUDIO_STATE.selectionIdsByPlant)[0];
+    if (!selectionId) return;
+  }
+
+  const makeFavorite = !DATASTUDIO_STATE._currentIsFavorite;
+
+  try {
+    const res = await apiFetch("/datastudio/favorite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        selection_id: selectionId,
+        is_favorite: makeFavorite,
+      }),
+    });
+    const data = await res.json();
+    if (data?.ok) {
+      DATASTUDIO_STATE._currentIsFavorite = data.is_favorite;
+      updateDsFavoriteToggleBtn();
+    }
+  } catch (e) {
+    console.warn("[datastudio] favorite toggle falhou:", e);
+  }
+}
+
+// Favoritar por planta individual
+async function toggleFavoriteForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+
+  let selectionId = ps.selectionId || DATASTUDIO_STATE.selectionIdsByPlant[String(plantId)];
+
+  // Se não tem seleção salva, salva automaticamente
+  if (!selectionId) {
+    if (!ps.selectedTags?.length) {
+      window.alert("Selecione medidas nesta usina antes de favoritar.");
+      return;
+    }
+    // Salvar seleção só desta planta
+    try {
+      const payload = buildPayloadForPlant(plantId, ps.selectedTags);
+      const res = await apiFetch("/datastudio/selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      const parsed = dsNormalizeApiBody(data);
+      selectionId = parsed?.selection_id ?? parsed?.id ?? null;
+      if (selectionId) {
+        ps.selectionId = selectionId;
+        DATASTUDIO_STATE.selectionIdsByPlant[String(plantId)] = selectionId;
+      }
+    } catch (e) {
+      console.warn("[datastudio] save before favorite falhou:", e);
+      return;
+    }
+  }
+
+  if (!selectionId) return;
+
+  const currentlyFav = !!ps._isFavorite;
+  const makeFavorite = !currentlyFav;
+
+  try {
+    const res = await apiFetch("/datastudio/favorite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selection_id: selectionId, is_favorite: makeFavorite }),
+    });
+    const data = await res.json();
+    if (data?.ok) {
+      ps._isFavorite = data.is_favorite;
+      _updatePlantFavBtn(plantId);
+    }
+  } catch (e) {
+    console.warn("[datastudio] favorite toggle falhou:", e);
+  }
+}
+
+function _updatePlantFavBtn(plantId) {
+  const btn = document.querySelector(`[data-action="favoritePlant"][data-plant="${plantId}"]`);
+  if (!btn) return;
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  const isFav = !!ps?._isFavorite;
+  const icon = btn.querySelector("i");
+  const label = btn.querySelector("span");
+  if (icon) icon.className = isFav ? "fa-solid fa-star" : "fa-regular fa-star";
+  if (label) label.textContent = isFav ? "Favoritado" : "Favoritar";
+  btn.classList.toggle("ds-plant-fav-active", isFav);
+}
+
+// Exportar CSV por planta individual
+async function exportDataStudioSelectionForPlant(plantId) {
+  const selId = DATASTUDIO_STATE.selectionIdsByPlant[String(plantId)];
+  if (!selId) {
+    window.alert("Salve uma seleção desta usina antes de exportar.");
+    return;
+  }
+
+  const btn = document.querySelector(`[data-action="exportPlant"][data-plant="${plantId}"]`);
+  const oldHtml = btn ? btn.innerHTML : "";
+  try {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    const url = `${API_BASE}/datastudio/export?selection_id=${encodeURIComponent(selId)}`;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const headers = {};
+    if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
+    if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+    const res = await fetch(url, { headers, cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `datastudio_usina_${plantId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  } catch (e) {
+    console.warn("[datastudio] export falhou:", e);
+    window.alert("Falha ao exportar CSV.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+  }
+}
+
+// Remover plant block
+function removePlantBlock(plantId) {
+  const pidStr = String(plantId);
+  const pidNum = Number(plantId);
+
+  // Destroi chart
+  const ps = DATASTUDIO_PLANTS[pidStr];
+  if (ps && ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} }
+  delete DATASTUDIO_PLANTS[pidStr];
+  delete DATASTUDIO_CHART[pidStr];
+  delete DATASTUDIO_STATE.selectionIdsByPlant[pidStr];
+  delete DATASTUDIO_STATE.seriesByPlant[pidStr];
+
+  // Remove do selectedPlantIds
+  DATASTUDIO_STATE.selectedPlantIds = DATASTUDIO_STATE.selectedPlantIds.filter(id => id !== pidNum);
+
+  // Remove o DOM
+  const el = document.getElementById(`dsPlantBlock_${pidStr}`);
+  if (el) el.remove();
+
+  // Desmarca checkbox no multiselect
+  const dropdown = document.getElementById("dsPlantMultiselectDropdown");
+  if (dropdown) {
+    const cb = dropdown.querySelector(`input[type='checkbox'][value='${pidNum}']`);
+    if (cb) cb.checked = false;
+  }
+  if (typeof _syncMultiselectLabel === "function") _syncMultiselectLabel();
+
+  // Se não sobrou nenhuma planta, mostra empty state
+  if (!DATASTUDIO_STATE.selectedPlantIds.length) {
+    const container = document.getElementById("dsPlantBlocks");
+    const noPlantState = document.getElementById("dsNoPlantState");
+    if (container && noPlantState) {
+      container.appendChild(noPlantState);
+      noPlantState.style.display = "";
+    }
+    DATASTUDIO_STATE.selectionId = null;
+  }
+
+  updateDataStudioExportButton();
+}
+
+async function fetchDataStudioFavorites() {
+  try {
+    const res = await apiFetch("/datastudio/selections?favorites_only=true");
+    const data = await res.json();
+    return Array.isArray(data?.selections) ? data.selections : [];
+  } catch (e) {
+    console.warn("[datastudio] fetch favorites falhou:", e);
+    return [];
+  }
+}
+
+let _dsFavoritesCache = [];
+
+async function renderDsFavoritesPanel() {
+  const panel = document.getElementById("dsFavoritesPanel");
+  const list = document.getElementById("dsFavoritesList");
+  if (!panel || !list) return;
+
+  list.innerHTML = '<p class="ds-favorites-empty">Carregando...</p>';
+  panel.style.display = "";
+
+  const favorites = await fetchDataStudioFavorites();
+  _dsFavoritesCache = favorites;
+
+  if (!favorites.length) {
+    list.innerHTML = '<p class="ds-favorites-empty">Nenhum favorito salvo ainda.</p>';
+    return;
+  }
+
+  list.innerHTML = "";
+
+  for (const fav of favorites) {
+    const item = document.createElement("div");
+    item.className = "ds-fav-item";
+
+    const startStr = fav.start_ts ? new Date(fav.start_ts).toLocaleDateString("pt-BR") : "—";
+    const endStr = fav.end_ts ? new Date(fav.end_ts).toLocaleDateString("pt-BR") : "—";
+    const plantName = fav.power_plant_name || `Usina #${fav.power_plant_id}`;
+    const itemsCount = fav.items_count || 0;
+
+    const title = fav.items_labels || fav.selection_name || "Seleção sem nome";
+
+    item.innerHTML = `
+      <input type="checkbox" class="ds-fav-item-check" data-fav-id="${fav.id}" />
+      <div class="ds-fav-item-info">
+        <div class="ds-fav-item-plant">
+          <img src="img/logo-plant.svg" class="ds-fav-plant-icon" alt="" />
+          <span>${escapeHtml(plantName)}</span>
+        </div>
+        <div class="ds-fav-item-name">${escapeHtml(title)}</div>
+        <div class="ds-fav-item-meta">${startStr} a ${endStr} &middot; ${itemsCount} medida${itemsCount !== 1 ? "s" : ""}</div>
+      </div>
+      <button class="ds-fav-item-star" title="Desfavoritar" data-id="${fav.id}">
+        <i class="fa-solid fa-star"></i>
+      </button>
+    `;
+
+    // Clicar em qualquer lugar da row toggle o checkbox
+    item.addEventListener("click", (e) => {
+      // Ignora se clicou na estrela ou no próprio checkbox
+      if (e.target.closest(".ds-fav-item-star")) return;
+      if (e.target.classList.contains("ds-fav-item-check")) return;
+      const cb = item.querySelector(".ds-fav-item-check");
+      if (cb) cb.checked = !cb.checked;
+    });
+
+    // Clicar na estrela desfavorita
+    item.querySelector(".ds-fav-item-star").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await toggleFavoriteById(fav.id, false);
+      await renderDsFavoritesPanel();
+    });
+
+    list.appendChild(item);
+  }
+
+  // Botão de carregar selecionados
+  const loadBar = document.createElement("div");
+  loadBar.className = "ds-favorites-load-bar";
+  loadBar.innerHTML = `
+    <button class="ds-favorites-load-btn" id="dsFavLoadSelectedBtn" type="button">
+      <i class="fa-solid fa-chart-line"></i> Carregar selecionados
+    </button>
+  `;
+  list.appendChild(loadBar);
+
+  document.getElementById("dsFavLoadSelectedBtn")?.addEventListener("click", () => {
+    const checked = list.querySelectorAll(".ds-fav-item-check:checked");
+    if (!checked.length) {
+      window.alert("Selecione ao menos um favorito.");
+      return;
+    }
+    const selectedIds = new Set();
+    checked.forEach(cb => selectedIds.add(Number(cb.dataset.favId)));
+    const selectedFavs = _dsFavoritesCache.filter(f => selectedIds.has(Number(f.id)));
+    console.log("[datastudio] favoritos selecionados:", selectedFavs.length, selectedFavs.map(f => f.id));
+    loadFavoriteSelections(selectedFavs);
+  });
+}
+
+async function toggleFavoriteById(selectionId, makeFavorite) {
+  try {
+    const res = await apiFetch("/datastudio/favorite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selection_id: selectionId, is_favorite: makeFavorite }),
+    });
+    const data = await res.json();
+    return data?.is_favorite ?? null;
+  } catch (e) {
+    console.warn("[datastudio] favorite toggle falhou:", e);
+    return null;
+  }
+}
+
+async function loadFavoriteSelections(favs) {
+  if (!favs.length) return;
+
+  // Fecha o painel
+  const panel = document.getElementById("dsFavoritesPanel");
+  if (panel) panel.style.display = "none";
+
+  // Limpa estado anterior
+  Object.keys(DATASTUDIO_PLANTS).forEach(pid => {
+    const ps = DATASTUDIO_PLANTS[pid];
+    if (ps && ps.chartInstance) { try { ps.chartInstance.destroy(); } catch(e){} }
+  });
+  DATASTUDIO_PLANTS = {};
+  DATASTUDIO_CHART = {};
+  DATASTUDIO_STATE.seriesByPlant = {};
+  DATASTUDIO_STATE.selectionIdsByPlant = {};
+  DATASTUDIO_STATE.chartData = null;
+
+  // Agrupa favoritos por planta (pode ter múltiplos da mesma usina)
+  const favsByPlant = {};
+  for (const fav of favs) {
+    const pid = String(fav.power_plant_id);
+    if (!favsByPlant[pid]) favsByPlant[pid] = [];
+    favsByPlant[pid].push(fav);
+  }
+
+  const plantIds = Object.keys(favsByPlant).map(Number);
+
+  // O primeiro selection_id fica no state (para o botão favoritar funcionar)
+  DATASTUDIO_STATE.selectedPlantIds = plantIds;
+  DATASTUDIO_STATE.selectionIdsByPlant = {};
+  for (const pid of Object.keys(favsByPlant)) {
+    DATASTUDIO_STATE.selectionIdsByPlant[pid] = favsByPlant[pid][0].id;
+  }
+  DATASTUDIO_STATE.selectionId = favs[0].id;
+  DATASTUDIO_STATE._currentIsFavorite = true;
+
+  // Sincroniza checkboxes do multiselect de usinas
+  const dropdown = document.getElementById("dsPlantMultiselectDropdown");
+  if (dropdown) {
+    dropdown.querySelectorAll("input[type='checkbox']").forEach(cb => {
+      cb.checked = plantIds.includes(Number(cb.value));
+    });
+    if (typeof _syncMultiselectLabel === "function") _syncMultiselectLabel();
+  }
+
+  renderPlantBlocks();
+
+  // Buscar tags do catálogo para cada usina
+  for (const pid of plantIds) {
+    const ps = DATASTUDIO_PLANTS[String(pid)];
+    if (ps && !ps.catalogTags.length) {
+      fetchDataStudioTagsForPlant(String(pid));
+    }
+  }
+
+  // Forçar workspace visível em cada plant block
+  for (const pid of Object.keys(favsByPlant)) {
+    const ps = DATASTUDIO_PLANTS[pid];
+    if (ps) {
+      ps.catalogConfirmed = true;
+      ps.loadedFromFavorite = true;
+      ps._isFavorite = true;
+      updateStageUIForPlant(pid);
+      _updatePlantFavBtn(pid);
+    }
+  }
+
+  // Buscar séries de TODOS os favoritos e mergear por planta
+  setDataStudioLoadingSeries(true);
+  try {
+    DATASTUDIO_STATE.seriesByPlant = {};
+
+    for (const [pid, plantFavs] of Object.entries(favsByPlant)) {
+      let mergedSeries = [];
+      console.log(`[datastudio] planta ${pid}: carregando ${plantFavs.length} favorito(s)`);
+
+      for (const fav of plantFavs) {
+        const params = new URLSearchParams({ selection_id: String(fav.id) });
+        const res = await apiFetch(`/datastudio/series?${params.toString()}`);
+        if (!res.ok) throw new Error(`Falha ao carregar séries para fav ${fav.id} (${res.status})`);
+        const data = await res.json();
+        console.log(`[datastudio]   fav ${fav.id} raw keys:`, Object.keys(data || {}));
+        const parsed = dsNormalizeApiBody(data);
+        console.log(`[datastudio]   fav ${fav.id} parsed keys:`, Object.keys(parsed || {}));
+        const seriesList = _extractSeriesList(parsed);
+        console.log(`[datastudio]   fav ${fav.id}: ${seriesList.length} série(s)`);
+        mergedSeries = mergedSeries.concat(seriesList);
+      }
+
+      console.log(`[datastudio] planta ${pid}: total ${mergedSeries.length} série(s) mergeadas`);
+      // Monta payload mergeado
+      const mergedPayload = { series: mergedSeries };
+      DATASTUDIO_STATE.seriesByPlant[pid] = mergedPayload;
+
+      const ps = DATASTUDIO_PLANTS[pid];
+      if (ps) {
+        ps.catalogConfirmed = true;
+        updateStageUIForPlant(pid);
+      }
+      renderChartForPlant(pid, mergedPayload);
+    }
+  } catch (err) {
+    console.error("[DataStudio] erro ao carregar favoritos:", err);
+    window.alert(`Não foi possível carregar favoritos: ${err.message || err}`);
+  } finally {
+    setDataStudioLoadingSeries(false);
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 async function fetchDataStudioSeriesBySelection() {
@@ -3382,12 +3863,14 @@ function markDataStudioSeriesDirty() {
   DATASTUDIO_STATE.selectionIdsByPlant = {};
   DATASTUDIO_STATE.seriesByPlant = {};
   DATASTUDIO_STATE.chartData = null;
+  DATASTUDIO_STATE._currentIsFavorite = false;
 
   const loadSeriesBtn = document.getElementById("dsLoadSeriesBtn");
   const saveSelectionBtn = document.getElementById("dsSaveSelectionBtn");
   if (loadSeriesBtn) { loadSeriesBtn.disabled = true; loadSeriesBtn.textContent = "Carregar séries"; }
   if (saveSelectionBtn) saveSelectionBtn.disabled = false;
 
+  updateDsFavoriteToggleBtn();
   renderDataStudioChart(null);
   updateDataStudioExportButton();
 }
@@ -3652,6 +4135,15 @@ function _wireDataStudioPlantBlocksDelegation() {
         if (ch3 && typeof ch3.resetZoom === "function") ch3.resetZoom();
         break;
       }
+      case "favoritePlant":
+        toggleFavoriteForPlant(plantId);
+        break;
+      case "exportPlant":
+        exportDataStudioSelectionForPlant(plantId);
+        break;
+      case "removePlant":
+        removePlantBlock(plantId);
+        break;
     }
   });
 
@@ -3767,10 +4259,36 @@ function wireDataStudioOnce() {
   const saveSelectionBtn = document.getElementById("dsSaveSelectionBtn");
   const exportBtn = document.getElementById("dsExportBtn") || document.getElementById("dsExportBtnBottom");
   const clearAllBtn = document.getElementById("dsClearAllBtn");
+  const applyBottomBtn = document.getElementById("dsApplyBottomBtn");
 
   loadSeriesBtn?.addEventListener("click", () => saveDataStudioSelection());
   saveSelectionBtn?.addEventListener("click", saveDataStudioSelection);
   exportBtn?.addEventListener("click", exportDataStudioSelection);
+  applyBottomBtn?.addEventListener("click", () => {
+    if (typeof window.applyAllPlants === "function") window.applyAllPlants();
+  });
+
+  const exportAllBtn = document.getElementById("dsExportAllBtn");
+  exportAllBtn?.addEventListener("click", exportDataStudioSelection);
+
+  // Favoritos
+  const favToggleBtn = document.getElementById("dsFavoriteToggleBtn");
+  const favListBtn = document.getElementById("dsFavoritesListBtn");
+  const favPanelClose = document.getElementById("dsFavoritesPanelClose");
+
+  favToggleBtn?.addEventListener("click", toggleDataStudioFavorite);
+  favListBtn?.addEventListener("click", () => {
+    const panel = document.getElementById("dsFavoritesPanel");
+    if (panel && panel.style.display !== "none") {
+      panel.style.display = "none";
+    } else {
+      renderDsFavoritesPanel();
+    }
+  });
+  favPanelClose?.addEventListener("click", () => {
+    const panel = document.getElementById("dsFavoritesPanel");
+    if (panel) panel.style.display = "none";
+  });
 
   clearAllBtn?.addEventListener("click", () => {
     DATASTUDIO_STATE.selectionId = null;
@@ -3779,6 +4297,8 @@ function wireDataStudioOnce() {
     DATASTUDIO_STATE.chartData = null;
     DATASTUDIO_STATE.selectedPlantIds = [];
     DATASTUDIO_STATE.selectedPlantId = null;
+    DATASTUDIO_STATE._currentIsFavorite = false;
+    updateDsFavoriteToggleBtn();
 
     // Uncheck all multi-select checkboxes
     const dropdown = document.getElementById("dsPlantMultiselectDropdown");
