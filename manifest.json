@@ -1,0 +1,27 @@
+{
+  "name": "AIOTI Solar SCADA",
+  "short_name": "AIOTI",
+  "description": "Monitoramento de Usinas Solares",
+  "start_url": "/resumo.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#02050a",
+  "theme_color": "#7FD055",
+  "lang": "pt-BR",
+  "categories": ["utilities", "business"],
+  "icons": [
+    {
+      "src": "img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -229,6 +229,7 @@ body {
 
 .hidden { display: none !important; }
 
+
 /* Base mobile alignment helpers (resumo/app) */
 @media (max-width: 640px) {
   body {

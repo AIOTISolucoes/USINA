@@ -4,52 +4,67 @@
   <meta charset="UTF-8" />
   <title>Ordens de Serviço · AIOTI</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#7FD055" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="img/icon-192.png" />
+  <link rel="apple-touch-icon" href="img/icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <link rel="stylesheet" href="os.css" />
   <style>
-  body.theme-light{--bg-main:#f0f4f2;--bg-card:#fff;--bg-card-alt:#eaf4ee;--text-main:#0b0f0c;--text-muted:#5f6f66;--accent:#1fd67a;--border-soft:#e0e8e4;--accent-soft:rgba(31,214,122,.10);--col-bg:rgba(255,255,255,.7);--col-border:rgba(31,214,122,.15);}
-  body.theme-dark{--bg-main:#030608;--bg-card:#070d0a;--bg-card-alt:#0a1410;--text-main:#e6f5ec;--text-muted:#6a8e7a;--accent:#2aff7b;--border-soft:rgba(255,255,255,.07);--accent-soft:rgba(42,255,123,.08);--col-bg:rgba(7,14,10,.85);--col-border:rgba(42,255,123,.12);}
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:"Roboto",sans-serif;background:var(--bg-main);color:var(--text-main);overflow-x:hidden;
-    background-image:radial-gradient(800px 500px at 15% 5%,rgba(42,255,123,.04),transparent 60%),radial-gradient(600px 400px at 80% 90%,rgba(42,255,123,.03),transparent 60%);background-attachment:fixed;}
+  body{
+    --accent:#4DB848;--accent-dim:rgba(77,184,72,.15);--accent-glow:rgba(77,184,72,.35);
+    --bg-main:#080c09;--bg-card:#0d1410;--bg-card-alt:#111a12;--bg-glass:rgba(13,20,16,.85);
+    --text-main:#e8f5e9;--text-muted:#557a5c;
+    --border-soft:rgba(77,184,72,.08);--border-mid:rgba(77,184,72,.18);
+    --accent-soft:rgba(77,184,72,.12);
+    --col-bg:rgba(13,20,16,.7);--col-border:rgba(77,184,72,.12);
+    --shadow-card:0 2px 16px rgba(0,0,0,.35);--shadow-glow:0 0 24px rgba(77,184,72,.12);
+    font-family:"Roboto",sans-serif;background:var(--bg-main);color:var(--text-main);overflow-x:hidden;
+    background-image:radial-gradient(900px 600px at 10% 0%,rgba(77,184,72,.05),transparent 55%),radial-gradient(700px 500px at 85% 95%,rgba(77,184,72,.03),transparent 55%);
+    background-attachment:fixed;}
   .layout{display:grid;grid-template-columns:68px 1fr;min-height:100vh;}
   /* sidebar */
-  .os-sidebar{background:var(--bg-card);border-right:1px solid var(--border-soft);display:flex;flex-direction:column;align-items:center;padding:0 0 16px;height:100vh;position:sticky;top:0;z-index:100;width:68px;}
+  .os-sidebar{background:linear-gradient(180deg,#0a120b,#060d07);border-right:1px solid rgba(77,184,72,.12);box-shadow:2px 0 20px rgba(0,0,0,.4);display:flex;flex-direction:column;align-items:center;padding:0 0 16px;height:100vh;position:sticky;top:0;z-index:100;width:68px;}
   .os-sidebar-logo{width:68px;height:56px;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--border-soft);flex-shrink:0;}
   .os-sidebar-logo img{width:38px;height:38px;object-fit:contain;}
   .os-sidebar-logo-fallback{font-family:"Exo 2",sans-serif;font-size:10px;font-weight:800;color:var(--accent);letter-spacing:.1em;}
   .os-sidebar-nav{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;padding:10px 8px 0;}
-  .os-nav-item{width:52px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);cursor:pointer;transition:.15s;text-decoration:none;}
+  .os-nav-item{width:52px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border-radius:10px;border:1px solid transparent;background:transparent;color:var(--text-muted);cursor:pointer;transition:.15s;text-decoration:none;position:relative;overflow:hidden;}
+  .os-nav-item::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,rgba(77,184,72,.08) 50%,transparent 100%);transform:translateX(-100%);transition:transform .3s;}
+  .os-nav-item:hover::after{transform:translateX(100%);}
   .os-nav-item svg{width:20px;height:20px;flex-shrink:0;transition:.15s;}
   .os-nav-item span{font-size:9px;font-family:"Exo 2",sans-serif;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}
-  .os-nav-item:hover,.os-nav-item.active{background:var(--accent-soft);border-color:rgba(42,255,123,.35);color:var(--accent);}
+  .os-nav-item:hover,.os-nav-item.active{background:var(--accent-dim);border-color:rgba(77,184,72,.3);color:var(--accent);}
   .os-sidebar-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px;padding:0 8px;}
   .os-icon-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-soft);background:var(--bg-card-alt);color:var(--text-muted);cursor:pointer;font-size:14px;transition:.15s;}
-  .os-icon-btn:hover{color:var(--accent);border-color:rgba(42,255,123,.4);}
+  .os-icon-btn:hover{color:var(--accent);border-color:rgba(77,184,72,.4);}
   /* topbar */
   .main{display:flex;flex-direction:column;min-width:0;}
-  .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border-soft);background:var(--bg-card);gap:12px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid rgba(77,184,72,.1);background:rgba(8,12,9,.92);backdrop-filter:blur(16px);box-shadow:0 1px 20px rgba(0,0,0,.3);gap:12px;position:sticky;top:0;z-index:50;}
   .topbar-left{display:flex;flex-direction:column;gap:1px;}
   .topbar-title{font-family:"Exo 2",sans-serif;font-size:15px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:8px;}
   .topbar-sub{font-size:11px;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;}
   .topbar-right{display:flex;align-items:center;gap:10px;}
-  .topbar-search{display:flex;align-items:center;gap:8px;background:var(--bg-card-alt);border:1px solid var(--border-soft);border-radius:8px;padding:6px 12px;min-width:200px;}
+  .topbar-search{display:flex;align-items:center;gap:8px;background:var(--bg-card-alt);border:1px solid var(--border-soft);border-radius:8px;padding:6px 12px;min-width:200px;transition:border-color .15s;}
+  .topbar-search:focus-within{border-color:var(--border-mid);}
   .topbar-search input{background:none;border:none;outline:none;color:var(--text-main);font-size:13px;width:100%;}
   .topbar-search input::placeholder{color:var(--text-muted);}
   .topbar-search i{color:var(--text-muted);font-size:13px;}
   .icon-btn{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-soft);background:var(--bg-card-alt);color:var(--text-muted);cursor:pointer;font-size:14px;transition:.15s;}
-  .icon-btn:hover{color:var(--accent);border-color:rgba(42,255,123,.4);}
+  .icon-btn:hover{color:var(--accent);border-color:var(--border-mid);}
   .user-pill{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;border:1px solid var(--border-soft);background:var(--bg-card-alt);font-size:12px;}
-  .avatar{width:22px;height:22px;border-radius:50%;background:#112218;border:1px solid rgba(42,255,123,.3);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--accent);}
+  .avatar{width:22px;height:22px;border-radius:50%;background:#0d2018;border:1px solid rgba(77,184,72,.3);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--accent);}
   .hidden{display:none!important;}
   </style>
-  <script src="app.js"></script>
+  <script src="js/app.js"></script>
   <script src="os.js" defer></script>
+  <script src="js/pwa.js" defer></script>
 </head>
-<body class="theme-dark">
+<body>
 <div class="layout">
 
   <!-- ═══ SIDEBAR OS ═══ -->
@@ -78,17 +93,8 @@
         </svg>
         <span>Tarefas</span>
       </a>
-      <!-- ATIVOS -->
-      <a href="#" class="os-nav-item" id="navAtivos" title="Ativos">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
-        </svg>
-        <span>Ativos</span>
-      </a>
     </nav>
     <div class="os-sidebar-bottom">
-      <button class="os-icon-btn" id="themeToggleBtn" title="Alternar tema"><i id="themeIcon" class="fa-solid fa-moon"></i></button>
       <button class="os-icon-btn" id="logoutBtn" title="Sair"><i class="fa-solid fa-right-from-bracket"></i></button>
     </div>
   </aside>
@@ -104,7 +110,6 @@
           </svg>
           Tarefas
         </div>
-        <div class="topbar-sub">Vista Kanban</div>
       </div>
       <div class="topbar-right">
         <div class="topbar-search">
@@ -119,6 +124,75 @@
         </div>
       </div>
     </header>
+
+    <div class="os-kpi-grid" id="osKpiGrid">
+      <div class="os-kpi-card os-kpi-card--highlight">
+        <div class="os-kpi-icon"><i class="fa-solid fa-list-check"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Total de OS</div>
+          <div class="os-kpi-value" id="osKpiTotal">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon os-kpi-icon--yellow"><i class="fa-solid fa-clock"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Pendentes</div>
+          <div class="os-kpi-value" id="osKpiPendentes">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon os-kpi-icon--blue"><i class="fa-solid fa-gears"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Em Processo</div>
+          <div class="os-kpi-value" id="osKpiEmProcesso">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon os-kpi-icon--red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Atrasadas</div>
+          <div class="os-kpi-value" id="osKpiAtrasadas">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon os-kpi-icon--orange"><i class="fa-solid fa-circle-pause"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Paradas</div>
+          <div class="os-kpi-value" id="osKpiParadas">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon"><i class="fa-solid fa-circle-check"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Concluídas</div>
+          <div class="os-kpi-value" id="osKpiConcluidas">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card">
+        <div class="os-kpi-icon os-kpi-icon--purple"><i class="fa-solid fa-sack-dollar"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">Custo Total</div>
+          <div class="os-kpi-value os-kpi-value--sm" id="osKpiCustoTotal">—</div>
+        </div>
+      </div>
+      <div class="os-kpi-card" title="Tempo médio entre falhas consecutivas">
+        <div class="os-kpi-icon os-kpi-icon--teal"><i class="fa-solid fa-wave-square"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">MTBF</div>
+          <div class="os-kpi-value" id="osKpiMtbf">—</div>
+          <div class="os-kpi-sub">entre falhas</div>
+        </div>
+      </div>
+      <div class="os-kpi-card" title="Tempo médio de reparo">
+        <div class="os-kpi-icon os-kpi-icon--blue"><i class="fa-solid fa-wrench"></i></div>
+        <div class="os-kpi-body">
+          <div class="os-kpi-label">MTTR</div>
+          <div class="os-kpi-value" id="osKpiMttr">—</div>
+          <div class="os-kpi-sub">tempo de reparo</div>
+        </div>
+      </div>
+    </div>
+    <div class="os-category-breakdown" id="osCategoryBreakdown"></div>
 
     <div class="kb-board" id="kbBoard">
       <div class="kb-col" data-status="pendente">
@@ -144,7 +218,7 @@
       </div>
       <div class="kb-col" data-status="concluida">
         <div class="kb-col-header">
-          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#2aff7b;box-shadow:0 0 6px rgba(42,255,123,.5);"></span><span class="kb-col-title">OSs Concluídas</span><span class="kb-col-count" id="count-concluida">0</span></div>
+          <div class="kb-col-title-row"><span class="kb-col-dot" style="background:#4DB848;box-shadow:0 0 6px rgba(77,184,72,.5);"></span><span class="kb-col-title">OSs Concluídas</span><span class="kb-col-count" id="count-concluida">0</span></div>
           <button class="kb-col-refresh" data-col="concluida"><i class="fa-solid fa-rotate-right"></i></button>
         </div>
         <div class="kb-col-body" id="col-concluida"><div class="kb-loading" id="loading-concluida"><span class="kb-spinner"></span></div></div>
@@ -156,9 +230,9 @@
 <!-- FAB -->
 <button class="kb-fab" id="kbFab" title="Nova Ordem de Serviço">
   <svg viewBox="0 0 60 60" fill="none" class="fab-hex">
-    <polygon points="30,2 56,16 56,44 30,58 4,44 4,16" fill="rgba(10,25,18,.95)" stroke="rgba(42,255,123,.7)" stroke-width="1.5"/>
-    <line x1="30" y1="20" x2="30" y2="40" stroke="#2aff7b" stroke-width="2.5" stroke-linecap="round"/>
-    <line x1="20" y1="30" x2="40" y2="30" stroke="#2aff7b" stroke-width="2.5" stroke-linecap="round"/>
+    <polygon points="30,2 56,16 56,44 30,58 4,44 4,16" fill="rgba(10,25,18,.95)" stroke="rgba(77,184,72,.7)" stroke-width="1.5"/>
+    <line x1="30" y1="20" x2="30" y2="40" stroke="#4DB848" stroke-width="2.5" stroke-linecap="round"/>
+    <line x1="20" y1="30" x2="40" y2="30" stroke="#4DB848" stroke-width="2.5" stroke-linecap="round"/>
   </svg>
   <div class="fab-ring"></div>
 </button>
@@ -187,6 +261,12 @@
 
       <!-- STEP 1: ATIVO -->
       <div class="wz-step-content" id="wz-step-1">
+        <div class="wz-field-group" id="plantFieldGroup">
+          <label class="wz-label">Usina</label>
+          <select id="f-plant" class="wz-input wz-select">
+            <option value="">Todas as usinas</option>
+          </select>
+        </div>
         <div class="wz-field-group">
           <label class="wz-label required">Ativo</label>
           <div class="wz-asset-selected hidden" id="assetSelected">
@@ -307,14 +387,6 @@
             <label class="wz-label required">Tipo de tarefa</label>
             <select id="f-task-type" class="wz-input wz-select">
               <option value="">Selecionar...</option>
-              <option>Administrativa</option>
-              <option>Corretiva</option>
-              <option>Corretiva Emergencial</option>
-              <option>Handover</option>
-              <option>Inspeção</option>
-              <option>Preditiva</option>
-              <option>Preventiva</option>
-              <option>Ronda</option>
             </select>
             <div class="wz-error hidden" id="err-task-type">Tipo de tarefa não pode ficar em branco</div>
           </div>
@@ -322,24 +394,12 @@
             <label class="wz-label">Classificação 1</label>
             <select id="f-class1" class="wz-input wz-select">
               <option value="">Selecionar...</option>
-              <option>Calibração</option>
-              <option>Coleta de Óleo</option>
-              <option>Emergencial</option>
-              <option>Não Programada</option>
-              <option>Programada</option>
-              <option>Religamento</option>
-              <option>Termografia</option>
             </select>
           </div>
           <div class="wz-field-group">
             <label class="wz-label">Classificação 2</label>
             <select id="f-class2" class="wz-input wz-select">
               <option value="">Selecionar...</option>
-              <option>Automação e Controle</option>
-              <option>Civil</option>
-              <option>Elétrica</option>
-              <option>Mecânica</option>
-              <option>Segurança do Trabalho</option>
             </select>
           </div>
         </div>
@@ -347,10 +407,7 @@
           <div class="wz-field-group">
             <label class="wz-label">Criticidade</label>
             <select id="f-criticality" class="wz-input wz-select">
-              <option value="baixa">Baixa</option>
-              <option value="media" selected>Médio</option>
-              <option value="alta">Alta</option>
-              <option value="critica">Crítica</option>
+              <option value="">Selecionar...</option>
             </select>
           </div>
           <div class="wz-field-group">
@@ -440,6 +497,16 @@
         <div class="wz-subtasks-list" id="resourcesList">
           <div class="wz-subtasks-empty"><i class="fa-regular fa-toolbox"></i><span>Nenhum recurso adicionado</span></div>
         </div>
+        <div class="wz-field-group" style="margin-bottom:12px;">
+          <label class="wz-label">Anexos <span style="font-weight:400;opacity:.65;font-size:.82em;">(opcional)</span></label>
+          <div class="wz-attachments-drop">
+            <input type="file" id="wzAttachmentsInput" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" style="display:none;" />
+            <button type="button" class="wz-attachment-add-btn" id="wzAttachmentAddBtn">
+              <i class="fa-solid fa-plus"></i> Adicionar arquivo
+            </button>
+            <div class="wz-attachment-list" id="wzAttachmentList"></div>
+          </div>
+        </div>
         <div class="wz-summary-box">
           <div class="wz-summary-title">Resumo da OS</div>
           <div class="wz-summary-grid" id="wzSummaryGrid"></div>
@@ -479,7 +546,7 @@
       <div class="asset-drawer-title">Filtro</div>
     </div>
     <div class="afp-body">
-      <div class="wz-field-group"><label class="wz-label">Localização</label><select id="flt-location" class="wz-input wz-select"><option value="">Todas</option></select></div>
+      <div class="wz-field-group"><label class="wz-label">Usina</label><select id="flt-location" class="wz-input wz-select"><option value="">Todas</option></select></div>
       <div class="wz-field-group"><label class="wz-label">Tipo de Ativo</label><select id="flt-asset-type" class="wz-input wz-select"><option value="">Todos</option><option>Instalações</option><option>Equipamento</option><option>Instrumento</option></select></div>
       <div class="wz-field-group"><label class="wz-label">Descrição</label><input type="text" id="flt-desc" class="wz-input" placeholder="Pesquisar..." /></div>
       <div class="wz-field-group"><label class="wz-label">Código</label><input type="text" id="flt-code" class="wz-input" placeholder="Pesquisar..." /></div>
@@ -548,19 +615,34 @@
       </tbody>
     </table>
   </div>
+  <div class="resp-drawer-footer">
+    <span id="respResultsMeta">Mostrando 0 de 0</span>
+  </div>
 </div>
 
 <!-- OS DETAIL DRAWER -->
 <div class="os-detail-overlay hidden" id="osDetailOverlay"></div>
-<div class="os-detail-drawer hidden" id="osDetailDrawer">
+<div class="os-detail-drawer hidden" id="osDetailDrawer" role="dialog" aria-modal="true" aria-labelledby="osdNum">
   <div class="osd-header">
+    <button class="asset-drawer-back osd-back-btn" id="osdBackBtn"><i class="fa-solid fa-arrow-left"></i></button>
     <div class="osd-num" id="osdNum">—</div>
     <div class="osd-actions">
-      <button class="icon-btn" id="osdStatusBtn"><i class="fa-solid fa-arrow-right-arrow-left"></i></button>
-      <button class="icon-btn" id="osdCloseBtn"><i class="fa-solid fa-xmark"></i></button>
+      <button class="wz-btn-primary osd-save-btn" id="osdSaveBtn"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
+      <button class="icon-btn" id="osdDeleteBtn" title="Excluir OS" style="color:#f87171;border-color:rgba(248,113,113,.3);display:none;"><i class="fa-solid fa-trash"></i></button>
+      <button class="icon-btn" id="osdStatusBtn" title="Mais a&#231;&#245;es"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+      <button class="icon-btn" id="osdCloseBtn" title="Fechar"><i class="fa-solid fa-xmark"></i></button>
     </div>
   </div>
   <div class="osd-body" id="osdBody"></div>
+</div>
+
+<!-- TASK DETAIL MODAL -->
+<div class="task-modal-overlay hidden" id="taskModalOverlay"></div>
+<div class="task-modal hidden" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalHeader">
+  <div class="task-modal-header" id="taskModalHeader"></div>
+  <div class="task-modal-body" id="taskModalBody"></div>
+  <div class="task-modal-footer" id="taskModalFooter"></div>
+  <input type="file" id="taskAttachmentInput" class="hidden" accept="image/*,application/pdf" />
 </div>
 
 <!-- STATUS POPOVER -->
@@ -569,9 +651,41 @@
   <button class="sp-btn" data-status="pendente"><span class="sp-dot" style="background:#f59e0b;"></span>Tarefas pendentes</button>
   <button class="sp-btn" data-status="em_processo"><span class="sp-dot" style="background:#3b82f6;"></span>OSs em Processo</button>
   <button class="sp-btn" data-status="em_verificacao"><span class="sp-dot" style="background:#a855f7;"></span>OSs em Verificação</button>
-  <button class="sp-btn" data-status="concluida"><span class="sp-dot" style="background:#2aff7b;"></span>OSs Concluídas</button>
+  <button class="sp-btn" data-status="concluida"><span class="sp-dot" style="background:#4DB848;"></span>OSs Concluídas</button>
 </div>
 
-<div class="os-toast hidden" id="osToast"></div>
+<div class="os-toast hidden" id="osToast" role="status" aria-live="polite">
+  <span class="os-toast-icon" id="osToastIcon"><i class="fa-solid fa-circle-check"></i></span>
+  <span class="os-toast-text" id="osToastText"></span>
+</div>
+
+<div class="del-modal-overlay hidden" id="delModalOverlay"></div>
+<div class="del-modal hidden" id="delModal">
+  <div class="del-modal-header">
+    <i class="fa-solid fa-triangle-exclamation" style="color:#f87171;font-size:20px;"></i>
+    <span>Excluir Ordem de Serviço</span>
+  </div>
+  <div class="del-modal-body">
+    <p style="font-size:13px;color:var(--text-muted);line-height:1.5;">Esta ação é irreversível. Confirme com suas credenciais para excluir.</p>
+    <p id="delModalOsId" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#f87171;"></p>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">Usuário</label>
+      <input id="delModalUser" class="osd-input" type="text" placeholder="Seu usuário" autocomplete="username" />
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">Senha</label>
+      <input id="delModalPass" class="osd-input" type="password" placeholder="Sua senha" autocomplete="current-password" />
+    </div>
+    <div class="hidden" id="delModalError" style="font-size:12px;color:#f87171;display:flex;align-items:center;gap:6px;">
+      <i class="fa-solid fa-circle-xmark"></i><span id="delModalErrorText"></span>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;padding:14px 20px;border-top:1px solid rgba(248,113,113,.15);justify-content:flex-end;">
+    <button class="wz-btn-ghost" id="delModalCancel">Cancelar</button>
+    <button id="delModalConfirm" style="display:flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
+      <i class="fa-solid fa-trash"></i> Confirmar exclusão
+    </button>
+  </div>
+</div>
 </body>
 </html>

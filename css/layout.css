@@ -2779,8 +2779,13 @@ tbody tr:hover td {
 
 .plant-card__stats {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
+}
+@media (min-width: 360px) {
+  .plant-card__stats {
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+  }
 }
 
 .plant-card__stat {
@@ -2790,19 +2795,23 @@ tbody tr:hover td {
   background: rgba(57,229,140,0.04);
   border: 1px solid rgba(57,229,140,0.08);
   border-radius: 7px;
-  padding: 6px 8px;
+  padding: 5px 6px;
+  min-width: 0;
 }
 
 .plant-card__stat-label {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.10em;
   color: var(--text-muted);
   opacity: 0.7;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .plant-card__stat-label i {
@@ -2813,10 +2822,11 @@ tbody tr:hover td {
 
 .plant-card__stat-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-main);
   line-height: 1;
+  white-space: nowrap;
 }
 
 .plant-card__stat-value.active { color: var(--accent-green); }

@@ -1,4 +1,4 @@
-// ======================================================
+﻿// ======================================================
 // CONTROLE DE ACESSO POR ROLE
 // ======================================================
 function _getUserRole() {
@@ -382,7 +382,25 @@ let PLANT_CAPABILITIES = {
   relayDeviceId: null,
   transformerDeviceId: null,
   multimeterDeviceId: null,
+  breakers: [],          // [{id, level, name, cabin_id, device_id}]
 };
+
+/* ── Breaker helpers ── */
+function getBreaker(level, cabinId, deviceId) {
+  const bk = PLANT_CAPABILITIES.breakers;
+  if (!bk || !bk.length) return null;
+  if (level === 'djmt') return bk.find(b => b.level === 'djmt') || null;
+  if (level === 'djbt') return bk.find(b => b.level === 'djbt' && b.cabin_id === cabinId) || null;
+  if (level === 'djinv') return bk.find(b => b.level === 'djinv' && b.device_id === deviceId) || null;
+  return null;
+}
+function hasBreaker(level, cabinId, deviceId) {
+  return getBreaker(level, cabinId, deviceId) != null;
+}
+function getBreakerName(level, cabinId, deviceId, fallback) {
+  const b = getBreaker(level, cabinId, deviceId);
+  return b?.name || fallback;
+}
 
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const PLANT_REFRESH_INTERVAL_MS = 10000;
@@ -1428,6 +1446,7 @@ async function fetchPlantCapabilities(plantId) {
     PLANT_CAPABILITIES.relayDeviceId       = data.relay_device_id != null ? String(data.relay_device_id) : null;
     PLANT_CAPABILITIES.transformerDeviceId = data.transformer_device_id != null ? String(data.transformer_device_id) : null;
     PLANT_CAPABILITIES.multimeterDeviceId  = data.multimeter_device_id != null ? String(data.multimeter_device_id) : null;
+    PLANT_CAPABILITIES.breakers            = Array.isArray(data.breakers) ? data.breakers : [];
   } catch (e) {
     console.warn('[fetchPlantCapabilities]', e);
   }
@@ -3013,7 +3032,7 @@ function openBulkCommandConsole() {
         <div class="bulk-cmd-title-wrap">
           ${unifSVGDisjuntor(null, 'large')}
           <div>
-            <div class="bulk-cmd-title">DJBT — Disjuntor Geral</div>
+            <div class="bulk-cmd-title">${cabinMapEscape(getBreakerName('djbt', null, null, 'DJBT'))} — Disjuntor Geral</div>
             <div class="bulk-cmd-subtitle">Todos os inversores</div>
           </div>
         </div>
@@ -3205,10 +3224,11 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
     ?? (relayItem?.device_id != null ? String(relayItem.device_id) : null)
     ?? (relayItem?.relay_id  != null ? String(relayItem.relay_id)  : null);
 
-  // DJMT state: based on command state (not relay online status — relay is a separate device)
-  // Default "on" = closed (null = unknown/yellow), "off" = tripped/open
-  const djmtCmdState = relayDevId ? getDevicePersistentState("relay", relayDevId, null) : null;
-  const djmtTripped  = djmtCmdState === "off" ? true : djmtCmdState === "on" ? false : null;
+  // DJMT state: independent of relay — based on whether the plant has active power
+  // Green (closed) = plant producing, Yellow (unknown) = no data, Red (open) = commanded off
+  const djmtBkId     = getBreaker('djmt', null, null)?.id;
+  const djmtCmdState = djmtBkId ? getDevicePersistentState("breaker", String(djmtBkId), null) : null;
+  const djmtTripped  = djmtCmdState === "off" ? true : anyOn ? false : null;
   const djmtOff      = djmtCmdState === "off"; // propagate to downstream wires
 
   // DJBT wire cascade: if no inverters are active, mark as idle
@@ -3249,12 +3269,12 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
 
       <!-- DJMT + Relé de Proteção ao lado -->
       <div class="unif-djmt-row">
-        <div class="unif-spine-device unif-spine-dj${canCmd && relayDevId ? ' is-clickable' : ''}"
+        <div class="unif-spine-device unif-spine-dj${canCmd ? ' is-clickable' : ''}"
              id="unifNodeDjmt"
-             ${canCmd && relayDevId ? `data-dj-relay-id="${relayDevId}"` : ''}>
+             ${canCmd && djmtBkId ? `data-dj-breaker-id="${djmtBkId}"` : ''}>
           ${unifSVGDisjuntor(djmtTripped, 'large')}
-          <span class="unif-node-lbl unif-lbl-dj">DJMT</span>
-          ${canCmd && relayDevId ? '<span class="unif-dj-hint">Comandar</span>' : ''}
+          <span class="unif-node-lbl unif-lbl-dj">${cabinMapEscape(getBreakerName('djmt', null, null, 'DJMT'))}</span>
+          ${canCmd ? '<span class="unif-dj-hint">Comandar</span>' : ''}
         </div>
         ${hasRelay ? `
         <div class="unif-relay-arm">
@@ -3302,7 +3322,7 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
              id="unifDjGeral"
              ${canCmd ? 'onclick="typeof openBulkCommandConsole===\'function\'&&openBulkCommandConsole()"' : ''}>
           ${unifSVGDisjuntor(anyOn ? false : null, 'large')}
-          <span class="unif-node-lbl unif-lbl-dj">DJBT</span>
+          <span class="unif-node-lbl unif-lbl-dj">${cabinMapEscape(getBreakerName('djbt', groups.length === 1 ? groups[0]?.id : null, null, 'DJBT'))}</span>
           ${canCmd ? '<span class="unif-dj-hint">Comandar</span>' : ''}
         </div>
         ${hasMultimeter ? `
@@ -3639,12 +3659,12 @@ function buildUnifilarOverview() {
     });
   });
 
-  // ── Click: DJMT → command console do relé ──
-  el.querySelectorAll("[data-dj-relay-id]").forEach(btn => {
+  // ── Click: DJMT → command console do disjuntor geral (breaker) ──
+  el.querySelectorAll("[data-dj-breaker-id]").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const id = btn.dataset.djRelayId;
-      if (id && _canSendCommand()) openCommandConsole({ deviceType: "relay", deviceId: id });
+      const id = btn.dataset.djBreakerId;
+      if (id && _canSendCommand()) openCommandConsole({ deviceType: "breaker", deviceId: id });
     });
   });
 }
@@ -3956,7 +3976,7 @@ function openUnifDeviceModal(data, type) {
 
   let title = "Dispositivo";
   if (type === "inverter" && data) title = cabinMapEscape(getInverterDisplayName(data, 0));
-  else if (type === "relay")       title = "QGBT MT / Relé";
+  else if (type === "relay")       title = "PMT";
   else if (type === "multimeter")  title = "CC 01 / Multimedidor";
   else if (type === "transformer") title = "T01 — Transformador";
   else if (type === "sa")          title = "SA 01";
@@ -4996,7 +5016,7 @@ function renderInvertersRows(inverters) {
 // ✅ MERGE: config(/strings) + realtime(/strings/realtime)
 // ======================================================
 function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
-  const maxStrings = 30;
+  const maxStrings = configPayload?.max_strings ?? realtimePayload?.max_strings ?? 30;
 
   const cfgList = configPayload?.strings ?? [];
   const rtList = realtimePayload?.items ?? realtimePayload?.strings ?? [];

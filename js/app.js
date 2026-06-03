@@ -1846,7 +1846,24 @@ function getPortfolioPlantVisualState(plant) {
 function sortPortfolioPlants(plants) {
   const validPlants = Array.isArray(plants) ? [...plants] : [];
 
+  const getAlarmPriority = (plant) => {
+    const pid = plant.power_plant_id ?? plant.plant_id ?? plant.id;
+    const pname = plant.power_plant_name ?? plant.plant_name ?? plant.name;
+    const sev = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pid))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
+      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
+      || null;
+    if (sev === "high") return 0;
+    if (sev === "medium") return 1;
+    return 2;
+  };
+
   validPlants.sort((a, b) => {
+    // Alarmes primeiro: high → medium → sem alarme
+    const alarmA = getAlarmPriority(a);
+    const alarmB = getAlarmPriority(b);
+    if (alarmA !== alarmB) return alarmA - alarmB;
+
     const stateA = getPortfolioPlantVisualState(a);
     const stateB = getPortfolioPlantVisualState(b);
 
@@ -4010,7 +4027,7 @@ function autoAdjustDataStudioDateRangeByMode() {
   const period = dsSafeTrim(DATASTUDIO_STATE.consolidationPeriod || "5min");
 
   if (mode === "historico") {
-    start.setDate(now.getDate() - 7);
+    start.setDate(now.getDate() - 1);
   } else {
     switch (period) {
       case "5min": start.setDate(now.getDate() - 1); break;
@@ -4787,6 +4804,8 @@ function renderPortfolioCards(plants) {
     const pr = plant.pr_daily_pct != null ? Number(plant.pr_daily_pct).toFixed(1) + "%" : "\u2014";
     const irr = plant.irradiance_wm2 != null ? Number(plant.irradiance_wm2).toFixed(0) + " W/m\u00B2" : "\u2014";
     const invAvail = plant.inverter_availability_pct != null ? Number(plant.inverter_availability_pct).toFixed(1) + "%" : "\u2014";
+    const relayAvail = plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "\u2014";
+    const prAcc = plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "\u2014";
 
     const isOffline = plantState.isOffline || isCommOffline;
     const isGenerating = plantState.kind === "generating";
@@ -4847,7 +4866,7 @@ function renderPortfolioCards(plants) {
           <div class="plant-card__stat-value muted">${ratedPower.toFixed(1)} kWp</div>
         </div>
         <div class="plant-card__stat">
-          <div class="plant-card__stat-label"><i class="fa-solid fa-calendar-day"></i> Hoje</div>
+          <div class="plant-card__stat-label"><i class="fa-solid fa-bolt-lightning"></i> Energia Diária</div>
           <div class="plant-card__stat-value">${energyToday.toFixed(1)} kWh</div>
         </div>
         <div class="plant-card__stat">
@@ -4861,6 +4880,14 @@ function renderPortfolioCards(plants) {
         <div class="plant-card__stat">
           <div class="plant-card__stat-label"><i class="fa-solid fa-microchip"></i> Inv. Disp.</div>
           <div class="plant-card__stat-value">${invAvail}</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-tower-broadcast"></i> Relay Disp.</div>
+          <div class="plant-card__stat-value">${relayAvail}</div>
+        </div>
+        <div class="plant-card__stat">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-chart-line"></i> PR Acc.</div>
+          <div class="plant-card__stat-value">${prAcc}</div>
         </div>
       </div>
       <div class="plant-card__chart-area">
