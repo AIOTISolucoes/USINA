@@ -1,4 +1,4 @@
-const CACHE_NAME = "aioti-v1";
+const CACHE_NAME = "aioti-v2";
 
 self.addEventListener("install", (e) => {
   const base = self.registration.scope;
