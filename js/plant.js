@@ -7190,7 +7190,7 @@ function _wireRobotPlant() {
 
   // Initial fetch + periodic refresh
   _robotRefresh().catch(e => console.warn("[ROBOT]", e));
-  setInterval(() => _robotRefresh().catch(e => console.warn("[ROBOT]", e)), 30000);
+  setInterval(() => _robotRefresh().catch(e => console.warn("[ROBOT]", e)), 60000);
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
