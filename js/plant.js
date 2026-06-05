@@ -403,7 +403,7 @@ function getBreakerName(level, cabinId, deviceId, fallback) {
 }
 
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
-const PLANT_REFRESH_INTERVAL_MS = 10000;
+const PLANT_REFRESH_INTERVAL_MS = 30000;
 const PLANT_ID = new URLSearchParams(window.location.search).get("plant_id");
 
 function normalizeApiBody(data) {
@@ -1289,12 +1289,19 @@ function setDisabledPref(inverterRealId, stringIndex, disabled) {
 // ======================================================
 // FETCH — TEMPO REAL, WEATHER, ALARMES, ENERGIA
 // ======================================================
+let _lastGoodRealtime = null;
+
 async function fetchPlantRealtime(plantId) {
   const res = await fetch(`${API_BASE}/plants/${plantId}/realtime`, {
     headers: buildAuthHeaders()
   });
-  const data = await res.json();
-  return normalizeApiBody(data);
+  if (!res.ok) {
+    console.warn(`[realtime] HTTP ${res.status} — mantendo estado anterior`);
+    return _lastGoodRealtime;
+  }
+  const data = normalizeApiBody(await res.json());
+  if (data && !data.error) _lastGoodRealtime = data;
+  return data;
 }
 
 async function fetchActiveAlarms(plantId) {
@@ -1403,8 +1410,8 @@ async function safeFetchRelayIfSupported(plantId) {
   }
 
   if (!res.ok) {
-    console.warn(`[relay/realtime] HTTP ${res.status} em ${url}`);
-    return null;
+    console.warn(`[relay/realtime] HTTP ${res.status} em ${url} — mantendo estado anterior`);
+    return RELAY_REALTIME ?? null;
   }
 
   RELAY_SUPPORTED = true;
@@ -1424,8 +1431,8 @@ async function safeFetchMultimeterIfSupported(plantId) {
   }
 
   if (!res.ok) {
-    console.warn(`[multimeter/realtime] HTTP ${res.status} em ${url}`);
-    return null;
+    console.warn(`[multimeter/realtime] HTTP ${res.status} em ${url} — mantendo estado anterior`);
+    return MULTIMETER_REALTIME ?? null;
   }
 
   MULTIMETER_SUPPORTED = true;
@@ -1505,11 +1512,12 @@ async function fetchInvertersRealtime(plantId) {
     }
 
     if (res.status === 404) continue;
-    console.warn(`[inverters realtime] HTTP ${res.status} em ${url}`);
+    console.warn(`[inverters realtime] HTTP ${res.status} em ${url} — mantendo estado anterior`);
+    return INVERTERS_REALTIME ?? [];
   }
 
   console.warn("[inverters realtime] nenhum endpoint disponível -> mantendo estático");
-  return [];
+  return INVERTERS_REALTIME ?? [];
 }
 
 // config (enabled/has_data)
@@ -5993,8 +6001,17 @@ async function refreshRealtimeEverything() {
 
   let realtime = null;
   try {
-    try {
-      realtime = await fetchPlantRealtime(PLANT_ID);
+    const [realtimeRes, alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes] = await Promise.allSettled([
+      fetchPlantRealtime(PLANT_ID),
+      fetchActiveAlarms(PLANT_ID),
+      fetchInvertersRealtime(PLANT_ID),
+      safeFetchRelayIfSupported(PLANT_ID),
+      safeFetchMultimeterIfSupported(PLANT_ID),
+      fetchTrackersRealtime(PLANT_ID)
+    ]);
+
+    if (realtimeRes.status === "fulfilled") {
+      realtime = realtimeRes.value;
       renderPlantName(realtime);
       if (realtime) {
         const rated = asNumber(
@@ -6017,17 +6034,9 @@ async function refreshRealtimeEverything() {
           capacity_ac: realtime.capacity_ac != null ? Number(realtime.capacity_ac) : PLANT_STATE.capacity_ac,
         };
       }
-    } catch (e) {
-      console.error("[refreshRealtimeEverything][realtime] erro", e);
+    } else {
+      console.error("[refreshRealtimeEverything][realtime] erro", realtimeRes.reason);
     }
-
-    const [alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes] = await Promise.allSettled([
-      fetchActiveAlarms(PLANT_ID),
-      fetchInvertersRealtime(PLANT_ID),
-      safeFetchRelayIfSupported(PLANT_ID),
-      safeFetchMultimeterIfSupported(PLANT_ID),
-      fetchTrackersRealtime(PLANT_ID)
-    ]);
 
     if (alarmsRes.status === "fulfilled") {
       ACTIVE_ALARMS = Array.isArray(alarmsRes.value) ? alarmsRes.value : [];
