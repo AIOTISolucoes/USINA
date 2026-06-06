@@ -21,8 +21,8 @@
   />
 
   <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
 </head>
 
 <body>
@@ -647,12 +647,33 @@
   </div>
   <div class="robot-report hidden" id="robotReport">
     <div class="robot-report-header">
-      <span class="robot-report-title">
-        <i class="fa-solid fa-clipboard-list"></i> Diagnóstico
-      </span>
+      <div class="robot-report-tabs">
+        <button class="robot-tab active" data-tab="diag">
+          <i class="fa-solid fa-clipboard-list"></i> Diagnóstico
+        </button>
+        <button class="robot-tab" data-tab="ronda">
+          <i class="fa-solid fa-route"></i> Ronda Diária
+        </button>
+      </div>
       <button class="robot-report-close" id="robotReportClose">×</button>
     </div>
     <div class="robot-report-list" id="robotReportList"></div>
+    <div class="robot-ronda-content hidden" id="robotRondaContent"></div>
+  </div>
+  <div class="ronda-fullpanel hidden" id="rondaFullPanel">
+    <div class="ronda-fullpanel-header">
+      <div class="ronda-fullpanel-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        <span>Ronda Diária</span>
+        <span class="ronda-fullpanel-plant" id="rondaFullPlantName"></span>
+      </div>
+      <div class="ronda-fullpanel-actions">
+        <input type="date" class="ronda-date-picker ronda-full-date" id="rondaFullDatePicker">
+        <button class="ronda-btn" id="rondaFullDownloadCsv"><i class="fa-solid fa-download"></i> CSV</button>
+        <button class="ronda-fullpanel-close" id="rondaFullClose"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+    <div class="ronda-fullpanel-body" id="rondaFullBody"></div>
   </div>
   <div class="robot-avatar" id="robotAvatar" title="Diagnóstico do sistema">
     <img id="robotImg" src="img/roboaiotiidle.png" alt="Bot" class="robot-img" />
