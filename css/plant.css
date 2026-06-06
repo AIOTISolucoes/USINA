@@ -9290,7 +9290,7 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 }
 
 /* ── Ronda Diária content ── */
-.robot-ronda-content { overflow-y: auto; padding: 0; flex: 1; }
+.robot-ronda-content { overflow-y: auto; padding: 0; flex: 1; min-height: 0; }
 .robot-ronda-content.hidden { display: none; }
 
 .ronda-loading {

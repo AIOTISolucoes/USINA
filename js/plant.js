@@ -7190,13 +7190,16 @@ function _rondaSwitchTab(tab) {
   const list = document.getElementById("robotReportList");
   const ronda = document.getElementById("robotRondaContent");
   const panel = document.getElementById("robotReport");
+  const prefsFooter = panel ? panel.querySelector(".robot-prefs-footer") : null;
   if (tab === "diag") {
     if (list) list.classList.remove("hidden");
     if (ronda) ronda.classList.add("hidden");
+    if (prefsFooter) prefsFooter.style.display = "";
     if (panel) { panel.classList.remove("ronda-expanded"); panel.style.width = ""; panel.style.maxHeight = ""; }
   } else {
     if (list) list.classList.add("hidden");
-    if (ronda) ronda.classList.remove("hidden");
+    if (ronda) { ronda.classList.remove("hidden"); ronda.scrollTop = 0; }
+    if (prefsFooter) prefsFooter.style.display = "none";
     if (panel) panel.classList.add("ronda-expanded");
     if (!_RONDA_DATA && !_RONDA_LOADING) _rondaFetchAndRender();
   }
@@ -7282,7 +7285,7 @@ function _rondaRender(data, el) {
   // Weather
   const irradCls = w.irradiance_classification;
   html += `<div class="ronda-section">
-    <div class="ronda-section-title"><i class="fa-solid fa-cloud-sun"></i> Meteorologia</div>
+    <div class="ronda-section-title"><i class="fa-solid fa-cloud-sun"></i> Estação Solarimétrica</div>
     <div class="ronda-kpi-grid">
       <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Média</span><span class="ronda-kpi-value">${_rondaFmt(w.irradiance_avg_wm2, 1)} W/m²</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Máx</span><span class="ronda-kpi-value">${_rondaFmt(w.irradiance_max_wm2, 1)} W/m²</span></div>
@@ -7300,7 +7303,7 @@ function _rondaRender(data, el) {
       <div style="overflow-x:auto;">
       <table class="ronda-inv-table">
         <thead><tr>
-          <th>Inv</th><th>Pot Méd</th><th>Energia</th><th>PR</th><th>Perf.</th><th>vs Frota</th>
+          <th>Inv</th><th>Pot Méd</th><th>Energia</th><th>PR</th><th>Perf.</th><th>vs Média</th>
         </tr></thead>
         <tbody>`;
     invs.forEach(inv => {
@@ -7452,7 +7455,7 @@ function _rondaOpenFullPanel(data) {
   body += `<div class="ronda-card">
     <div class="ronda-card-header">
       <div class="ronda-card-icon icon-weather">${svgWeather}</div>
-      <div><div class="ronda-card-title">Meteorologia</div><div class="ronda-card-subtitle">${w.irradiance_classification ? "Irradiância: " + w.irradiance_classification : ""}</div></div>
+      <div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">${w.irradiance_classification ? "Irradiância: " + w.irradiance_classification : ""}</div></div>
     </div>
     <div class="ronda-card-body">
       <div class="ronda-full-kpi-row">
@@ -7479,7 +7482,7 @@ function _rondaOpenFullPanel(data) {
         <div style="overflow-x:auto;">
         <table class="ronda-full-inv-table">
           <thead><tr>
-            <th>Inversor</th><th>Pot. Média</th><th>Pot. Máx</th><th>Energia</th><th>PR</th><th>Temp. Média</th><th>Performance</th><th>vs Frota (Pot)</th><th>vs Frota (PR)</th><th>Disponib.</th>
+            <th>Inversor</th><th>Pot. Média</th><th>Pot. Máx</th><th>Energia</th><th>PR</th><th>Temp. Média</th><th>Performance</th><th>vs Média (Pot)</th><th>vs Média (PR)</th><th>Disponib.</th>
           </tr></thead>
           <tbody>`;
     invs.forEach(inv => {
@@ -7614,7 +7617,7 @@ function _rondaDownloadCsv(data) {
   lines.push("Fim Geração," + (ps.gen_end_time || ""));
   lines.push("");
 
-  lines.push("METEOROLOGIA");
+  lines.push("Estação Solarimétrica");
   lines.push("Irrad Media W/m2," + (w.irradiance_avg_wm2 || ""));
   lines.push("Irrad Max W/m2," + (w.irradiance_max_wm2 || ""));
   lines.push("Temp Media C," + (w.air_temp_avg_c || ""));
@@ -7625,7 +7628,7 @@ function _rondaDownloadCsv(data) {
 
   if (invs.length) {
     lines.push("INVERSORES");
-    lines.push("Nome,Pot Media kW,Energia kWh,PR %,Performance,vs Frota");
+    lines.push("Nome,Pot Media kW,Energia kWh,PR %,Performance,vs Media");
     invs.forEach(inv => {
       lines.push([
         inv.inverter_name || "",
