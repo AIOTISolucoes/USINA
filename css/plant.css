@@ -8995,8 +8995,52 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   overflow: hidden;
   animation: robot-report-in 0.22s ease;
   z-index: 10;
+  transition: width .55s cubic-bezier(.34,1.56,.64,1),
+              max-height .55s cubic-bezier(.34,1.56,.64,1),
+              border-radius .4s ease;
+}
+.robot-report.ronda-expanded {
+  width: min(620px, calc(100vw - 40px));
+  max-height: min(75vh, 680px);
+}
+.robot-report.ronda-resizing {
+  transition: none;
 }
 .robot-report.hidden { display: none; }
+
+/* Drag-resize handle */
+.robot-report-resize {
+  position: absolute; top: 0; left: 0;
+  width: 8px; height: 100%;
+  cursor: ew-resize; z-index: 2;
+  opacity: 0; transition: opacity .2s;
+}
+.robot-report-resize::after {
+  content: ""; position: absolute;
+  top: 50%; left: 2px;
+  transform: translateY(-50%);
+  width: 3px; height: 32px;
+  border-radius: 2px;
+  background: rgba(57,229,140,0.4);
+}
+.robot-report:hover .robot-report-resize,
+.robot-report-resize:hover { opacity: 1; }
+.robot-report-resize-top {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 8px;
+  cursor: ns-resize; z-index: 2;
+  opacity: 0; transition: opacity .2s;
+}
+.robot-report-resize-top::after {
+  content: ""; position: absolute;
+  left: 50%; top: 2px;
+  transform: translateX(-50%);
+  width: 32px; height: 3px;
+  border-radius: 2px;
+  background: rgba(57,229,140,0.4);
+}
+.robot-report:hover .robot-report-resize-top,
+.robot-report-resize-top:hover { opacity: 1; }
 
 @keyframes robot-report-in {
   from { opacity: 0; transform: translateY(10px); }
@@ -9148,6 +9192,7 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 .robot-cat-item:hover .robot-cat-item-go { color: rgba(255,255,255,0.6); }
 
 /* ── Robot preferências ── */
+.robot-report.ronda-expanded .robot-prefs-footer { display: none; }
 .robot-prefs-footer {
   border-top: 1px solid rgba(255,255,255,0.08);
   margin-top: 2px;
@@ -9606,6 +9651,7 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   .robot-bubble { max-width: 240px; }
   .robot-bubble-text { font-size: 0.48rem; }
   .robot-report { width: calc(100vw - 24px); right: 0; max-height: 55vh; z-index: 20; }
+  .robot-report.ronda-expanded { width: calc(100vw - 16px); max-height: 70vh; }
   .robot-tab { font-size: 0.42rem; padding: 6px 7px; }
   .ronda-kpi-grid { grid-template-columns: 1fr; }
   .ronda-full-grid { grid-template-columns: 1fr; }

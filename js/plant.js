@@ -7033,6 +7033,9 @@ function _robotToggleReport(forceOpen) {
     if (_ROBOT_STATE.dismissTimer) { clearTimeout(_ROBOT_STATE.dismissTimer); _ROBOT_STATE.dismissTimer = null; }
   } else {
     panel.classList.add("hidden");
+    panel.classList.remove("ronda-expanded");
+    panel.style.width = ""; panel.style.maxHeight = "";
+    _rondaSwitchTab("diag");
     if (badge && _ROBOT_STATE.issues.length > 0) badge.classList.remove("hidden");
     _ROBOT_STATE.reportOpen = false;
     _robotDismissBubble();
@@ -7186,12 +7189,15 @@ function _rondaSwitchTab(tab) {
   document.querySelectorAll(".robot-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   const list = document.getElementById("robotReportList");
   const ronda = document.getElementById("robotRondaContent");
+  const panel = document.getElementById("robotReport");
   if (tab === "diag") {
     if (list) list.classList.remove("hidden");
     if (ronda) ronda.classList.add("hidden");
+    if (panel) { panel.classList.remove("ronda-expanded"); panel.style.width = ""; panel.style.maxHeight = ""; }
   } else {
     if (list) list.classList.add("hidden");
     if (ronda) ronda.classList.remove("hidden");
+    if (panel) panel.classList.add("ronda-expanded");
     if (!_RONDA_DATA && !_RONDA_LOADING) _rondaFetchAndRender();
   }
 }
@@ -7685,9 +7691,56 @@ function _wireRobotPlant() {
     if (_ROBOT_STATE.reportOpen && el && !el.contains(e.target)) _robotToggleReport(false);
   });
 
+  // Drag-resize: left edge (width) and top edge (height)
+  _wireRobotResize();
+
   // Initial fetch + periodic refresh
   _robotRefresh().catch(e => console.warn("[ROBOT]", e));
   setInterval(() => _robotRefresh().catch(e => console.warn("[ROBOT]", e)), 60000);
+}
+
+function _wireRobotResize() {
+  const panel = document.getElementById("robotReport");
+  const handleLeft = document.getElementById("robotReportResizeLeft");
+  const handleTop = document.getElementById("robotReportResizeTop");
+  if (!panel) return;
+
+  let dragging = null;
+  let startX = 0, startY = 0, startW = 0, startH = 0;
+
+  function onPointerDown(axis, e) {
+    e.preventDefault(); e.stopPropagation();
+    dragging = axis;
+    startX = e.clientX; startY = e.clientY;
+    const rect = panel.getBoundingClientRect();
+    startW = rect.width; startH = rect.height;
+    panel.classList.add("ronda-resizing");
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }
+
+  function onPointerMove(e) {
+    if (!dragging) return;
+    if (dragging === "x") {
+      const dx = startX - e.clientX;
+      const newW = Math.max(300, Math.min(window.innerWidth - 40, startW + dx));
+      panel.style.width = newW + "px";
+    } else {
+      const dy = startY - e.clientY;
+      const newH = Math.max(200, Math.min(window.innerHeight - 100, startH + dy));
+      panel.style.maxHeight = newH + "px";
+    }
+  }
+
+  function onPointerUp() {
+    dragging = null;
+    panel.classList.remove("ronda-resizing");
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+  }
+
+  if (handleLeft) handleLeft.addEventListener("pointerdown", e => onPointerDown("x", e));
+  if (handleTop) handleTop.addEventListener("pointerdown", e => onPointerDown("y", e));
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
