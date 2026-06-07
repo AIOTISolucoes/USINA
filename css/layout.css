@@ -5866,7 +5866,8 @@ body.plant-edit-modal-open {
 .ronda-date-picker::-webkit-calendar-picker-indicator { filter: invert(0.7); }
 .ronda-expand-btn { background: rgba(57,229,140,0.08); border: 1px solid rgba(57,229,140,0.2); color: #39e58c; border-radius: 6px; padding: 4px 8px; font-size: 10px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background .15s; }
 .ronda-expand-btn:hover { background: rgba(57,229,140,0.18); }
-.ronda-plant-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; color: rgba(255,255,255,0.8); font-size: 11px; padding: 4px 8px; cursor: pointer; max-width: 160px; }
+.ronda-plant-select { background: #2a2d35; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; color: rgba(255,255,255,0.9); font-size: 11px; padding: 4px 8px; cursor: pointer; max-width: 180px; }
+.ronda-plant-select option { background: #2a2d35; color: #e5e5e5; padding: 4px; }
 
 /* ── Ronda Fullscreen Panel (VS Code style) ── */
 .ronda-fullpanel { position: fixed; inset: 0; z-index: 9999; background: #1a1d23; display: flex; flex-direction: column; animation: ronda-panel-in .25s ease; }
