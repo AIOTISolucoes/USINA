@@ -22,7 +22,7 @@
   let deferredInstallPrompt = null;
 
   // ── Register SW ──
-  navigator.serviceWorker.register("sw.js").then((reg) => {
+  navigator.serviceWorker.register("/sw.js").then((reg) => {
     console.log("[PWA] SW registrado", reg.scope);
     if (Notification.permission === "granted") {
       subscribePush(reg);
