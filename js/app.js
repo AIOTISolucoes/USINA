@@ -6196,9 +6196,11 @@ function robotToggleReport(forceOpen) {
     if (ROBOT_STATE.dismissTimer) { clearTimeout(ROBOT_STATE.dismissTimer); ROBOT_STATE.dismissTimer = null; }
   } else {
     panel.classList.add("hidden");
+    panel.classList.remove("ronda-expanded");
+    panel.style.width = ""; panel.style.maxHeight = "";
+    _appRondaSwitchTab("diag");
     if (badge && ROBOT_STATE.issues.length > 0) badge.classList.remove("hidden");
     ROBOT_STATE.reportOpen = false;
-    // After closing report, user has read — show "Ok!" + thumbs-up
     robotDismissBubble();
     robotUpdateAvatar("ok", "img/roboaiotiok.png");
   }
@@ -6336,6 +6338,341 @@ function _robotRenderPrefsFooter() {
   });
 }
 
+/* ── Ronda Diária (aba no robô do portfólio) ── */
+let _APP_RONDA_DATA = null;
+let _APP_RONDA_LOADING = false;
+let _APP_RONDA_PLANTS = [];
+
+function _appRondaSwitchTab(tab) {
+  document.querySelectorAll(".robot-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  const list = document.getElementById("robotReportList");
+  const ronda = document.getElementById("robotRondaContent");
+  const panel = document.getElementById("robotReport");
+  const prefsFooter = panel ? panel.querySelector(".robot-prefs-footer") : null;
+  if (tab === "diag") {
+    if (list) list.classList.remove("hidden");
+    if (ronda) ronda.classList.add("hidden");
+    if (prefsFooter) prefsFooter.style.display = "";
+    if (panel) { panel.classList.remove("ronda-expanded"); panel.style.width = ""; panel.style.maxHeight = ""; }
+  } else {
+    if (list) list.classList.add("hidden");
+    if (ronda) { ronda.classList.remove("hidden"); ronda.scrollTop = 0; }
+    if (prefsFooter) prefsFooter.style.display = "none";
+    if (panel) panel.classList.add("ronda-expanded");
+    _appRondaEnsurePlants();
+  }
+}
+
+async function _appRondaEnsurePlants() {
+  const el = document.getElementById("robotRondaContent");
+  if (!el) return;
+  if (_APP_RONDA_PLANTS.length > 0 && !_APP_RONDA_DATA) {
+    _appRondaRenderPicker(el);
+    return;
+  }
+  if (_APP_RONDA_PLANTS.length > 0) return;
+  el.innerHTML = '<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>Carregando usinas...</div>';
+  try {
+    _APP_RONDA_PLANTS = await fetchPlants();
+    _appRondaRenderPicker(el);
+  } catch (e) {
+    el.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
+  }
+}
+
+function _appRondaRenderPicker(el) {
+  const plants = _APP_RONDA_PLANTS;
+  if (!plants.length) {
+    el.innerHTML = '<div class="ronda-error">Nenhuma usina encontrada</div>';
+    return;
+  }
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const defaultDate = yesterday.toISOString().slice(0, 10);
+  const opts = plants.map(p => {
+    const id = p.power_plant_id ?? p.plant_id ?? p.id;
+    const name = p.power_plant_name ?? p.plant_name ?? p.name ?? `Usina ${id}`;
+    return `<option value="${id}">${name}</option>`;
+  }).join("");
+
+  el.innerHTML = `<div class="ronda-toolbar" style="border-top:none; border-bottom:1px solid rgba(255,255,255,0.06); justify-content:flex-start;">
+    <select class="ronda-plant-select" id="appRondaPlantSelect">${opts}</select>
+    <input type="date" class="ronda-date-picker" id="appRondaDatePicker" value="${defaultDate}" max="${new Date().toISOString().slice(0,10)}">
+    <button class="ronda-btn" id="appRondaLoadBtn"><i class="fa-solid fa-search"></i> Carregar</button>
+  </div>
+  <div id="appRondaBody" style="flex:1;overflow-y:auto;"></div>`;
+
+  document.getElementById("appRondaLoadBtn")?.addEventListener("click", () => {
+    const plantId = document.getElementById("appRondaPlantSelect")?.value;
+    const date = document.getElementById("appRondaDatePicker")?.value;
+    if (plantId) _appRondaFetch(plantId, date);
+  });
+}
+
+async function _appRondaFetch(plantId, dateStr) {
+  const bodyEl = document.getElementById("appRondaBody");
+  if (!bodyEl) return;
+  _APP_RONDA_LOADING = true;
+  bodyEl.innerHTML = '<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>Carregando ronda...</div>';
+  try {
+    let url = `${API_BASE}/plants/${plantId}/realtime?view=daily-round`;
+    if (dateStr) url += `&date=${dateStr}`;
+    const res = await apiFetch(url.replace(API_BASE, ""));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let data = await res.json();
+    if (data && data.body) data = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    _APP_RONDA_DATA = data;
+    _appRondaRenderContent(data, bodyEl);
+  } catch (e) {
+    console.error("[RONDA-APP]", e);
+    bodyEl.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
+  } finally {
+    _APP_RONDA_LOADING = false;
+  }
+}
+
+function _appRondaFmt(v, dec) {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  return isNaN(n) ? String(v) : n.toLocaleString("pt-BR", { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+}
+
+function _appRondaPerfClass(cls) {
+  if (!cls || cls === "sem_dados") return "";
+  return `ronda-perf-${cls}`;
+}
+
+function _appRondaPerfLabel(cls) {
+  const map = { acima: "Acima", normal: "Normal", abaixo: "Abaixo", sem_dados: "—" };
+  return map[cls] || cls || "—";
+}
+
+function _appRondaRenderContent(data, el) {
+  if (!data) return;
+  const ps = data.plant_summary || {};
+  const w = data.weather || {};
+  const invs = data.inverters || [];
+  const sb = data.string_box || [];
+  const alarms = data.alarms || [];
+  let html = "";
+
+  html += `<div class="ronda-section">
+    <div class="ronda-section-title"><i class="fa-solid fa-solar-panel"></i> Resumo da Usina — ${ps.power_plant_name || ""}</div>
+    <div class="ronda-kpi-grid">
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Geração</span><span class="ronda-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)} kWh</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Diário</span><span class="ronda-kpi-value ${(ps.pr_daily_pct || 0) >= 75 ? "val-good" : (ps.pr_daily_pct || 0) >= 60 ? "val-warn" : "val-bad"}">${_appRondaFmt(ps.pr_daily_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Acumulado</span><span class="ronda-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Fator Capac.</span><span class="ronda-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Início Geração</span><span class="ronda-kpi-value">${ps.gen_start_time || "—"}</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Fim Geração</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
+    </div>
+  </div>`;
+
+  html += `<div class="ronda-section">
+    <div class="ronda-section-title"><i class="fa-solid fa-cloud-sun"></i> Estação Solarimétrica</div>
+    <div class="ronda-kpi-grid">
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Média</span><span class="ronda-kpi-value">${_appRondaFmt(w.irradiance_avg_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Máx</span><span class="ronda-kpi-value">${_appRondaFmt(w.irradiance_max_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Média</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)} °C</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Máx</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_max_c, 1)} °C</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Vento Méd</span><span class="ronda-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)} m/s</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Chuva</span><span class="ronda-kpi-value">${w.rain_detected ? "Sim" : "Não"}</span></div>
+    </div>
+  </div>`;
+
+  if (invs.length) {
+    html += `<div class="ronda-section">
+      <div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores</div>
+      <div style="overflow-x:auto;"><table class="ronda-inv-table">
+        <thead><tr><th>Inv</th><th>Pot Méd</th><th>Energia</th><th>PR</th><th>Perf.</th><th>vs Média</th></tr></thead>
+        <tbody>`;
+    invs.forEach(inv => {
+      const perfCls = _appRondaPerfClass(inv.power_performance);
+      const prCls = _appRondaPerfClass(inv.pr_vs_fleet);
+      html += `<tr>
+        <td>${inv.inverter_name || "Inv" + inv.device_id}</td>
+        <td>${_appRondaFmt(inv.avg_power_kw, 1)} kW</td>
+        <td>${_appRondaFmt(inv.energy_daily_kwh, 0)} kWh</td>
+        <td>${_appRondaFmt(inv.pr_inverter_pct, 1)}%</td>
+        <td><span class="ronda-perf-badge ${perfCls}">${_appRondaPerfLabel(inv.power_performance)}</span></td>
+        <td><span class="ronda-perf-badge ${prCls}">${_appRondaPerfLabel(inv.pr_vs_fleet)}</span></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  }
+
+  if (sb && sb.length) {
+    const grouped = {};
+    sb.forEach(s => {
+      const key = s.device_name || s.inverter_name || ("Inv" + s.device_id);
+      if (!grouped[key]) grouped[key] = { health: s.health_pct };
+      grouped[key].health = s.health_pct;
+    });
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-plug-circle-check"></i> Saúde String Box</div>`;
+    Object.entries(grouped).forEach(([name, g]) => {
+      const hp = g.health != null ? Number(g.health) : 100;
+      const hCls = hp >= 80 ? "health-good" : hp >= 50 ? "health-mid" : "health-bad";
+      html += `<div class="ronda-string-row">
+        <span style="width:70px;font-size:10.5px;color:rgba(255,255,255,0.55);flex-shrink:0;">${name}</span>
+        <div class="ronda-string-bar"><div class="ronda-string-fill ${hCls}" style="width:${Math.min(100, hp)}%;"></div></div>
+        <span style="width:36px;text-align:right;font-size:10.5px;font-weight:700;color:${hp >= 80 ? '#39e58c' : hp >= 50 ? '#eab308' : '#ef4444'}">${_appRondaFmt(hp, 0)}%</span>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (alarms.length) {
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes (${data.alarm_count || alarms.length})</div>`;
+    alarms.slice(0, 20).forEach(a => {
+      const sevCls = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
+      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
+      html += `<div class="ronda-alarm-row"><div class="ronda-alarm-dot ${sevCls}"></div><div class="ronda-alarm-body"><div class="ronda-alarm-device">${a.device_name || "—"}</div><div class="ronda-alarm-desc">${a.description || a.code || "—"}</div><div class="ronda-alarm-ts">${ts}</div></div></div>`;
+    });
+    if (alarms.length > 20) html += `<div style="text-align:center;font-size:10px;color:rgba(255,255,255,0.4);padding:6px;">+${alarms.length - 20} alarmes</div>`;
+    html += `</div>`;
+  }
+
+  html += `<div class="ronda-toolbar">
+    <button class="ronda-btn" id="appRondaDlCsv"><i class="fa-solid fa-download"></i> CSV</button>
+    <button class="ronda-expand-btn" id="appRondaExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
+  </div>`;
+
+  el.innerHTML = html;
+  document.getElementById("appRondaDlCsv")?.addEventListener("click", () => _appRondaDownloadCsv(data));
+  document.getElementById("appRondaExpandBtn")?.addEventListener("click", () => _appRondaOpenFullPanel(data));
+}
+
+function _appRondaDownloadCsv(data) {
+  if (!data) return;
+  const ps = data.plant_summary || {};
+  const w = data.weather || {};
+  const invs = data.inverters || [];
+  const alarms = data.alarms || [];
+  const lines = [];
+  lines.push("RONDA DIÁRIA - " + (ps.power_plant_name || "") + " - " + (data.date || ""));
+  lines.push("");
+  lines.push("RESUMO DA USINA");
+  lines.push("Geração kWh," + (ps.generation_kwh || ""));
+  lines.push("PR Diário %," + (ps.pr_daily_pct || ""));
+  lines.push("PR Acumulado %," + (ps.pr_accumulated_pct || ""));
+  lines.push("Fator Capacidade %," + (ps.capacity_factor_daily_pct || ""));
+  lines.push("Inicio Geração," + (ps.gen_start_time || ""));
+  lines.push("Fim Geração," + (ps.gen_end_time || ""));
+  lines.push("");
+  lines.push("ESTAÇÃO SOLARIMÉTRICA");
+  lines.push("Irrad Media W/m2," + (w.irradiance_avg_wm2 || ""));
+  lines.push("Irrad Max W/m2," + (w.irradiance_max_wm2 || ""));
+  lines.push("Temp Media C," + (w.air_temp_avg_c || ""));
+  lines.push("Vento m/s," + (w.wind_speed_avg || ""));
+  lines.push("Chuva," + (w.rain_detected ? "Sim" : "Nao"));
+  lines.push("");
+  if (invs.length) {
+    lines.push("INVERSORES");
+    lines.push("Nome,Pot Media kW,Energia kWh,PR %,Performance,vs Media");
+    invs.forEach(inv => lines.push([inv.inverter_name||"", inv.avg_power_kw||"", inv.energy_daily_kwh||"", inv.pr_inverter_pct||"", inv.power_performance||"", inv.pr_vs_fleet||""].join(",")));
+    lines.push("");
+  }
+  if (alarms.length) {
+    lines.push("ALARMES");
+    lines.push("Timestamp,Dispositivo,Tipo,Descrição,Severidade");
+    alarms.forEach(a => lines.push([(a.timestamp||"").replace(/,/g,";"), a.device_name||"", a.code||"", (a.description||"").replace(/,/g,";"), a.severity||""].join(",")));
+  }
+  const csv = "﻿" + lines.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ronda_diaria_${ps.power_plant_name || "usina"}_${data.date || "hoje"}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function _appRondaOpenFullPanel(data) {
+  const panel = document.getElementById("rondaFullPanel");
+  if (!panel || !data) return;
+  panel.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  const ps = data.plant_summary || {};
+  const w = data.weather || {};
+  const invs = data.inverters || [];
+  const sb = data.string_box || [];
+  const alarms = data.alarms || [];
+
+  const nameEl = document.getElementById("rondaFullPlantName");
+  if (nameEl) nameEl.textContent = ps.power_plant_name ? `— ${ps.power_plant_name}` : "";
+  const datePicker = document.getElementById("rondaFullDatePicker");
+  if (datePicker) { datePicker.value = data.date || ""; datePicker.max = new Date().toISOString().slice(0, 10); }
+  const dlBtn = document.getElementById("rondaFullDownloadCsv");
+  if (dlBtn) dlBtn.onclick = () => _appRondaDownloadCsv(data);
+  const closeBtn = document.getElementById("rondaFullClose");
+  if (closeBtn) closeBtn.onclick = () => { panel.classList.add("hidden"); document.body.style.overflow = ""; };
+
+  const svgSolar = '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  const svgWeather = '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M3 15a4 4 0 0 0 4 4h9a5 5 0 0 0 .5-9.97A7 7 0 0 0 3 11.5"/></svg>';
+  const svgBolt = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+  const svgString = '<svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2M6 17v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"/></svg>';
+  const svgAlarm = '<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  const prCls = (ps.pr_daily_pct || 0) >= 75 ? "val-good" : (ps.pr_daily_pct || 0) >= 60 ? "val-warn" : "val-bad";
+
+  let body = '<div class="ronda-full-grid">';
+  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo da Usina</div><div class="ronda-card-subtitle">${data.date || ""}</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Diário</div><div class="ronda-full-kpi-value ${prCls}">${_appRondaFmt(ps.pr_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Acum.</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fator Capac.</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Início</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_start_time || "—"}</div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fim</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_end_time || "—"}</div></div></div></div></div>`;
+  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">${w.irradiance_classification ? "Irradiância: " + w.irradiance_classification : ""}</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.irradiance_avg_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.irradiance_max_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_detected ? "Sim" : "Não"}</div></div></div></div></div>`;
+
+  if (invs.length) {
+    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Inversores</div><div class="ronda-card-subtitle">${invs.length} unidades</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Pot. Média</th><th>Pot. Máx</th><th>Energia</th><th>PR</th><th>Temp. Média</th><th>Performance</th><th>vs Média (Pot)</th><th>vs Média (PR)</th><th>Disponib.</th></tr></thead><tbody>`;
+    invs.forEach(inv => {
+      const pC = inv.power_performance && inv.power_performance !== "sem_dados" ? `ronda-full-perf-${inv.power_performance}` : "";
+      const fPC = inv.power_vs_fleet && inv.power_vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.power_vs_fleet}` : "";
+      const fPrC = inv.pr_vs_fleet && inv.pr_vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.pr_vs_fleet}` : "";
+      const arrow = inv.power_performance === "acima" ? "▲" : inv.power_performance === "abaixo" ? "▼" : "";
+      body += `<tr><td style="font-weight:600;">${inv.inverter_name || "Inv" + inv.device_id}</td><td>${_appRondaFmt(inv.avg_power_kw, 1)} kW</td><td>${_appRondaFmt(inv.max_power_kw, 1)} kW</td><td>${_appRondaFmt(inv.energy_daily_kwh, 0)} kWh</td><td style="font-weight:700;">${_appRondaFmt(inv.pr_inverter_pct, 1)}%</td><td>${_appRondaFmt(inv.avg_temp_c, 1)} °C</td><td><span class="ronda-full-perf-badge ${pC}">${arrow} ${_appRondaPerfLabel(inv.power_performance)}</span></td><td><span class="ronda-full-perf-badge ${fPC}">${_appRondaPerfLabel(inv.power_vs_fleet)}</span></td><td><span class="ronda-full-perf-badge ${fPrC}">${_appRondaPerfLabel(inv.pr_vs_fleet)}</span></td><td>${_appRondaFmt(inv.running_pct, 1)}%</td></tr>`;
+    });
+    body += `</tbody></table></div></div></div>`;
+  }
+
+  if (sb && sb.length) {
+    const grouped = {};
+    sb.forEach(s => { const k = s.device_name || s.inverter_name || ("Inv" + s.device_id); if (!grouped[k]) grouped[k] = { health: s.health_pct }; grouped[k].health = s.health_pct; });
+    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">Saúde String Box</div></div></div><div class="ronda-card-body"><div class="ronda-full-string-grid">`;
+    Object.entries(grouped).forEach(([name, g]) => {
+      const hp = g.health != null ? Number(g.health) : 100;
+      const hCls = hp >= 80 ? "health-good" : hp >= 50 ? "health-mid" : "health-bad";
+      const hColor = hp >= 80 ? "#39e58c" : hp >= 50 ? "#eab308" : "#ef4444";
+      body += `<div class="ronda-full-string-item"><span class="ronda-full-string-name">${name}</span><div class="ronda-full-string-bar"><div class="ronda-full-string-fill ${hCls}" style="width:${Math.min(100, hp)}%;"></div></div><span class="ronda-full-string-pct" style="color:${hColor}">${_appRondaFmt(hp, 0)}%</span></div>`;
+    });
+    body += `</div></div></div>`;
+  }
+
+  if (alarms.length) {
+    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes</div><div class="ronda-card-subtitle">${data.alarm_count || alarms.length} eventos</div></div></div><div class="ronda-card-body">`;
+    alarms.forEach(a => {
+      const sC = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
+      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
+      const aL = a.is_active ? "Ativo" : "Resolvido";
+      const aC = a.is_active ? "is-active" : "is-resolved";
+      body += `<div class="ronda-full-alarm"><div class="ronda-full-alarm-severity ${sC}"></div><div class="ronda-full-alarm-body"><div class="ronda-full-alarm-device">${a.device_name || "—"}</div><div class="ronda-full-alarm-desc">${a.description || a.code || "—"}</div><div class="ronda-full-alarm-ts">${ts}</div></div><span class="ronda-full-alarm-active ${aC}">${aL}</span></div>`;
+    });
+    body += `</div></div>`;
+  }
+  body += "</div>";
+
+  const bodyEl = document.getElementById("rondaFullBody");
+  if (bodyEl) bodyEl.innerHTML = body;
+  document.addEventListener("keydown", function _esc(e) { if (e.key === "Escape") { panel.classList.add("hidden"); document.body.style.overflow = ""; document.removeEventListener("keydown", _esc); } });
+}
+
+function _wireAppRobotResize() {
+  const panel = document.getElementById("robotReport");
+  const handleLeft = document.getElementById("robotReportResizeLeft");
+  const handleTop = document.getElementById("robotReportResizeTop");
+  if (!panel) return;
+  let dragging = null, startX = 0, startY = 0, startW = 0, startH = 0;
+  function onDown(axis, e) { e.preventDefault(); e.stopPropagation(); dragging = axis; startX = e.clientX; startY = e.clientY; const r = panel.getBoundingClientRect(); startW = r.width; startH = r.height; panel.classList.add("ronda-resizing"); document.addEventListener("pointermove", onMove); document.addEventListener("pointerup", onUp); }
+  function onMove(e) { if (!dragging) return; if (dragging === "x") { panel.style.width = Math.max(300, Math.min(window.innerWidth - 40, startW + (startX - e.clientX))) + "px"; } else { panel.style.maxHeight = Math.max(200, Math.min(window.innerHeight - 100, startH + (startY - e.clientY))) + "px"; } }
+  function onUp() { dragging = null; panel.classList.remove("ronda-resizing"); document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); }
+  if (handleLeft) handleLeft.addEventListener("pointerdown", e => onDown("x", e));
+  if (handleTop) handleTop.addEventListener("pointerdown", e => onDown("y", e));
+}
+
 function wireRobotAssistant() {
   // Sincronizar preferências salvas no backend
   (async () => {
@@ -6358,6 +6695,11 @@ function wireRobotAssistant() {
   const expandBtn = document.getElementById("robotBubbleExpand");
   const closeBtn  = document.getElementById("robotReportClose");
   const bubble    = document.getElementById("robotBubble");
+
+  document.querySelectorAll(".robot-tab").forEach(btn => {
+    btn.addEventListener("click", e => { e.stopPropagation(); _appRondaSwitchTab(btn.dataset.tab); });
+  });
+  _wireAppRobotResize();
 
   if (avatar) avatar.addEventListener("click", () => robotToggleReport());
   if (expandBtn) expandBtn.addEventListener("click", e => { e.stopPropagation(); robotToggleReport(true); });
