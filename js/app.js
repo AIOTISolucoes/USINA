@@ -6474,6 +6474,11 @@ function _appRondaPerfLabel(cls) {
   return map[cls] || cls || "—";
 }
 
+function _rondaInfoBtn(text) {
+  const id = "ri_" + Math.random().toString(36).slice(2, 8);
+  return `<span class="ronda-info-btn" tabindex="0" onclick="this.nextElementSibling.classList.toggle('hidden')" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(57,229,140,0.15);color:#39e58c;font-size:9px;font-weight:700;cursor:pointer;margin-left:4px;flex-shrink:0;border:1px solid rgba(57,229,140,0.3);vertical-align:middle;line-height:1;" title="Ver metodologia">i</span><span class="ronda-info-pop hidden" style="display:block;background:rgba(10,18,12,0.95);border:1px solid rgba(57,229,140,0.25);border-radius:8px;padding:8px 10px;font-size:10px;line-height:1.5;color:rgba(255,255,255,0.75);margin:4px 0 6px;max-width:400px;box-shadow:0 4px 16px rgba(0,0,0,0.4);">${text}</span>`;
+}
+
 function _appRondaRenderContent(data, el) {
   if (!data) return;
   const ps = data.plant_summary || {};
@@ -6486,12 +6491,12 @@ function _appRondaRenderContent(data, el) {
   html += `<div class="ronda-section">
     <div class="ronda-section-title"><i class="fa-solid fa-solar-panel"></i> Resumo da Usina — ${ps.power_plant_name || ""}</div>
     <div class="ronda-kpi-grid">
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Energia ativa gerada no dia (kWh). Fonte: contadores de energia dos inversores ou integração trapezoidal da potência ativa.">Geração</span><span class="ronda-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)} kWh</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Performance Ratio diário = (Geração real do dia [kWh]) / (Capacidade DC [kWp] × Irradiação do dia [kWh/m²]) × 100. Mede a eficiência global da usina descontando a irradiação disponível.">PR Diário</span><span class="ronda-kpi-value ${(ps.pr_daily_pct || 0) >= 75 ? "val-good" : (ps.pr_daily_pct || 0) >= 60 ? "val-warn" : "val-bad"}">${_appRondaFmt(ps.pr_daily_pct, 1)}%</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Performance Ratio acumulado no mês = Soma(Geração real dos dias do mês [kWh]) / Soma(Capacidade DC [kWp] × Irradiação de cada dia [kWh/m²]) × 100.">PR Acumulado</span><span class="ronda-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}%</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Fator de Capacidade diário = (Geração real do dia [kWh]) / (Capacidade DC [kWp] × 24h) × 100. Indica quanto a usina gerou em relação ao máximo teórico se operasse a potência nominal 24h.">Fator Capac. Diário</span><span class="ronda-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}%</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Horário da primeira leitura de potência ativa > 0 no dia (fuso America/Fortaleza).">Início Geração</span><span class="ronda-kpi-value">${ps.gen_start_time || "—"}</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Horário da última leitura de potência ativa > 0 no dia (fuso America/Fortaleza).">Fim Geração</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Geração ${_rondaInfoBtn("Energia ativa gerada no dia (kWh).<br>Fonte: contadores de energia dos inversores ou integração trapezoidal da potência ativa ao longo do dia.")}</span><span class="ronda-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)} kWh</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Diário ${_rondaInfoBtn("<b>Performance Ratio</b> = (Geração real [kWh]) / (Capacidade DC [kWp] × Irradiação [kWh/m²]) × 100.<br>Mede a eficiência global da usina descontando a irradiação disponível no dia.")}</span><span class="ronda-kpi-value ${(ps.pr_daily_pct || 0) >= 75 ? "val-good" : (ps.pr_daily_pct || 0) >= 60 ? "val-warn" : "val-bad"}">${_appRondaFmt(ps.pr_daily_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Acumulado ${_rondaInfoBtn("<b>PR Acumulado</b> = Soma(Geração real dos dias do mês) / Soma(Capacidade DC × Irradiação de cada dia) × 100.<br>Consolida o PR de todos os dias do mês até a data selecionada.")}</span><span class="ronda-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Fator Capac. Diário ${_rondaInfoBtn("<b>Fator de Capacidade</b> = (Geração real [kWh]) / (Capacidade DC [kWp] × 24h) × 100.<br>Indica quanto a usina gerou em relação ao máximo teórico se operasse a potência nominal 24 horas. Valores típicos: 15–25%.")}</span><span class="ronda-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Início Geração</span><span class="ronda-kpi-value">${ps.gen_start_time || "—"}</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Fim Geração</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
     </div>
   </div>`;
 
@@ -6509,9 +6514,9 @@ function _appRondaRenderContent(data, el) {
 
   if (invs.length) {
     html += `<div class="ronda-section">
-      <div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores</div>
+      <div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores ${_rondaInfoBtn("<b>Pot Méd</b>: Potência ativa média (kW) durante geração.<br><b>Energia</b>: Energia gerada no dia (kWh).<br><b>PR</b>: PR do inversor = Energia / (Potência nominal × Irradiação [kWh/m²]) × 100.<br><b>Perf.</b>: Potência média vs média própria dos últimos 30 dias (±15%).<br><b>vs Média</b>: PR do inversor vs média da frota (±15%).")}</div>
       <div style="overflow-x:auto;"><table class="ronda-inv-table">
-        <thead><tr><th>Inv</th><th title="Potência ativa média (kW) do inversor durante horário de geração.">Pot Méd</th><th title="Energia gerada pelo inversor no dia (kWh).">Energia</th><th title="PR do inversor = Energia do inversor / (Potência nominal × Irradiação do dia em kWh/m²) × 100.">PR</th><th title="Comparação da potência média do inversor com sua própria média dos últimos 30 dias. Acima/Normal/Abaixo (limiar ±15%).">Perf.</th><th title="Comparação do PR do inversor com a média do PR da frota (todos inversores da usina). Acima/Normal/Abaixo (limiar ±15%).">vs Média</th></tr></thead>
+        <thead><tr><th>Inv</th><th>Pot Méd</th><th>Energia</th><th>PR</th><th>Perf.</th><th>vs Média</th></tr></thead>
         <tbody>`;
     invs.forEach(inv => {
       const perfCls = _appRondaPerfClass(inv.power_performance);
@@ -6529,27 +6534,28 @@ function _appRondaRenderContent(data, el) {
   }
 
   if (sb && sb.length) {
-    html += `<div class="ronda-section"><div class="ronda-section-title" title="Corrente média (A) de cada string no dia comparada com a média dos últimos 30 dias (horário solar 8h–16h, excluindo leituras zeradas). Variação = ((Corrente dia - Média 30d) / Média 30d) × 100. Verde: ≥ -5% | Amarelo: -5% a -15% | Vermelho: < -15%."><i class="fa-solid fa-plug-circle-check"></i> Corrente Strings — vs Média 30 dias</div>`;
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-plug-circle-check"></i> Corrente Strings ${_rondaInfoBtn("<b>Metodologia</b>: Corrente média (A) de cada string no horário solar (6h–18h).<br><b>Referência</b>: Média de corrente de todas as strings ativas (> 0.1A) do mesmo inversor no dia.<br><b>Variação</b> = ((Corrente string − Média inv) / Média inv) × 100.<br><b>Cores</b>: Verde ≥ −5% | Amarelo −5% a −15% | Vermelho < −15%.")}</div>`;
     sb.forEach(inv => {
       const name = inv.device_name || inv.inverter_name || ("Inv" + inv.device_id);
       const strings = inv.strings || [];
       if (!strings.length) return;
-      html += `<div style="margin-bottom:8px;">
+      const active = strings.filter(s => (s.avg_current || 0) >= 0.1);
+      const invAvg = active.length > 0 ? active.reduce((s, x) => s + Number(x.avg_current || 0), 0) / active.length : 0;
+      html += `<div style="margin-bottom:10px;">
         <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7);">${name}</span>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:3px 12px;margin-top:3px;">`;
+        <span style="font-size:9.5px;color:rgba(255,255,255,0.35);margin-left:8px;">méd inv: ${invAvg.toFixed(1)}A</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:3px 12px;margin-top:3px;">`;
       strings.forEach(s => {
-        const avg = s.avg_current != null ? Number(s.avg_current) : 0;
-        const avg30 = s.avg_current_30d != null ? Number(s.avg_current_30d) : null;
-        const vPct = s.variation_pct != null ? Number(s.variation_pct) : null;
+        const avg = Number(s.avg_current || 0);
+        let vPct = s.variation_pct != null ? Number(s.variation_pct) : null;
+        if (vPct == null && invAvg > 0 && avg >= 0.1) vPct = ((avg - invAvg) / invAvg) * 100;
         const sign = vPct != null ? (vPct >= 0 ? "+" : "") : "";
         const color = vPct == null ? "rgba(255,255,255,0.4)" : vPct >= -5 ? "#39e58c" : vPct >= -15 ? "#eab308" : "#ef4444";
-        const label30 = avg30 != null ? `méd 30d: ${avg30}A` : "sem histórico";
         const varLabel = vPct != null ? `${sign}${vPct.toFixed(1)}%` : "—";
         html += `<div style="display:flex;align-items:center;gap:6px;font-size:10px;">
-          <span style="width:30px;color:rgba(255,255,255,0.45);">S${s.string_index}</span>
-          <span style="color:rgba(255,255,255,0.7);min-width:42px;">${avg.toFixed(1)}A</span>
-          <span style="color:rgba(255,255,255,0.35);min-width:75px;">(${label30})</span>
-          <span style="font-weight:700;color:${color};min-width:40px;text-align:right;">${varLabel}</span>
+          <span style="width:26px;color:rgba(255,255,255,0.45);">S${s.string_index}</span>
+          <span style="color:rgba(255,255,255,0.7);min-width:40px;">${avg.toFixed(1)}A</span>
+          <span style="font-weight:700;color:${color};min-width:45px;text-align:right;">${varLabel}</span>
         </div>`;
       });
       html += `</div></div>`;
@@ -6667,22 +6673,23 @@ function _appRondaOpenFullPanel(data) {
   }
 
   if (sb && sb.length) {
-    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">Corrente Strings — vs Média 30 dias</div><div class="ronda-card-subtitle">Variação da corrente média diária em relação à média dos últimos 30 dias (horário solar 8h-16h)</div></div></div><div class="ronda-card-body">`;
+    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">Corrente Strings — vs Média do Inversor</div><div class="ronda-card-subtitle">Corrente média de cada string vs média das strings ativas do mesmo inversor (horário solar 6h-18h)</div></div></div><div class="ronda-card-body">`;
     sb.forEach(inv => {
       const invName = inv.device_name || inv.inverter_name || ("Inv" + inv.device_id);
       const strings = inv.strings || [];
       if (!strings.length) return;
-      body += `<div style="margin-bottom:10px;"><div style="font-size:11.5px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:4px;">${invName}</div>`;
-      body += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:3px 14px;">`;
+      const active = strings.filter(s => (s.avg_current || 0) >= 0.1);
+      const invAvg = active.length > 0 ? active.reduce((s, x) => s + Number(x.avg_current || 0), 0) / active.length : 0;
+      body += `<div style="margin-bottom:12px;"><div style="font-size:11.5px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:2px;">${invName} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.4);">méd inv: ${invAvg.toFixed(1)}A</span></div>`;
+      body += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:3px 14px;">`;
       strings.forEach(s => {
-        const avg = s.avg_current != null ? Number(s.avg_current) : 0;
-        const avg30 = s.avg_current_30d != null ? Number(s.avg_current_30d) : null;
-        const vPct = s.variation_pct != null ? Number(s.variation_pct) : null;
+        const avg = Number(s.avg_current || 0);
+        let vPct = s.variation_pct != null ? Number(s.variation_pct) : null;
+        if (vPct == null && invAvg > 0 && avg >= 0.1) vPct = ((avg - invAvg) / invAvg) * 100;
         const sign = vPct != null ? (vPct >= 0 ? "+" : "") : "";
         const color = vPct == null ? "rgba(255,255,255,0.4)" : vPct >= -5 ? "#39e58c" : vPct >= -15 ? "#eab308" : "#ef4444";
-        const label30 = avg30 != null ? `méd 30d: ${avg30}A` : "sem histórico";
         const varLabel = vPct != null ? `${sign}${vPct.toFixed(1)}%` : "—";
-        body += `<div style="display:flex;align-items:center;gap:6px;font-size:10.5px;"><span style="width:30px;color:rgba(255,255,255,0.45);">S${s.string_index}</span><span style="color:rgba(255,255,255,0.7);min-width:45px;">${avg.toFixed(1)}A</span><span style="color:rgba(255,255,255,0.35);min-width:85px;">(${label30})</span><span style="font-weight:700;color:${color};min-width:50px;text-align:right;">${varLabel}</span></div>`;
+        body += `<div style="display:flex;align-items:center;gap:6px;font-size:10.5px;"><span style="width:30px;color:rgba(255,255,255,0.45);">S${s.string_index}</span><span style="color:rgba(255,255,255,0.7);min-width:45px;">${avg.toFixed(1)}A</span><span style="font-weight:700;color:${color};min-width:50px;text-align:right;">${varLabel}</span></div>`;
       });
       body += `</div></div>`;
     });
