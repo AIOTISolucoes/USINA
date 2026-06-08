@@ -656,11 +656,15 @@
         <button class="robot-tab" data-tab="ronda">
           <i class="fa-solid fa-route"></i> Ronda Diária
         </button>
+        <button class="robot-tab" data-tab="report">
+          <i class="fa-solid fa-file-lines"></i> Relatório
+        </button>
       </div>
       <button class="robot-report-close" id="robotReportClose">×</button>
     </div>
     <div class="robot-report-list" id="robotReportList"></div>
     <div class="robot-ronda-content hidden" id="robotRondaContent"></div>
+    <div class="robot-report-content hidden" id="robotReportContent"></div>
   </div>
   <div class="ronda-fullpanel hidden" id="rondaFullPanel">
     <div class="ronda-fullpanel-header">
@@ -671,11 +675,26 @@
       </div>
       <div class="ronda-fullpanel-actions">
         <input type="date" class="ronda-date-picker ronda-full-date" id="rondaFullDatePicker">
-        <button class="ronda-btn" id="rondaFullDownloadCsv"><i class="fa-solid fa-download"></i> CSV</button>
+        <button class="ronda-btn report-btn-pdf" id="rondaFullDownloadPdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
         <button class="ronda-fullpanel-close" id="rondaFullClose"><i class="fa-solid fa-xmark"></i></button>
       </div>
     </div>
     <div class="ronda-fullpanel-body" id="rondaFullBody"></div>
+  </div>
+  <div class="ronda-fullpanel hidden" id="reportFullPanel">
+    <div class="ronda-fullpanel-header">
+      <div class="ronda-fullpanel-title">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Relatório de Performance</span>
+        <span class="ronda-fullpanel-plant" id="reportFullPlantName"></span>
+      </div>
+      <div class="ronda-fullpanel-actions">
+        <button class="ronda-btn report-btn-pdf" id="reportFullPdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+        <!-- CSV removido, só PDF -->
+        <button class="ronda-fullpanel-close" id="reportFullClose"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+    <div class="ronda-fullpanel-body" id="reportFullBody"></div>
   </div>
   <div class="robot-avatar" id="robotAvatar" title="Diagnóstico do sistema">
     <img id="robotImg" src="img/roboaiotiidle.png" alt="Bot" class="robot-img" />

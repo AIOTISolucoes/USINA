@@ -6375,19 +6375,29 @@ function _appRondaSwitchTab(tab) {
   document.querySelectorAll(".robot-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   const list = document.getElementById("robotReportList");
   const ronda = document.getElementById("robotRondaContent");
+  const reportEl = document.getElementById("robotReportContent");
   const panel = document.getElementById("robotReport");
   const prefsFooter = panel ? panel.querySelector(".robot-prefs-footer") : null;
   if (tab === "diag") {
     if (list) list.classList.remove("hidden");
     if (ronda) ronda.classList.add("hidden");
+    if (reportEl) reportEl.classList.add("hidden");
     if (prefsFooter) prefsFooter.style.display = "";
     if (panel) { panel.classList.remove("ronda-expanded"); panel.style.width = ""; panel.style.maxHeight = ""; }
-  } else {
+  } else if (tab === "ronda") {
     if (list) list.classList.add("hidden");
     if (ronda) { ronda.classList.remove("hidden"); ronda.scrollTop = 0; }
+    if (reportEl) reportEl.classList.add("hidden");
     if (prefsFooter) prefsFooter.style.display = "none";
     if (panel) panel.classList.add("ronda-expanded");
     _appRondaEnsurePlants();
+  } else if (tab === "report") {
+    if (list) list.classList.add("hidden");
+    if (ronda) ronda.classList.add("hidden");
+    if (reportEl) { reportEl.classList.remove("hidden"); reportEl.scrollTop = 0; }
+    if (prefsFooter) prefsFooter.style.display = "none";
+    if (panel) panel.classList.add("ronda-expanded");
+    _appReportEnsurePlants();
   }
 }
 
@@ -6577,12 +6587,12 @@ function _appRondaRenderContent(data, el) {
   }
 
   html += `<div class="ronda-toolbar">
-    <button class="ronda-btn" id="appRondaDlCsv"><i class="fa-solid fa-download"></i> CSV</button>
+    <button class="ronda-btn report-btn-pdf" id="appRondaDlPdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
     <button class="ronda-expand-btn" id="appRondaExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
   </div>`;
 
   el.innerHTML = html;
-  document.getElementById("appRondaDlCsv")?.addEventListener("click", () => _appRondaDownloadCsv(data));
+  document.getElementById("appRondaDlPdf")?.addEventListener("click", () => _appRondaDownloadPdf(data));
   document.getElementById("appRondaExpandBtn")?.addEventListener("click", () => _appRondaOpenFullPanel(data));
 }
 
@@ -6631,6 +6641,52 @@ function _appRondaDownloadCsv(data) {
   URL.revokeObjectURL(url);
 }
 
+async function _pdfCaptureFull(bodyEl, panelEl, filename, orientation) {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-size:14px;color:#39e58c;font-family:'Inter',sans-serif;";
+  overlay.innerHTML = '<div><i class="fa-solid fa-spinner fa-spin" style="margin-right:8px;"></i>Gerando PDF...</div>';
+  document.body.appendChild(overlay);
+  const savedOverflow = bodyEl.style.overflow;
+  const savedMaxH = bodyEl.style.maxHeight;
+  const savedH = bodyEl.style.height;
+  const savedPanelH = panelEl ? panelEl.style.height : "";
+  bodyEl.style.overflow = "visible";
+  bodyEl.style.maxHeight = "none";
+  bodyEl.style.height = "auto";
+  if (panelEl) { panelEl.style.height = "auto"; panelEl.style.overflow = "visible"; }
+  await new Promise(r => setTimeout(r, 200));
+  try {
+    if (typeof html2canvas === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
+    if (typeof jspdf === "undefined" && typeof jsPDF === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
+    const JP = (typeof jsPDF !== "undefined") ? jsPDF : (typeof jspdf !== "undefined" ? jspdf.jsPDF : window.jspdf.jsPDF);
+    const canvas = await html2canvas(bodyEl, { backgroundColor: "#1a1d23", scale: 2, scrollY: 0, scrollX: 0, windowHeight: bodyEl.scrollHeight + 200 });
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new JP({ orientation: orientation || "landscape", unit: "mm", format: "a4" });
+    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight(), m = 10, uW = pW - 2 * m;
+    const imgH = (canvas.height / canvas.width) * uW;
+    let yOff = 0;
+    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, "PNG", m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text("Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
+    pdf.save(filename);
+  } catch (e) { console.error("[PDF]", e); alert("Erro ao gerar PDF: " + e.message); }
+  finally {
+    bodyEl.style.overflow = savedOverflow;
+    bodyEl.style.maxHeight = savedMaxH;
+    bodyEl.style.height = savedH;
+    if (panelEl) { panelEl.style.height = savedPanelH; panelEl.style.overflow = ""; }
+    overlay.remove();
+  }
+}
+
+async function _appRondaDownloadPdf(data) {
+  if (!data) return;
+  const panel = document.getElementById("rondaFullPanel");
+  if (!panel || panel.classList.contains("hidden")) { _appRondaOpenFullPanel(data); await new Promise(r => setTimeout(r, 500)); }
+  const bodyEl = document.getElementById("rondaFullBody");
+  if (!bodyEl) return;
+  const ps = data.plant_summary || {};
+  await _pdfCaptureFull(bodyEl, panel, `Ronda_Diaria_${(ps.power_plant_name || "usina").replace(/\s+/g, "_")}_${data.date || "hoje"}.pdf`, "portrait");
+}
+
 function _appRondaOpenFullPanel(data) {
   const panel = document.getElementById("rondaFullPanel");
   if (!panel || !data) return;
@@ -6646,8 +6702,8 @@ function _appRondaOpenFullPanel(data) {
   if (nameEl) nameEl.textContent = ps.power_plant_name ? `— ${ps.power_plant_name}` : "";
   const datePicker = document.getElementById("rondaFullDatePicker");
   if (datePicker) { datePicker.value = data.date || ""; datePicker.max = new Date().toISOString().slice(0, 10); }
-  const dlBtn = document.getElementById("rondaFullDownloadCsv");
-  if (dlBtn) dlBtn.onclick = () => _appRondaDownloadCsv(data);
+  const dlBtn = document.getElementById("rondaFullDownloadPdf");
+  if (dlBtn) dlBtn.onclick = () => _appRondaDownloadPdf(data);
   const closeBtn = document.getElementById("rondaFullClose");
   if (closeBtn) closeBtn.onclick = () => { panel.classList.add("hidden"); document.body.style.overflow = ""; };
 
@@ -6714,6 +6770,530 @@ function _appRondaOpenFullPanel(data) {
   const bodyEl = document.getElementById("rondaFullBody");
   if (bodyEl) bodyEl.innerHTML = body;
   document.addEventListener("keydown", function _esc(e) { if (e.key === "Escape") { panel.classList.add("hidden"); document.body.style.overflow = ""; document.removeEventListener("keydown", _esc); } });
+}
+
+/* ── Relatório de Performance (aba no robô do portfólio) ── */
+let _APP_REPORT_DATA = null;
+let _APP_REPORT_LOADING = false;
+let _APP_REPORT_PLANTS = [];
+
+async function _appReportEnsurePlants() {
+  const el = document.getElementById("robotReportContent");
+  if (!el) return;
+  if (_APP_REPORT_PLANTS.length > 0 && !_APP_REPORT_DATA) { _appReportRenderPicker(el); return; }
+  if (_APP_REPORT_PLANTS.length > 0) return;
+  el.innerHTML = '<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>Carregando usinas...</div>';
+  try {
+    _APP_REPORT_PLANTS = _APP_RONDA_PLANTS.length > 0 ? _APP_RONDA_PLANTS : await fetchPlants();
+    if (!_APP_RONDA_PLANTS.length) _APP_RONDA_PLANTS = _APP_REPORT_PLANTS;
+    _appReportRenderPicker(el);
+  } catch (e) {
+    el.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
+  }
+}
+
+function _appReportRenderPicker(el) {
+  const plants = _APP_REPORT_PLANTS;
+  if (!plants.length) { el.innerHTML = '<div class="ronda-error">Nenhuma usina encontrada</div>'; return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const opts = plants.map(p => {
+    const id = p.power_plant_id ?? p.plant_id ?? p.id;
+    const name = p.power_plant_name ?? p.plant_name ?? p.name ?? `Usina ${id}`;
+    return `<option value="${id}">${name}</option>`;
+  }).join("");
+  el.innerHTML = `<div class="ronda-toolbar" style="border-top:none; border-bottom:1px solid rgba(255,255,255,0.06); justify-content:flex-start; flex-wrap:wrap;">
+    <select class="ronda-plant-select" id="appReportPlantSelect">${opts}</select>
+    <input type="date" class="ronda-date-picker" id="appReportStartDate" value="${weekAgo}" max="${today}" title="Início">
+    <span style="color:rgba(255,255,255,0.3);font-size:11px;align-self:center;">~</span>
+    <input type="date" class="ronda-date-picker" id="appReportEndDate" value="${today}" max="${today}" title="Fim">
+    <button class="ronda-btn" id="appReportLoadBtn"><i class="fa-solid fa-search"></i> Gerar</button>
+  </div>
+  <div id="appReportBody" style="padding:8px 10px;"></div>`;
+
+  document.getElementById("appReportLoadBtn")?.addEventListener("click", () => _appReportFetch());
+}
+
+async function _appReportFetch() {
+  const plantId = document.getElementById("appReportPlantSelect")?.value;
+  const startDate = document.getElementById("appReportStartDate")?.value;
+  const endDate = document.getElementById("appReportEndDate")?.value;
+  const bodyEl = document.getElementById("appReportBody");
+  if (!plantId || !bodyEl) return;
+
+  if (startDate && endDate) {
+    const diff = (new Date(endDate) - new Date(startDate)) / 86400000;
+    if (diff > 30) { bodyEl.innerHTML = '<div class="ronda-error">Período máximo: 30 dias</div>'; return; }
+    if (diff < 0) { bodyEl.innerHTML = '<div class="ronda-error">Data fim deve ser >= início</div>'; return; }
+  }
+
+  _APP_REPORT_LOADING = true;
+  bodyEl.innerHTML = '<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>Gerando relatório...</div>';
+  try {
+    let url = `${API_BASE}/plants/${plantId}/realtime?view=report`;
+    if (startDate) url += `&start=${startDate}`;
+    if (endDate) url += `&end=${endDate}`;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const headers = {};
+    if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
+    if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+    if (user.username) headers["X-Username"] = user.username;
+    const res = await fetch(url, { headers, cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let data = await res.json();
+    if (data && data.body) data = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    _APP_REPORT_DATA = data;
+    _appReportRenderMini(data, bodyEl);
+  } catch (e) {
+    console.error("[REPORT-APP]", e);
+    bodyEl.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
+  } finally {
+    _APP_REPORT_LOADING = false;
+  }
+}
+
+function _rpFmt(v, dec) { return v != null ? Number(v).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec }) : "—"; }
+
+function _rpSparklineSVG(values, color, w, h) {
+  if (!values || !values.length) return "";
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const areaPath = `M0,${h} L${pts.split(" ").map((p, i) => { const [x, y] = p.split(","); return `${x},${y}`; }).join(" L")} L${w},${h} Z`;
+  const len = values.length * w / (values.length - 1 || 1);
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block;">
+    <defs><linearGradient id="rsg${color.replace('#','')}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity="0.18"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${areaPath}" fill="url(#rsg${color.replace('#','')})" />
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="--line-length:${len};stroke-dasharray:${len};stroke-dashoffset:${len};animation:reportLineDraw 1.2s ease-in-out forwards;"/>
+  </svg>`;
+}
+
+function _appReportRenderMini(data, el) {
+  const p = data.period || {};
+  const s = data.summary || {};
+  const invs = data.inverters || [];
+  const alarms = data.alarms_summary || [];
+  const trend = data.daily_trend || [];
+  const diag = data.diagnostic_text || [];
+
+  const genValues = trend.map(d => d.generation_kwh || 0);
+
+  let html = "";
+
+  html += `<div class="ronda-section">
+    <div class="ronda-section-title"><i class="fa-solid fa-solar-panel"></i> Resumo do Período — ${p.power_plant_name || ""}</div>
+    <div class="ronda-section-title" style="font-size:9px;margin-top:-4px;margin-bottom:6px;">${p.start || ""} ~ ${p.end || ""} (${p.days || 0} dias)</div>
+    <div class="ronda-kpi-grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Geração Total</span><span class="ronda-kpi-value" style="font-family:'Space Mono',monospace;">${_rpFmt(s.total_generation_kwh, 1)} <small style="font-size:10px;color:rgba(255,255,255,0.4);">kWh</small></span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Médio</span><span class="ronda-kpi-value ${(s.avg_pr_pct||0) >= 75 ? 'val-good' : (s.avg_pr_pct||0) >= 60 ? 'val-warn' : 'val-bad'}">${_rpFmt(s.avg_pr_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">FC Médio</span><span class="ronda-kpi-value">${_rpFmt(s.avg_capacity_factor_pct, 1)}%</span></div>
+    </div>
+  </div>`;
+
+  if (genValues.length > 1) {
+    html += `<div class="ronda-section">
+      <div class="ronda-section-title"><i class="fa-solid fa-chart-line"></i> Tendência</div>
+      ${_rpSparklineSVG(genValues, "#39e58c", 280, 50)}
+    </div>`;
+  }
+
+  if (invs.length) {
+    const sorted = [...invs].sort((a, b) => (a.avg_pr_pct || 0) - (b.avg_pr_pct || 0));
+    const worst = sorted[0];
+    const best = sorted[sorted.length - 1];
+    html += `<div class="ronda-section">
+      <div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores — Destaque</div>`;
+    if (worst && worst.vs_fleet === "abaixo") {
+      html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#ef4444;font-weight:700;">▼</span> <span style="color:rgba(255,255,255,0.8);">${worst.inverter_name}</span> <span style="font-family:'Space Mono',monospace;color:#ef4444;">PR ${_rpFmt(worst.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-abaixo">abaixo</span></div>`;
+    }
+    if (best && best.vs_fleet === "acima") {
+      html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#39e58c;font-weight:700;">▲</span> <span style="color:rgba(255,255,255,0.8);">${best.inverter_name}</span> <span style="font-family:'Space Mono',monospace;color:#39e58c;">PR ${_rpFmt(best.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-acima">acima</span></div>`;
+    }
+    html += `</div>`;
+  }
+
+  const totalAlarms = data.total_alarms || 0;
+  const critCount = alarms.reduce((s, a) => s + (a.critical_count || 0), 0);
+  const medCount = alarms.reduce((s, a) => s + (a.medium_count || 0), 0);
+  const lowCount = alarms.reduce((s, a) => s + (a.low_count || 0), 0);
+  html += `<div class="ronda-section">
+    <div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes — ${totalAlarms} ocorrências</div>
+    <div style="display:flex;gap:12px;font-size:11px;">
+      <span style="color:#ef4444;">● ${critCount} críticos</span>
+      <span style="color:#eab308;">● ${medCount} médios</span>
+      <span style="color:#3b82f6;">● ${lowCount} baixos</span>
+    </div>
+  </div>`;
+
+  html += `<div class="ronda-toolbar">
+    <button class="ronda-btn" id="appReportExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
+    <button class="ronda-btn report-btn-pdf" id="appReportPdfBtn"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+  </div>`;
+
+  el.innerHTML = html;
+  document.getElementById("appReportExpandBtn")?.addEventListener("click", () => _appReportOpenFullPanel(data));
+  document.getElementById("appReportPdfBtn")?.addEventListener("click", () => _appReportDownloadPdf(data));
+}
+
+function _rpCompBarHTML(label, curVal, prevVal, curLabel, prevLabel, unit, delta) {
+  const maxVal = Math.max(curVal || 0, prevVal || 0, 1);
+  const curPct = ((curVal || 0) / maxVal * 100).toFixed(1);
+  const prevPct = ((prevVal || 0) / maxVal * 100).toFixed(1);
+  const dColor = delta != null ? (delta >= 0 ? "#39e58c" : "#ef4444") : "rgba(255,255,255,0.4)";
+  const dSign = delta != null ? (delta >= 0 ? "+" : "") : "";
+  return `<div style="margin-bottom:10px;">
+    <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:3px;">${label}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+      <span style="width:60px;font-size:10px;color:rgba(255,255,255,0.6);">${curLabel}</span>
+      <div style="flex:1;height:10px;background:rgba(255,255,255,0.06);border-radius:5px;overflow:hidden;">
+        <div style="height:100%;width:${curPct}%;background:linear-gradient(90deg,#39e58c,#7FD055);border-radius:5px;animation:reportBarGrow 0.6s ease-out both;"></div>
+      </div>
+      <span style="min-width:70px;text-align:right;font-size:11px;font-family:'Space Mono',monospace;color:rgba(255,255,255,0.85);">${_rpFmt(curVal, 1)} ${unit}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:60px;font-size:10px;color:rgba(255,255,255,0.4);">${prevLabel}</span>
+      <div style="flex:1;height:10px;background:rgba(255,255,255,0.06);border-radius:5px;overflow:hidden;">
+        <div style="height:100%;width:${prevPct}%;background:rgba(255,255,255,0.12);border-radius:5px;animation:reportBarGrow 0.6s ease-out 0.1s both;"></div>
+      </div>
+      <span style="min-width:70px;text-align:right;font-size:11px;font-family:'Space Mono',monospace;color:rgba(255,255,255,0.5);">${_rpFmt(prevVal, 1)} ${unit}</span>
+    </div>
+    ${delta != null ? `<div style="text-align:right;font-size:10px;font-weight:700;color:${dColor};margin-top:2px;">${dSign}${delta.toFixed(1)}%</div>` : ""}
+  </div>`;
+}
+
+function _rpTrendSVG(data) {
+  const trend = data.daily_trend || [];
+  if (trend.length < 2) return "";
+  const W = 800, H = 250, PAD = 50, PADR = 50;
+  const genVals = trend.map(d => d.generation_kwh || 0);
+  const prVals = trend.map(d => d.pr_pct);
+  const maxGen = Math.max(...genVals, 1);
+  const maxPr = 100;
+
+  function toXY(vals, maxV, i) {
+    const x = PAD + (i / (trend.length - 1)) * (W - PAD - PADR);
+    const y = H - PAD - ((vals[i] || 0) / maxV) * (H - 2 * PAD);
+    return [x.toFixed(1), y.toFixed(1)];
+  }
+
+  let gridLines = "";
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD + (i / 4) * (H - 2 * PAD);
+    const genLabel = Math.round(maxGen * (1 - i / 4));
+    const prLabel = Math.round(maxPr * (1 - i / 4));
+    gridLines += `<line x1="${PAD}" y1="${y}" x2="${W - PADR}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="4 4"/>`;
+    gridLines += `<text x="${PAD - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="rgba(255,255,255,0.35)">${genLabel}</text>`;
+    gridLines += `<text x="${W - PADR + 6}" y="${y + 3}" text-anchor="start" font-size="9" fill="rgba(255,255,255,0.35)">${prLabel}%</text>`;
+  }
+
+  let dateLabels = "";
+  trend.forEach((d, i) => {
+    const x = PAD + (i / (trend.length - 1)) * (W - PAD - PADR);
+    const label = d.date ? d.date.slice(5).replace("-", "/") : "";
+    if (trend.length <= 10 || i % Math.ceil(trend.length / 10) === 0) {
+      dateLabels += `<text x="${x}" y="${H - 10}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.35)">${label}</text>`;
+    }
+  });
+
+  const genPts = genVals.map((_, i) => toXY(genVals, maxGen, i).join(",")).join(" ");
+  const genArea = `M${PAD},${H - PAD} ` + genVals.map((_, i) => `L${toXY(genVals, maxGen, i).join(",")}`).join(" ") + ` L${W - PADR},${H - PAD} Z`;
+  const prPts = prVals.map((v, i) => v != null ? toXY(prVals, maxPr, i).join(",") : null).filter(Boolean).join(" ");
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
+    <defs>
+      <linearGradient id="rpGenGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#39e58c" stop-opacity="0.15"/>
+        <stop offset="100%" stop-color="#39e58c" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}
+    ${dateLabels}
+    <text x="${PAD - 6}" y="${PAD - 10}" text-anchor="end" font-size="10" fill="rgba(255,255,255,0.4)">kWh</text>
+    <text x="${W - PADR + 6}" y="${PAD - 10}" text-anchor="start" font-size="10" fill="rgba(255,255,255,0.4)">PR%</text>
+    <path d="${genArea}" fill="url(#rpGenGrad)"/>
+    <polyline points="${genPts}" fill="none" stroke="#39e58c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#rpGlow)"/>
+    ${prPts ? `<polyline points="${prPts}" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6 3" stroke-linecap="round"/>` : ""}
+    <defs><filter id="rpGlow"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#39e58c" flood-opacity="0.3"/></filter></defs>
+    ${trend.map((d, i) => {
+      const [gx, gy] = toXY(genVals, maxGen, i);
+      const pr = prVals[i] != null ? prVals[i].toFixed(1) + "%" : "—";
+      const dt = d.date ? d.date.slice(5).replace("-", "/") : "";
+      return `<g class="rp-dot" style="cursor:pointer;" onmouseover="this.querySelector('.rp-tip').style.display='block';this.querySelector('circle').setAttribute('r','6')" onmouseout="this.querySelector('.rp-tip').style.display='none';this.querySelector('circle').setAttribute('r','4')">
+        <circle cx="${gx}" cy="${gy}" r="4" fill="#39e58c" stroke="#1a1d23" stroke-width="2" opacity="0.7"/>
+        <g class="rp-tip" style="display:none;">
+          <rect x="${Number(gx) - 60}" y="${Number(gy) - 52}" width="120" height="42" rx="6" fill="rgba(10,18,12,0.95)" stroke="rgba(57,229,140,0.3)" stroke-width="1"/>
+          <text x="${gx}" y="${Number(gy) - 36}" text-anchor="middle" font-size="9" font-weight="700" fill="#39e58c">${dt}</text>
+          <text x="${gx}" y="${Number(gy) - 24}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.85)">Ger: ${(genVals[i] || 0).toFixed(1)} kWh</text>
+          <text x="${gx}" y="${Number(gy) - 14}" text-anchor="middle" font-size="9" fill="#60a5fa">PR: ${pr}</text>
+        </g>
+      </g>`;
+    }).join("")}
+  </svg>`;
+}
+
+function _rpMiniSparkline(values, color) {
+  if (!values || values.length < 2) return "";
+  const w = 40, h = 16;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 2) - 1;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+}
+
+function _rpHeatmapHTML(sbData, dates) {
+  if (!sbData || !sbData.length) return "";
+  let html = "";
+  sbData.forEach(inv => {
+    const invName = inv.inverter_name || ("Inv" + inv.device_id);
+    const avgI = inv.avg_inverter_current;
+    html += `<div style="margin-bottom:14px;">
+      <div style="font-size:11.5px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:4px;">${invName} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.4);">méd: ${avgI != null ? avgI.toFixed(1) + "A" : "—"}</span></div>`;
+    html += `<div style="overflow-x:auto;"><table style="border-collapse:collapse;font-size:10px;">`;
+    html += `<thead><tr><th style="padding:2px 6px;color:rgba(255,255,255,0.35);text-align:left;">String</th>`;
+    const allDates = new Set();
+    (inv.strings || []).forEach(s => (s.daily || []).forEach(d => allDates.add(d.date)));
+    const sortedDates = [...allDates].sort();
+    sortedDates.forEach((d, di) => {
+      html += `<th style="padding:2px 4px;color:rgba(255,255,255,0.3);font-weight:400;animation:reportHeatIn 0.3s ease ${di * 50}ms both;">${d.slice(5).replace("-","/")}</th>`;
+    });
+    html += `</tr></thead><tbody>`;
+
+    (inv.strings || []).forEach(s => {
+      html += `<tr><td style="padding:2px 6px;color:rgba(255,255,255,0.55);">S${s.string_index}</td>`;
+      const byDate = {};
+      (s.daily || []).forEach(d => { byDate[d.date] = d; });
+      sortedDates.forEach((d, di) => {
+        const cell = byDate[d];
+        let bg = "rgba(255,255,255,0.06)";
+        let title = "sem dados";
+        if (cell) {
+          if (cell.status === "normal") { bg = "#39e58c"; title = `${cell.avg_current}A (${cell.variation_pct != null ? (cell.variation_pct >= 0 ? "+" : "") + cell.variation_pct + "%" : ""})`; }
+          else if (cell.status === "warning") { bg = "#eab308"; title = `${cell.avg_current}A (${cell.variation_pct}%)`; }
+          else if (cell.status === "critical") { bg = "#ef4444"; title = `${cell.avg_current}A (${cell.variation_pct}%)`; }
+          else { bg = "rgba(255,255,255,0.06)"; title = `${cell.avg_current}A (zerada)`; }
+        }
+        html += `<td style="padding:2px 4px;animation:reportHeatIn 0.3s ease ${di * 50}ms both;" title="${title}"><div style="width:14px;height:14px;border-radius:3px;background:${bg};opacity:0.85;"></div></td>`;
+      });
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  });
+  return html;
+}
+
+function _appReportOpenFullPanel(data) {
+  const panel = document.getElementById("reportFullPanel");
+  if (!panel || !data) return;
+  panel.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+
+  const p = data.period || {};
+  const s = data.summary || {};
+  const mc = data.monthly_comparison || {};
+  const trend = data.daily_trend || [];
+  const invs = data.inverters || [];
+  const sb = data.string_box_heatmap || [];
+  const w = data.weather || {};
+  const alarms = data.alarms_summary || [];
+  const diag = data.diagnostic_text || [];
+
+  const nameEl = document.getElementById("reportFullPlantName");
+  if (nameEl) nameEl.textContent = p.power_plant_name ? `— ${p.power_plant_name} (${p.start} ~ ${p.end})` : "";
+
+  const closeBtn = document.getElementById("reportFullClose");
+  if (closeBtn) closeBtn.onclick = () => { panel.classList.add("hidden"); document.body.style.overflow = ""; };
+
+  document.getElementById("reportFullPdf")?.addEventListener("click", () => _appReportDownloadPdf(data), { once: true });
+
+  const svgSolar = '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  const svgBars = '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>';
+  const svgTrend = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>';
+  const svgBolt = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+  const svgString = '<svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2M6 17v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"/></svg>';
+  const svgWeather = '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M3 15a4 4 0 0 0 4 4h9a5 5 0 0 0 .5-9.97A7 7 0 0 0 3 11.5"/></svg>';
+  const svgAlarm = '<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  const svgDiag = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14l2 2 4-4"/></svg>';
+
+  let ci = 0;
+  function cardDelay() { return `animation:reportCardIn 0.35s ease-out ${(ci++) * 0.05}s both;`; }
+
+  let body = '<div class="ronda-full-grid" style="max-width:1400px;">';
+
+  // Card: Resumo
+  const infoGen = _rondaInfoBtn(`${_rondaLabel('Geração Total')} — Soma da energia diária (kWh) de todos os dias do período selecionado.<br>${_rondaFormula('Geração Total = Σ generation_daily_kwh')}<br>${_rondaNote('Fonte: fct_power_plant_metrics_daily. Prioridade: daily_active_energy > daily_energy > delta acumulador > integração trapezoidal.')}`);
+  const infoPR = _rondaInfoBtn(`${_rondaLabel('PR Médio')} — Performance Ratio médio do período. Mede eficiência real vs teórica.<br>${_rondaFormula('PR = Média(Geração_dia / (Potência_Nominal × Irradiação_dia)) × 100')}<br>🟢 ≥ 75% — Bom&emsp;🟡 60–75% — Atenção&emsp;🔴 < 60% — Crítico<br>${_rondaNote('Média aritmética dos PRs diários do período. Dias sem irradiação são excluídos.')}`);
+  const infoFC = _rondaInfoBtn(`${_rondaLabel('Fator de Capacidade Médio')} — Relação entre energia gerada e máximo teórico em 24h.<br>${_rondaFormula('FC = Média(Geração_dia / (Pot_Nominal × 24h)) × 100')}<br>${_rondaNote('Indica o aproveitamento da capacidade instalada. Valores típicos para solar: 15-25%.')}`);
+  body += `<div class="ronda-card" style="${cardDelay()}">
+    <div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo do Período</div><div class="ronda-card-subtitle">${p.start || ""} ~ ${p.end || ""} (${p.days || 0} dias)</div></div></div>
+    <div class="ronda-card-body">
+      <div class="ronda-full-kpi-row">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração Total ${infoGen}</div><div class="ronda-full-kpi-value" style="animation:reportKpiGlow 3s ease-in-out infinite;">${_rpFmt(s.total_generation_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Médio ${infoPR}</div><div class="ronda-full-kpi-value ${(s.avg_pr_pct||0)>=75?'val-good':(s.avg_pr_pct||0)>=60?'val-warn':'val-bad'}">${_rpFmt(s.avg_pr_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">FC Médio ${infoFC}</div><div class="ronda-full-kpi-value">${_rpFmt(s.avg_capacity_factor_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div>
+      </div>
+      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmt(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days || 0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div>
+      </div>
+    </div>
+  </div>`;
+
+  // Card: Comparativo Mensal
+  const curLbl = mc.current_month ? mc.current_month.replace("-", "/") : "Atual";
+  const prevLbl = mc.previous_month ? mc.previous_month.replace("-", "/") : "Anterior";
+  body += `<div class="ronda-card" style="${cardDelay()}">
+    <div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal ${_rondaInfoBtn(`${_rondaLabel('Comparativo Mensal')} — Compara os indicadores do mês atual com o mês anterior.<br>${_rondaFormula('Delta% = ((Atual - Anterior) / |Anterior|) × 100')}<br>🟢 Positivo = melhoria&emsp;🔴 Negativo = queda<br>${_rondaNote('Geração, PR e Fator de Capacidade são calculados com as médias de cada mês completo.')}`)}</div><div class="ronda-card-subtitle">${curLbl} vs ${prevLbl}</div></div></div>
+    <div class="ronda-card-body">
+      ${_rpCompBarHTML("Geração", mc.current_generation_kwh, mc.previous_generation_kwh, curLbl, prevLbl, "kWh", mc.delta_generation_pct)}
+      ${_rpCompBarHTML("PR", mc.current_pr_pct, mc.previous_pr_pct, curLbl, prevLbl, "%", mc.delta_pr_pct)}
+      ${_rpCompBarHTML("Fator Capac.", mc.current_fc_pct, mc.previous_fc_pct, curLbl, prevLbl, "%", mc.delta_fc_pct)}
+    </div>
+  </div>`;
+
+  // Card: Tendência (full width)
+  if (trend.length > 1) {
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária ${_rondaInfoBtn(`${_rondaLabel('Gráfico de Tendência')} — Evolução diária da geração e PR no período selecionado.<br>🟢 ${_rondaLabel('Linha verde')}: Geração (kWh) — eixo esquerdo<br>🔵 ${_rondaLabel('Linha azul tracejada')}: PR (%) — eixo direito<br>${_rondaNote('Passe o mouse sobre os pontos para ver valores exatos de cada dia. A área verde sombreada indica volume de geração.')}`)}</div><div class="ronda-card-subtitle">Geração (kWh) e PR (%)</div></div></div>
+      <div class="ronda-card-body" style="padding:10px 12px;">${_rpTrendSVG(data)}</div>
+    </div>`;
+  }
+
+  // Card: Inversores (full width)
+  if (invs.length) {
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Performance por Inversor ${_rondaInfoBtn(`${_rondaLabel('Performance por Inversor')} — Médias de cada inversor no período.<br>${_rondaFormula('PR Inv = Energia_Total / (Cap_por_Inv × Irrad_Média × Dias) × 100')}<br>${_rondaLabel('vs Média')}: compara o PR do inversor com a média da frota (±10%).<br>🟢 Acima (+10%)&emsp;🔵 Normal (±10%)&emsp;🔴 Abaixo (-10%)<br>${_rondaLabel('Tend.')}: sparkline de energia diária — mostra se o inversor está estável, subindo ou caindo.<br>${_rondaNote('Disponibilidade = % de amostras com estado "rodando". Inversores inativos são excluídos.')}`)}</div><div class="ronda-card-subtitle">${invs.length} unidades — médias do período</div></div></div>
+      <div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;">
+        <table class="ronda-full-inv-table">
+          <thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th><th>PR Méd</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead>
+          <tbody>`;
+    invs.forEach(inv => {
+      const vsCls = inv.vs_fleet && inv.vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.vs_fleet}` : "";
+      const arrow = inv.vs_fleet === "acima" ? "▲" : inv.vs_fleet === "abaixo" ? "▼" : "";
+      const sparkColor = inv.vs_fleet === "abaixo" ? "#ef4444" : inv.vs_fleet === "acima" ? "#39e58c" : "#60a5fa";
+      body += `<tr>
+        <td style="font-weight:600;">${inv.inverter_name || "Inv" + inv.device_id}</td>
+        <td>${_rpFmt(inv.avg_power_kw, 1)} kW</td>
+        <td>${_rpFmt(inv.total_energy_kwh, 0)} kWh</td>
+        <td style="font-weight:700;">${_rpFmt(inv.avg_pr_pct, 1)}%</td>
+        <td><span class="ronda-full-perf-badge ${vsCls}">${arrow} ${inv.vs_fleet === "sem_dados" ? "—" : inv.vs_fleet}</span></td>
+        <td>${_rpFmt(inv.availability_pct, 1)}%</td>
+        <td>${_rpMiniSparkline(inv.daily_energy || [], sparkColor)}</td>
+      </tr>`;
+    });
+    body += `</tbody></table></div></div></div>`;
+  }
+
+  // Card: String Box Heatmap (full width)
+  if (sb && sb.length) {
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">String Box — Heatmap ${_rondaInfoBtn(`${_rondaLabel('Heatmap de Strings')} — Cada quadrado = corrente média de uma string em um dia (6h-18h).<br>${_rondaFormula('Variação% = ((Corrente_String - Média_Inversor) / Média_Inversor) × 100')}<br>🟢 ≥ -5% — Normal&emsp;🟡 -5% a -15% — Atenção&emsp;🔴 < -15% — Crítico&emsp;⬜ Zerada/offline<br>${_rondaNote('Passe o mouse sobre os quadrados para ver o valor exato. Strings zeradas por 2+ dias geram alerta no diagnóstico.')}`)}</div><div class="ronda-card-subtitle">Corrente vs média do inversor por dia (6h-18h)</div></div></div>
+      <div class="ronda-card-body">${_rpHeatmapHTML(sb)}</div>
+    </div>`;
+  }
+
+  // Card: Weather
+  body += `<div class="ronda-card" style="${cardDelay()}">
+    <div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">Médias do período</div></div></div>
+    <div class="ronda-card-body">
+      <div class="ronda-full-kpi-row">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_irradiance_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_rpFmt(w.max_irradiance_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+      </div>
+      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Máx</div><div class="ronda-full-kpi-value">${_rpFmt(w.max_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+      </div>
+      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_wind_speed, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_days || 0}<span class="ronda-full-kpi-unit">/ ${w.total_days || 0} dias</span></div></div>
+      </div>
+      ${w.daily_irradiance && w.daily_irradiance.length > 1 ? `<div style="margin-top:10px;">${_rpSparklineSVG(w.daily_irradiance, "#facc15", 260, 40)}</div>` : ""}
+    </div>
+  </div>`;
+
+  // Card: Alarmes por Dispositivo
+  body += `<div class="ronda-card" style="${cardDelay()}">
+    <div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes por Dispositivo ${_rondaInfoBtn(`${_rondaLabel('Alarmes por Dispositivo')} — Contagem de alarmes agrupados por dispositivo no período.<br>${_rondaLabel('Crít.')}: alarmes de severidade alta/crítica<br>${_rondaLabel('Méd.')}: alarmes de severidade média<br>${_rondaNote('Linhas com 3+ alarmes críticos ganham destaque vermelho. O alarme mais frequente de cada dispositivo é identificado para diagnóstico.')}`)}</div><div class="ronda-card-subtitle">${data.total_alarms || 0} ocorrências</div></div></div>
+    <div class="ronda-card-body">`;
+  if (alarms.length) {
+    body += `<table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+      <thead><tr><th style="text-align:left;padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Dispositivo</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Crít.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Méd.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Total</th></tr></thead><tbody>`;
+    alarms.forEach(a => {
+      const glow = (a.critical_count || 0) >= 3 ? "box-shadow:inset 0 0 12px rgba(239,68,68,0.08);" : "";
+      body += `<tr style="${glow}">
+        <td style="padding:4px 6px;font-weight:600;color:rgba(255,255,255,0.85);">${a.device_name || "—"} <span style="font-size:9px;font-weight:400;color:rgba(255,255,255,0.3);">${a.device_type || ""}</span></td>
+        <td style="padding:4px 6px;text-align:center;color:#ef4444;font-weight:800;">${a.critical_count || 0}</td>
+        <td style="padding:4px 6px;text-align:center;color:#eab308;">${a.medium_count || 0}</td>
+        <td style="padding:4px 6px;text-align:center;"><span style="background:rgba(255,255,255,0.06);border-radius:10px;padding:2px 8px;">${a.total_count || 0}</span></td>
+      </tr>`;
+    });
+    body += `</tbody></table>`;
+  } else {
+    body += `<div style="color:rgba(255,255,255,0.4);font-style:italic;font-size:12px;">Nenhuma ocorrência no período</div>`;
+  }
+  body += `</div></div>`;
+
+  // Card: Diagnóstico (full width)
+  if (diag.length) {
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgDiag}</div><div><div class="ronda-card-title">Diagnóstico do Período</div><div class="ronda-card-subtitle">Gerado automaticamente</div></div></div>
+      <div class="ronda-card-body" style="background:rgba(57,229,140,0.03);border:1px solid rgba(57,229,140,0.1);border-radius:8px;margin:8px;padding:14px 16px;">`;
+    diag.forEach(d => {
+      const icon = d.type === "warning" ? '<span style="color:#eab308;margin-right:4px;">&#9888;</span>' : d.type === "ok" ? '<span style="color:#39e58c;margin-right:4px;">&#10003;</span>' : '<span style="color:#60a5fa;margin-right:4px;">&#9432;</span>';
+      body += `<p style="margin:0 0 8px 0;font-size:12.5px;line-height:1.7;color:rgba(255,255,255,0.75);font-family:'Inter',sans-serif;">${icon}${d.text}</p>`;
+    });
+    body += `</div></div>`;
+  }
+
+  body += "</div>";
+
+  const bodyEl = document.getElementById("reportFullBody");
+  if (bodyEl) bodyEl.innerHTML = body;
+
+  document.addEventListener("keydown", function _rpEsc(e) {
+    if (e.key === "Escape") { panel.classList.add("hidden"); document.body.style.overflow = ""; document.removeEventListener("keydown", _rpEsc); }
+  });
+}
+
+function _appReportDownloadCsv(data) {
+  if (!data) return;
+  const p = data.period || {};
+  const trend = data.daily_trend || [];
+  const invs = data.inverters || [];
+  let csv = "Relatório de Performance\n";
+  csv += `Usina,${p.power_plant_name || ""}\n`;
+  csv += `Período,${p.start || ""} ~ ${p.end || ""}\n\n`;
+  csv += "Data,Geração (kWh),PR (%),FC (%),Irradiação (kWh/m²)\n";
+  trend.forEach(d => { csv += `${d.date},${d.generation_kwh ?? ""},${d.pr_pct ?? ""},${d.capacity_factor_pct ?? ""},${d.irradiation_kwh_m2 ?? ""}\n`; });
+  csv += "\nInversor,Pot. Média (kW),Energia (kWh),PR (%),vs Média,Disponib. (%)\n";
+  invs.forEach(inv => { csv += `${inv.inverter_name},${inv.avg_power_kw ?? ""},${inv.total_energy_kwh ?? ""},${inv.avg_pr_pct ?? ""},${inv.vs_fleet ?? ""},${inv.availability_pct ?? ""}\n`; });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Relatorio_${(p.power_plant_name||"usina").replace(/\s+/g,"_")}_${p.start}_${p.end}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function _appReportDownloadPdf(data) {
+  if (!data) return;
+  const panel = document.getElementById("reportFullPanel");
+  if (!panel || panel.classList.contains("hidden")) { _appReportOpenFullPanel(data); await new Promise(r => setTimeout(r, 500)); }
+  const bodyEl = document.getElementById("reportFullBody");
+  if (!bodyEl) return;
+  const p = data.period || {};
+  await _pdfCaptureFull(bodyEl, panel, `Relatorio_${(p.power_plant_name||"usina").replace(/\s+/g,"_")}_${p.start}_${p.end}.pdf`, "landscape");
 }
 
 function _wireAppRobotResize() {

@@ -7189,19 +7189,29 @@ function _rondaSwitchTab(tab) {
   document.querySelectorAll(".robot-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
   const list = document.getElementById("robotReportList");
   const ronda = document.getElementById("robotRondaContent");
+  const reportEl = document.getElementById("robotReportContent");
   const panel = document.getElementById("robotReport");
   const prefsFooter = panel ? panel.querySelector(".robot-prefs-footer") : null;
   if (tab === "diag") {
     if (list) list.classList.remove("hidden");
     if (ronda) ronda.classList.add("hidden");
+    if (reportEl) reportEl.classList.add("hidden");
     if (prefsFooter) prefsFooter.style.display = "";
     if (panel) { panel.classList.remove("ronda-expanded"); panel.style.width = ""; panel.style.maxHeight = ""; }
-  } else {
+  } else if (tab === "ronda") {
     if (list) list.classList.add("hidden");
     if (ronda) { ronda.classList.remove("hidden"); ronda.scrollTop = 0; }
+    if (reportEl) reportEl.classList.add("hidden");
     if (prefsFooter) prefsFooter.style.display = "none";
     if (panel) panel.classList.add("ronda-expanded");
     if (!_RONDA_DATA && !_RONDA_LOADING) _rondaFetchAndRender();
+  } else if (tab === "report") {
+    if (list) list.classList.add("hidden");
+    if (ronda) ronda.classList.add("hidden");
+    if (reportEl) { reportEl.classList.remove("hidden"); reportEl.scrollTop = 0; }
+    if (prefsFooter) prefsFooter.style.display = "none";
+    if (panel) panel.classList.add("ronda-expanded");
+    _plantReportInit();
   }
 }
 
@@ -7265,7 +7275,7 @@ function _rondaRender(data, el) {
   // Date picker + toolbar
   html += `<div class="ronda-toolbar" style="border-top:none; border-bottom:1px solid rgba(255,255,255,0.06);">
     <input type="date" class="ronda-date-picker" id="rondaDatePicker" value="${dateVal || defaultDate}" max="${new Date().toISOString().slice(0,10)}">
-    <button class="ronda-btn" id="rondaDownloadCsv"><i class="fa-solid fa-download"></i> CSV</button>
+    <button class="ronda-btn report-btn-pdf" id="rondaDownloadPdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
     <button class="ronda-expand-btn" id="rondaExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
   </div>`;
 
@@ -7378,9 +7388,9 @@ function _rondaRender(data, el) {
     });
   }
 
-  // Wire download CSV
-  const dlBtn = document.getElementById("rondaDownloadCsv");
-  if (dlBtn) dlBtn.addEventListener("click", () => _rondaDownloadCsv(data));
+  // Wire download PDF
+  const dlBtn = document.getElementById("rondaDownloadPdf");
+  if (dlBtn) dlBtn.addEventListener("click", () => _rondaDownloadPdf(data));
 
   // Wire expand to fullpanel
   const expBtn = document.getElementById("rondaExpandBtn");
@@ -7412,8 +7422,8 @@ function _rondaOpenFullPanel(data) {
     };
   }
 
-  const dlBtn = document.getElementById("rondaFullDownloadCsv");
-  if (dlBtn) dlBtn.onclick = () => _rondaDownloadCsv(data);
+  const pdfBtn = document.getElementById("rondaFullDownloadPdf");
+  if (pdfBtn) pdfBtn.onclick = () => _rondaDownloadPdf(data);
 
   const closeBtn = document.getElementById("rondaFullClose");
   if (closeBtn) closeBtn.onclick = () => {
@@ -7595,6 +7605,319 @@ async function _rondaFetchFullPanel(dateStr) {
   } catch (e) {
     bodyEl.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
   }
+}
+
+/* ── Relatório de Performance (aba no robô da usina) ── */
+let _PLANT_REPORT_DATA = null;
+let _PLANT_REPORT_LOADING = false;
+let _PLANT_REPORT_INITED = false;
+
+function _plantReportInit() {
+  const el = document.getElementById("robotReportContent");
+  if (!el || !PLANT_ID) return;
+  if (_PLANT_REPORT_INITED && !_PLANT_REPORT_DATA) return;
+  if (_PLANT_REPORT_INITED) return;
+  _PLANT_REPORT_INITED = true;
+  const today = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  el.innerHTML = `<div class="ronda-toolbar" style="border-top:none;border-bottom:1px solid rgba(255,255,255,0.06);justify-content:flex-start;flex-wrap:wrap;">
+    <input type="date" class="ronda-date-picker" id="plantReportStartDate" value="${weekAgo}" max="${today}" title="Início">
+    <span style="color:rgba(255,255,255,0.3);font-size:11px;align-self:center;">~</span>
+    <input type="date" class="ronda-date-picker" id="plantReportEndDate" value="${today}" max="${today}" title="Fim">
+    <button class="ronda-btn" id="plantReportLoadBtn"><i class="fa-solid fa-search"></i> Gerar</button>
+  </div>
+  <div id="plantReportBody" style="padding:8px 10px;"></div>`;
+  document.getElementById("plantReportLoadBtn")?.addEventListener("click", () => _plantReportFetch());
+}
+
+async function _plantReportFetch() {
+  const startDate = document.getElementById("plantReportStartDate")?.value;
+  const endDate = document.getElementById("plantReportEndDate")?.value;
+  const bodyEl = document.getElementById("plantReportBody");
+  if (!PLANT_ID || !bodyEl) return;
+  if (startDate && endDate) {
+    const diff = (new Date(endDate) - new Date(startDate)) / 86400000;
+    if (diff > 30) { bodyEl.innerHTML = '<div class="ronda-error">Período máximo: 30 dias</div>'; return; }
+    if (diff < 0) { bodyEl.innerHTML = '<div class="ronda-error">Data fim deve ser >= início</div>'; return; }
+  }
+  _PLANT_REPORT_LOADING = true;
+  bodyEl.innerHTML = '<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>Gerando relatório...</div>';
+  try {
+    let url = `${API_BASE}/plants/${PLANT_ID}/realtime?view=report`;
+    if (startDate) url += `&start=${startDate}`;
+    if (endDate) url += `&end=${endDate}`;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const headers = {};
+    if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
+    if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+    if (user.username) headers["X-Username"] = user.username;
+    const res = await fetch(url, { headers, cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let data = await res.json();
+    if (data && data.body) data = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    _PLANT_REPORT_DATA = data;
+    _plantReportRenderMini(data, bodyEl);
+  } catch (e) {
+    console.error("[REPORT-PLANT]", e);
+    bodyEl.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i> Erro: ${e.message}</div>`;
+  } finally {
+    _PLANT_REPORT_LOADING = false;
+  }
+}
+
+function _rpFmtP(v, dec) { return v != null ? Number(v).toLocaleString("pt-BR", { minimumFractionDigits: dec, maximumFractionDigits: dec }) : "—"; }
+
+function _rpSparkP(values, color, w, h) {
+  if (!values || !values.length) return "";
+  const max = Math.max(...values, 1); const min = Math.min(...values, 0); const range = max - min || 1;
+  const pts = values.map((v, i) => { const x = (i / Math.max(values.length - 1, 1)) * w; const y = h - ((v - min) / range) * (h - 4) - 2; return `${x.toFixed(1)},${y.toFixed(1)}`; }).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function _plantReportRenderMini(data, el) {
+  const p = data.period || {};
+  const s = data.summary || {};
+  const invs = data.inverters || [];
+  const alarms = data.alarms_summary || [];
+  const trend = data.daily_trend || [];
+  const genValues = trend.map(d => d.generation_kwh || 0);
+  let html = "";
+  html += `<div class="ronda-section">
+    <div class="ronda-section-title"><i class="fa-solid fa-solar-panel"></i> Resumo do Período</div>
+    <div class="ronda-section-title" style="font-size:9px;margin-top:-4px;margin-bottom:6px;">${p.start||""} ~ ${p.end||""} (${p.days||0} dias)</div>
+    <div class="ronda-kpi-grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Geração Total</span><span class="ronda-kpi-value" style="font-family:'Space Mono',monospace;">${_rpFmtP(s.total_generation_kwh, 1)} <small style="font-size:10px;color:rgba(255,255,255,0.4);">kWh</small></span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">PR Médio</span><span class="ronda-kpi-value ${(s.avg_pr_pct||0)>=75?'val-good':(s.avg_pr_pct||0)>=60?'val-warn':'val-bad'}">${_rpFmtP(s.avg_pr_pct, 1)}%</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">FC Médio</span><span class="ronda-kpi-value">${_rpFmtP(s.avg_capacity_factor_pct, 1)}%</span></div>
+    </div>
+  </div>`;
+  if (genValues.length > 1) {
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-chart-line"></i> Tendência</div>${_rpSparkP(genValues, "#39e58c", 280, 50)}</div>`;
+  }
+  if (invs.length) {
+    const sorted = [...invs].sort((a, b) => (a.avg_pr_pct || 0) - (b.avg_pr_pct || 0));
+    const worst = sorted[0]; const best = sorted[sorted.length - 1];
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores — Destaque</div>`;
+    if (worst && worst.vs_fleet === "abaixo") html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#ef4444;font-weight:700;">▼</span> ${worst.inverter_name} <span style="font-family:'Space Mono',monospace;color:#ef4444;">PR ${_rpFmtP(worst.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-abaixo">abaixo</span></div>`;
+    if (best && best.vs_fleet === "acima") html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#39e58c;font-weight:700;">▲</span> ${best.inverter_name} <span style="font-family:'Space Mono',monospace;color:#39e58c;">PR ${_rpFmtP(best.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-acima">acima</span></div>`;
+    html += `</div>`;
+  }
+  const totalAlarms = data.total_alarms || 0;
+  const critCount = alarms.reduce((acc, a) => acc + (a.critical_count || 0), 0);
+  const medCount = alarms.reduce((acc, a) => acc + (a.medium_count || 0), 0);
+  const lowCount = alarms.reduce((acc, a) => acc + (a.low_count || 0), 0);
+  html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes — ${totalAlarms} ocorrências</div>
+    <div style="display:flex;gap:12px;font-size:11px;">
+      <span style="color:#ef4444;">● ${critCount} críticos</span>
+      <span style="color:#eab308;">● ${medCount} médios</span>
+      <span style="color:#3b82f6;">● ${lowCount} baixos</span>
+    </div>
+  </div>`;
+  html += `<div class="ronda-toolbar">
+    <button class="ronda-btn" id="plantReportExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
+    <button class="ronda-btn report-btn-pdf" id="plantReportPdfBtn"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+  </div>`;
+  el.innerHTML = html;
+  document.getElementById("plantReportExpandBtn")?.addEventListener("click", () => _plantReportOpenFull(data));
+  document.getElementById("plantReportPdfBtn")?.addEventListener("click", () => _plantReportDownloadPdf(data));
+}
+
+function _plantReportOpenFull(data) {
+  const panel = document.getElementById("reportFullPanel");
+  if (!panel || !data) return;
+  panel.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  const p = data.period || {};
+  const s = data.summary || {};
+  const mc = data.monthly_comparison || {};
+  const trend = data.daily_trend || [];
+  const invs = data.inverters || [];
+  const sb = data.string_box_heatmap || [];
+  const w = data.weather || {};
+  const alarms = data.alarms_summary || [];
+  const diag = data.diagnostic_text || [];
+
+  const nameEl = document.getElementById("reportFullPlantName");
+  if (nameEl) nameEl.textContent = p.power_plant_name ? `— ${p.power_plant_name} (${p.start} ~ ${p.end})` : "";
+  const closeBtn = document.getElementById("reportFullClose");
+  if (closeBtn) closeBtn.onclick = () => { panel.classList.add("hidden"); document.body.style.overflow = ""; };
+  document.getElementById("reportFullPdf")?.addEventListener("click", () => _plantReportDownloadPdf(data), { once: true });
+
+  const svgSolar = '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  const svgBars = '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/></svg>';
+  const svgTrend = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>';
+  const svgBolt = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>';
+  const svgString = '<svg viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2M6 17v2a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"/></svg>';
+  const svgWeather = '<svg viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M3 15a4 4 0 0 0 4 4h9a5 5 0 0 0 .5-9.97A7 7 0 0 0 3 11.5"/></svg>';
+  const svgAlarm = '<svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+  const svgDiag = '<svg viewBox="0 0 24 24" fill="none" stroke="#39e58c" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M9 14l2 2 4-4"/></svg>';
+
+  let ci = 0;
+  function cd() { return `animation:reportCardIn 0.35s ease-out ${(ci++) * 0.05}s both;`; }
+
+  function compBar(label, curVal, prevVal, curLbl, prevLbl, unit, delta) {
+    const mx = Math.max(curVal || 0, prevVal || 0, 1);
+    const cP = ((curVal || 0) / mx * 100).toFixed(1), pP = ((prevVal || 0) / mx * 100).toFixed(1);
+    const dC = delta != null ? (delta >= 0 ? "#39e58c" : "#ef4444") : "rgba(255,255,255,0.4)";
+    const dS = delta != null ? (delta >= 0 ? "+" : "") : "";
+    return `<div style="margin-bottom:10px;"><div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:3px;">${label}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;"><span style="width:60px;font-size:10px;color:rgba(255,255,255,0.6);">${curLbl}</span><div style="flex:1;height:10px;background:rgba(255,255,255,0.06);border-radius:5px;overflow:hidden;"><div style="height:100%;width:${cP}%;background:linear-gradient(90deg,#39e58c,#7FD055);border-radius:5px;animation:reportBarGrow 0.6s ease-out both;"></div></div><span style="min-width:70px;text-align:right;font-size:11px;font-family:'Space Mono',monospace;color:rgba(255,255,255,0.85);">${_rpFmtP(curVal,1)} ${unit}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="width:60px;font-size:10px;color:rgba(255,255,255,0.4);">${prevLbl}</span><div style="flex:1;height:10px;background:rgba(255,255,255,0.06);border-radius:5px;overflow:hidden;"><div style="height:100%;width:${pP}%;background:rgba(255,255,255,0.12);border-radius:5px;animation:reportBarGrow 0.6s ease-out 0.1s both;"></div></div><span style="min-width:70px;text-align:right;font-size:11px;font-family:'Space Mono',monospace;color:rgba(255,255,255,0.5);">${_rpFmtP(prevVal,1)} ${unit}</span></div>
+      ${delta != null ? `<div style="text-align:right;font-size:10px;font-weight:700;color:${dC};margin-top:2px;">${dS}${delta.toFixed(1)}%</div>` : ""}</div>`;
+  }
+
+  function trendSVG() {
+    if (trend.length < 2) return "";
+    const W = 800, H = 250, PAD = 50, PADR = 50;
+    const gV = trend.map(d => d.generation_kwh || 0);
+    const pV = trend.map(d => d.pr_pct);
+    const mG = Math.max(...gV, 1);
+    function xy(vals, mx, i) { const x = PAD + (i / (trend.length - 1)) * (W - PAD - PADR); const y = H - PAD - ((vals[i] || 0) / mx) * (H - 2 * PAD); return [x.toFixed(1), y.toFixed(1)]; }
+    let gl = "";
+    for (let i = 0; i <= 4; i++) { const y = PAD + (i / 4) * (H - 2 * PAD); gl += `<line x1="${PAD}" y1="${y}" x2="${W-PADR}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="4 4"/><text x="${PAD-6}" y="${y+3}" text-anchor="end" font-size="9" fill="rgba(255,255,255,0.35)">${Math.round(mG*(1-i/4))}</text><text x="${W-PADR+6}" y="${y+3}" text-anchor="start" font-size="9" fill="rgba(255,255,255,0.35)">${Math.round(100*(1-i/4))}%</text>`; }
+    let dl = ""; trend.forEach((d, i) => { const x = PAD + (i / (trend.length - 1)) * (W - PAD - PADR); if (trend.length <= 10 || i % Math.ceil(trend.length / 10) === 0) dl += `<text x="${x}" y="${H-10}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.35)">${(d.date||"").slice(5).replace("-","/")}</text>`; });
+    const gPts = gV.map((_, i) => xy(gV, mG, i).join(",")).join(" ");
+    const gArea = `M${PAD},${H-PAD} ` + gV.map((_, i) => `L${xy(gV, mG, i).join(",")}`).join(" ") + ` L${W-PADR},${H-PAD} Z`;
+    const pPts = pV.map((v, i) => v != null ? xy(pV, 100, i).join(",") : null).filter(Boolean).join(" ");
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;"><defs><linearGradient id="rpGG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#39e58c" stop-opacity="0.15"/><stop offset="100%" stop-color="#39e58c" stop-opacity="0"/></linearGradient><filter id="rpGl"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#39e58c" flood-opacity="0.3"/></filter></defs>${gl}${dl}<text x="${PAD-6}" y="${PAD-10}" text-anchor="end" font-size="10" fill="rgba(255,255,255,0.4)">kWh</text><text x="${W-PADR+6}" y="${PAD-10}" text-anchor="start" font-size="10" fill="rgba(255,255,255,0.4)">PR%</text><path d="${gArea}" fill="url(#rpGG)"/><polyline points="${gPts}" fill="none" stroke="#39e58c" stroke-width="2.5" stroke-linecap="round" filter="url(#rpGl)"/>${pPts ? `<polyline points="${pPts}" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6 3" stroke-linecap="round"/>` : ""}</svg>`;
+  }
+
+  function heatmap() {
+    if (!sb || !sb.length) return "";
+    let h = "";
+    sb.forEach(inv => {
+      const n = inv.inverter_name || ("Inv" + inv.device_id);
+      h += `<div style="margin-bottom:14px;"><div style="font-size:11.5px;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:4px;">${n} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.4);">méd: ${inv.avg_inverter_current != null ? inv.avg_inverter_current.toFixed(1)+"A" : "—"}</span></div>`;
+      h += `<div style="overflow-x:auto;"><table style="border-collapse:collapse;font-size:10px;"><thead><tr><th style="padding:2px 6px;color:rgba(255,255,255,0.35);text-align:left;">String</th>`;
+      const allD = new Set(); (inv.strings||[]).forEach(s => (s.daily||[]).forEach(d => allD.add(d.date))); const sD = [...allD].sort();
+      sD.forEach((d, di) => { h += `<th style="padding:2px 4px;color:rgba(255,255,255,0.3);font-weight:400;animation:reportHeatIn 0.3s ease ${di*50}ms both;">${d.slice(5).replace("-","/")}</th>`; });
+      h += `</tr></thead><tbody>`;
+      (inv.strings||[]).forEach(st => {
+        h += `<tr><td style="padding:2px 6px;color:rgba(255,255,255,0.55);">S${st.string_index}</td>`;
+        const bd = {}; (st.daily||[]).forEach(d => { bd[d.date] = d; });
+        sD.forEach((d, di) => { const c = bd[d]; let bg = "rgba(255,255,255,0.06)", tt = "sem dados";
+          if (c) { if (c.status==="normal"){bg="#39e58c";tt=`${c.avg_current}A (${c.variation_pct!=null?(c.variation_pct>=0?"+":"")+c.variation_pct+"%":""})`;}else if(c.status==="warning"){bg="#eab308";tt=`${c.avg_current}A (${c.variation_pct}%)`;}else if(c.status==="critical"){bg="#ef4444";tt=`${c.avg_current}A (${c.variation_pct}%)`;}else{tt=`${c.avg_current}A (zerada)`;} }
+          h += `<td style="padding:2px 4px;animation:reportHeatIn 0.3s ease ${di*50}ms both;" title="${tt}"><div style="width:14px;height:14px;border-radius:3px;background:${bg};opacity:0.85;"></div></td>`; });
+        h += `</tr>`; });
+      h += `</tbody></table></div></div>`; });
+    return h;
+  }
+
+  function miniSpark(vals, col) {
+    if (!vals || vals.length < 2) return "";
+    const ww = 40, hh = 16, mx = Math.max(...vals, 1), mn = Math.min(...vals, 0), rr = mx - mn || 1;
+    const pts = vals.map((v, i) => `${((i/(vals.length-1))*ww).toFixed(1)},${(hh-((v-mn)/rr)*(hh-2)-1).toFixed(1)}`).join(" ");
+    return `<svg viewBox="0 0 ${ww} ${hh}" width="${ww}" height="${hh}"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+  }
+
+  let body = '<div class="ronda-full-grid" style="max-width:1400px;">';
+
+  const prCls = (s.avg_pr_pct||0)>=75?'val-good':(s.avg_pr_pct||0)>=60?'val-warn':'val-bad';
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo do Período</div><div class="ronda-card-subtitle">${p.start||""} ~ ${p.end||""} (${p.days||0} dias)</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração Total</div><div class="ronda-full-kpi-value" style="animation:reportKpiGlow 3s ease-in-out infinite;">${_rpFmtP(s.total_generation_kwh,1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Médio</div><div class="ronda-full-kpi-value ${prCls}">${_rpFmtP(s.avg_pr_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">FC Médio</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_capacity_factor_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days||0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div></div></div></div>`;
+
+  const cL = mc.current_month ? mc.current_month.replace("-","/") : "Atual", pL = mc.previous_month ? mc.previous_month.replace("-","/") : "Anterior";
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal</div><div class="ronda-card-subtitle">${cL} vs ${pL}</div></div></div><div class="ronda-card-body">${compBar("Geração",mc.current_generation_kwh,mc.previous_generation_kwh,cL,pL,"kWh",mc.delta_generation_pct)}${compBar("PR",mc.current_pr_pct,mc.previous_pr_pct,cL,pL,"%",mc.delta_pr_pct)}${compBar("Fator Capac.",mc.current_fc_pct,mc.previous_fc_pct,cL,pL,"%",mc.delta_fc_pct)}</div></div>`;
+
+  if (trend.length > 1) body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária</div><div class="ronda-card-subtitle">Geração (kWh) e PR (%)</div></div></div><div class="ronda-card-body" style="padding:10px 12px;">${trendSVG()}</div></div>`;
+
+  if (invs.length) {
+    body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Performance por Inversor</div><div class="ronda-card-subtitle">${invs.length} unidades</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th><th>PR Méd</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead><tbody>`;
+    invs.forEach(inv => {
+      const vc = inv.vs_fleet && inv.vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.vs_fleet}` : "";
+      const ar = inv.vs_fleet==="acima"?"▲":inv.vs_fleet==="abaixo"?"▼":"";
+      const sc = inv.vs_fleet==="abaixo"?"#ef4444":inv.vs_fleet==="acima"?"#39e58c":"#60a5fa";
+      body += `<tr><td style="font-weight:600;">${inv.inverter_name||"Inv"+inv.device_id}</td><td>${_rpFmtP(inv.avg_power_kw,1)} kW</td><td>${_rpFmtP(inv.total_energy_kwh,0)} kWh</td><td style="font-weight:700;">${_rpFmtP(inv.avg_pr_pct,1)}%</td><td><span class="ronda-full-perf-badge ${vc}">${ar} ${inv.vs_fleet==="sem_dados"?"—":inv.vs_fleet}</span></td><td>${_rpFmtP(inv.availability_pct,1)}%</td><td>${miniSpark(inv.daily_energy||[],sc)}</td></tr>`;
+    });
+    body += `</tbody></table></div></div></div>`;
+  }
+
+  if (sb && sb.length) body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">String Box — Heatmap</div><div class="ronda-card-subtitle">Corrente vs média (6h-18h)</div></div></div><div class="ronda-card-body">${heatmap()}</div></div>`;
+
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">Médias do período</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmtP(w.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_rpFmtP(w.max_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_rpFmtP(w.avg_temp_c,1)}<span class="ronda-full-kpi-unit">°C</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_rpFmtP(w.avg_wind_speed,1)}<span class="ronda-full-kpi-unit">m/s</span></div></div></div></div></div>`;
+
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes por Dispositivo</div><div class="ronda-card-subtitle">${data.total_alarms||0} ocorrências</div></div></div><div class="ronda-card-body">`;
+  if (alarms.length) {
+    body += `<table style="width:100%;border-collapse:collapse;font-size:11.5px;"><thead><tr><th style="text-align:left;padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Disp.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Crít.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Méd.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Total</th></tr></thead><tbody>`;
+    alarms.forEach(a => { const g = (a.critical_count||0) >= 3 ? "box-shadow:inset 0 0 12px rgba(239,68,68,0.08);" : "";
+      body += `<tr style="${g}"><td style="padding:4px 6px;font-weight:600;color:rgba(255,255,255,0.85);">${a.device_name||"—"}</td><td style="padding:4px 6px;text-align:center;color:#ef4444;font-weight:800;">${a.critical_count||0}</td><td style="padding:4px 6px;text-align:center;color:#eab308;">${a.medium_count||0}</td><td style="padding:4px 6px;text-align:center;"><span style="background:rgba(255,255,255,0.06);border-radius:10px;padding:2px 8px;">${a.total_count||0}</span></td></tr>`; });
+    body += `</tbody></table>`;
+  } else body += `<div style="color:rgba(255,255,255,0.4);font-style:italic;font-size:12px;">Nenhuma ocorrência no período</div>`;
+  body += `</div></div>`;
+
+  if (diag.length) {
+    body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgDiag}</div><div><div class="ronda-card-title">Diagnóstico do Período</div><div class="ronda-card-subtitle">Gerado automaticamente</div></div></div><div class="ronda-card-body" style="background:rgba(57,229,140,0.03);border:1px solid rgba(57,229,140,0.1);border-radius:8px;margin:8px;padding:14px 16px;">`;
+    diag.forEach(d => { const ic = d.type==="warning"?'<span style="color:#eab308;margin-right:4px;">&#9888;</span>':d.type==="ok"?'<span style="color:#39e58c;margin-right:4px;">&#10003;</span>':'<span style="color:#60a5fa;margin-right:4px;">&#9432;</span>';
+      body += `<p style="margin:0 0 8px 0;font-size:12.5px;line-height:1.7;color:rgba(255,255,255,0.75);font-family:'Inter',sans-serif;">${ic}${d.text}</p>`; });
+    body += `</div></div>`;
+  }
+  body += "</div>";
+
+  const bodyEl = document.getElementById("reportFullBody");
+  if (bodyEl) bodyEl.innerHTML = body;
+  document.addEventListener("keydown", function _rpE(e) { if (e.key === "Escape") { panel.classList.add("hidden"); document.body.style.overflow = ""; document.removeEventListener("keydown", _rpE); } });
+}
+
+function _plantReportDownloadCsv(data) {
+  if (!data) return;
+  const p = data.period || {};
+  const trend = data.daily_trend || [];
+  const invs = data.inverters || [];
+  let csv = "Relatório de Performance\n";
+  csv += `Usina,${p.power_plant_name || ""}\nPeríodo,${p.start || ""} ~ ${p.end || ""}\n\n`;
+  csv += "Data,Geração (kWh),PR (%),FC (%),Irradiação (kWh/m²)\n";
+  trend.forEach(d => { csv += `${d.date},${d.generation_kwh??""},${d.pr_pct??""},${d.capacity_factor_pct??""},${d.irradiation_kwh_m2??""}\n`; });
+  csv += "\nInversor,Pot. Média (kW),Energia (kWh),PR (%),vs Média,Disponib. (%)\n";
+  invs.forEach(inv => { csv += `${inv.inverter_name},${inv.avg_power_kw??""},${inv.total_energy_kwh??""},${inv.avg_pr_pct??""},${inv.vs_fleet??""},${inv.availability_pct??""}\n`; });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url;
+  a.download = `Relatorio_${(p.power_plant_name||"usina").replace(/\s+/g,"_")}_${p.start}_${p.end}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+async function _pdfCaptureFullPlant(bodyEl, panelEl, filename, orientation) {
+  const overlay = document.createElement("div");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-size:14px;color:#39e58c;font-family:'Inter',sans-serif;";
+  overlay.innerHTML = '<div><i class="fa-solid fa-spinner fa-spin" style="margin-right:8px;"></i>Gerando PDF...</div>';
+  document.body.appendChild(overlay);
+  const sO = bodyEl.style.overflow, sMH = bodyEl.style.maxHeight, sH = bodyEl.style.height;
+  const sPH = panelEl ? panelEl.style.height : "";
+  bodyEl.style.overflow = "visible"; bodyEl.style.maxHeight = "none"; bodyEl.style.height = "auto";
+  if (panelEl) { panelEl.style.height = "auto"; panelEl.style.overflow = "visible"; }
+  await new Promise(r => setTimeout(r, 200));
+  try {
+    if (typeof html2canvas === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
+    if (typeof jspdf === "undefined" && typeof jsPDF === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
+    const JP = (typeof jsPDF !== "undefined") ? jsPDF : (typeof jspdf !== "undefined" ? jspdf.jsPDF : window.jspdf.jsPDF);
+    const canvas = await html2canvas(bodyEl, { backgroundColor: "#1a1d23", scale: 2, scrollY: 0, scrollX: 0, windowHeight: bodyEl.scrollHeight + 200 });
+    const imgData = canvas.toDataURL("image/png");
+    const pdf = new JP({ orientation: orientation || "landscape", unit: "mm", format: "a4" });
+    const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight(), m = 10, uW = pW - 2 * m;
+    const imgH = (canvas.height / canvas.width) * uW;
+    let yOff = 0;
+    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, "PNG", m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text("Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
+    pdf.save(filename);
+  } catch (e) { console.error("[PDF]", e); alert("Erro ao gerar PDF: " + e.message); }
+  finally { bodyEl.style.overflow = sO; bodyEl.style.maxHeight = sMH; bodyEl.style.height = sH; if (panelEl) { panelEl.style.height = sPH; panelEl.style.overflow = ""; } overlay.remove(); }
+}
+
+async function _plantReportDownloadPdf(data) {
+  if (!data) return;
+  const panel = document.getElementById("reportFullPanel");
+  if (!panel || panel.classList.contains("hidden")) { _plantReportOpenFull(data); await new Promise(r => setTimeout(r, 500)); }
+  const bodyEl = document.getElementById("reportFullBody");
+  if (!bodyEl) return;
+  await _pdfCaptureFullPlant(bodyEl, panel, `Relatorio_${(data.period?.power_plant_name||"usina").replace(/\s+/g,"_")}_${data.period?.start}_${data.period?.end}.pdf`, "landscape");
+}
+
+async function _rondaDownloadPdf(data) {
+  if (!data) return;
+  const panel = document.getElementById("rondaFullPanel");
+  if (!panel || panel.classList.contains("hidden")) { _rondaOpenFullPanel(data); await new Promise(r => setTimeout(r, 500)); }
+  const bodyEl = document.getElementById("rondaFullBody");
+  if (!bodyEl) return;
+  const ps = data.plant_summary || {};
+  await _pdfCaptureFullPlant(bodyEl, panel, `Ronda_Diaria_${(ps.power_plant_name || "usina").replace(/\s+/g, "_")}_${data.date || "hoje"}.pdf`, "portrait");
 }
 
 function _rondaDownloadCsv(data) {

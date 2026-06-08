@@ -9632,6 +9632,16 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 .ronda-full-alarm-active.is-active { background: rgba(239,68,68,0.15); color: #ef4444; }
 .ronda-full-alarm-active.is-resolved { background: rgba(57,229,140,0.12); color: #39e58c; }
 
+/* ── Relatório: animações ── */
+@keyframes reportCardIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes reportBarGrow { from { width: 0; } }
+@keyframes reportLineDraw { from { stroke-dashoffset: var(--line-length); } to { stroke-dashoffset: 0; } }
+@keyframes reportHeatIn { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
+@keyframes reportKpiGlow { 0%, 100% { text-shadow: 0 0 8px rgba(57,229,140,0.3); } 50% { text-shadow: 0 0 16px rgba(57,229,140,0.5); } }
+.report-btn-pdf { background: linear-gradient(135deg, rgba(239,68,68,0.12), rgba(239,68,68,0.06)); border: 1px solid rgba(239,68,68,0.25); color: #ef4444; }
+.report-btn-pdf:hover { background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(239,68,68,0.12)); box-shadow: 0 0 12px rgba(239,68,68,0.15); }
+.robot-report-content { overflow-y: auto; padding: 0; }
+
 .ronda-expand-btn {
   background: rgba(57,229,140,0.08);
   border: 1px solid rgba(57,229,140,0.2);
