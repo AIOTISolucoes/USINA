@@ -685,4 +685,90 @@ body {
   .explorer-header h2 {
     font-size: 18px;
   }
+  .explorer-legend-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Legend panel */
+.explorer-legend {
+  margin: 0 0 12px 0;
+}
+.explorer-legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(57, 229, 140, 0.08);
+  border: 1px solid rgba(57, 229, 140, 0.2);
+  border-radius: 8px;
+  color: #39e58c;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+  text-align: left;
+}
+.explorer-legend-toggle:hover {
+  background: rgba(57, 229, 140, 0.15);
+}
+.explorer-legend-arrow {
+  margin-left: auto;
+  transition: transform 0.25s;
+  font-size: 11px;
+}
+.explorer-legend-arrow.open {
+  transform: rotate(180deg);
+}
+.explorer-legend-body {
+  margin-top: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 12px 14px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.explorer-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px 16px;
+}
+.explorer-legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.explorer-legend-code {
+  font-weight: 700;
+  color: #60a5fa;
+  min-width: 42px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.explorer-legend-desc {
+  color: rgba(255,255,255,0.75);
+}
+.explorer-legend-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.explorer-legend-badge.alarm { background: rgba(239,68,68,0.15); color: #f87171; }
+.explorer-legend-badge.event { background: rgba(96,165,250,0.15); color: #60a5fa; }
+.explorer-legend-badge.warning { background: rgba(234,179,8,0.15); color: #eab308; }
+.explorer-legend-badge.high { border: 1px solid rgba(239,68,68,0.3); }
+.explorer-legend-empty {
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+  font-style: italic;
+  padding: 8px 0;
 }

@@ -7479,6 +7479,18 @@ function initExplorerOnce() {
     _explorerLoad();
   });
   exportBtn.addEventListener("click", _explorerExportCsv);
+
+  const legendToggle = document.getElementById("explorerLegendToggle");
+  if (legendToggle) {
+    legendToggle.addEventListener("click", () => {
+      const body = document.getElementById("explorerLegendBody");
+      const arrow = document.querySelector(".explorer-legend-arrow");
+      if (!body) return;
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "";
+      if (arrow) arrow.classList.toggle("open", !open);
+    });
+  }
 }
 
 async function _explorerPopulatePlants(sel) {
@@ -7697,6 +7709,15 @@ function _explorerShowResults(result) {
   }
 
   window._explorerLastResult = result;
+
+  const dataType = document.getElementById("explorerDataType").value;
+  const hasIdCols = result.rows.length > 0 && Object.keys(result.rows[0]).some(k => /^ID\d+$/i.test(k));
+  if (hasIdCols) {
+    _explorerLoadLegend(dataType);
+  } else {
+    const lgEl = document.getElementById("explorerLegend");
+    if (lgEl) lgEl.style.display = "none";
+  }
 }
 
 function _explorerExportCsv() {
@@ -7721,4 +7742,52 @@ function _explorerExportCsv() {
   a.download = `explorador_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+let _explorerLegendCache = {};
+
+async function _explorerLoadLegend(tableName) {
+  const legendEl = document.getElementById("explorerLegend");
+  const gridEl = document.getElementById("explorerLegendGrid");
+  const bodyEl = document.getElementById("explorerLegendBody");
+  const arrowEl = document.querySelector(".explorer-legend-arrow");
+  if (!legendEl || !gridEl) return;
+
+  legendEl.style.display = "none";
+  if (bodyEl) bodyEl.style.display = "none";
+  if (arrowEl) arrowEl.classList.remove("open");
+
+  if (_explorerLegendCache[tableName]) {
+    _explorerRenderLegend(_explorerLegendCache[tableName]);
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/raw/id-legend?table=${encodeURIComponent(tableName)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.items || [];
+    if (items.length === 0) return;
+    _explorerLegendCache[tableName] = items;
+    _explorerRenderLegend(items);
+  } catch (e) {
+    console.warn("[Explorer] legenda indisponível:", e);
+  }
+}
+
+function _explorerRenderLegend(items) {
+  const legendEl = document.getElementById("explorerLegend");
+  const gridEl = document.getElementById("explorerLegendGrid");
+  if (!legendEl || !gridEl || !items.length) return;
+
+  legendEl.style.display = "";
+  gridEl.innerHTML = items.map(it => {
+    const badgeClass = (it.type || "event").toLowerCase();
+    const sevClass = (it.severity || "").toLowerCase() === "high" ? " high" : "";
+    return `<div class="explorer-legend-item">
+      <span class="explorer-legend-code">${it.code}</span>
+      <span class="explorer-legend-desc">${it.description}</span>
+      <span class="explorer-legend-badge ${badgeClass}${sevClass}">${it.type || ""}</span>
+    </div>`;
+  }).join("");
 }
