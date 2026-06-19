@@ -1,24 +1,22 @@
-const CACHE_NAME = "aioti-v2";
+const CACHE_NAME = "aioti-v1";
+const SHELL = [
+  "/resumo.html",
+  "/plant.html",
+  "/os.html",
+  "/index.html",
+  "/css/style.css",
+  "/css/layout.css",
+  "/css/plant.css",
+  "/css/login.css",
+  "/os.css",
+  "/js/app.js",
+  "/js/plant.js",
+  "/js/login.js",
+  "/js/pwa.js",
+  "/manifest.json",
+];
 
 self.addEventListener("install", (e) => {
-  const base = self.registration.scope;
-  const SHELL = [
-    "resumo.html",
-    "plant.html",
-    "os.html",
-    "index.html",
-    "css/style.css",
-    "css/layout.css",
-    "css/plant.css",
-    "css/login.css",
-    "os.css",
-    "js/app.js",
-    "js/plant.js",
-    "js/login.js",
-    "js/pwa.js",
-    "manifest.json",
-  ].map((f) => new URL(f, base).href);
-
   e.waitUntil(
     caches.open(CACHE_NAME).then((c) => c.addAll(SHELL))
   );
@@ -52,22 +50,18 @@ self.addEventListener("fetch", (e) => {
 
 // ── Push Notifications ──
 self.addEventListener("push", (e) => {
-  const base = self.registration.scope;
-  let data = { title: "AIOTI Solar", body: "Nova notificação", url: "resumo.html" };
+  let data = { title: "AIOTI Solar", body: "Nova notificação", url: "/resumo.html" };
   try {
     data = Object.assign(data, e.data.json());
   } catch (_) {}
 
-  const iconUrl = new URL("img/icon-192.png", base).href;
-  const clickUrl = data.url.startsWith("http") ? data.url : new URL(data.url, base).href;
-
   e.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: iconUrl,
-      badge: iconUrl,
+      icon: "/img/icon-192.png",
+      badge: "/img/icon-192.png",
       tag: data.tag || "aioti-default",
-      data: { url: clickUrl },
+      data: { url: data.url },
       vibrate: [200, 100, 200],
       requireInteraction: data.priority === "high",
     })
@@ -76,11 +70,11 @@ self.addEventListener("push", (e) => {
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const target = e.notification.data?.url || new URL("resumo.html", self.registration.scope).href;
+  const target = e.notification.data?.url || "/resumo.html";
   e.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) {
-        if (c.url === target && "focus" in c) return c.focus();
+        if (new URL(c.url).pathname === target && "focus" in c) return c.focus();
       }
       return clients.openWindow(target);
     })

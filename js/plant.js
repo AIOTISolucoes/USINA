@@ -2083,18 +2083,19 @@ function renderCabineStringsBalloonRows(payload, inverterRealId) {
     .map(s => {
       const amp = s.current_a != null ? asNumber(s.current_a, 0) : null;
       const pct = amp != null ? Math.min(100, (amp / maxAmp) * 100) : 0;
-      const inAlarm = isStringInAlarm(s, inverterOnline);
+      const inAlarm = isStringInAlarm(s, inverterOnline, inverterRealId);
       const noData = s.has_data !== true;
       const disabled = s.effective_enabled === false;
 
       const stClass = disabled ? "csb-str--disabled"
         : inAlarm ? "csb-str--alarm"
-        : noData ? "csb-str--nodata"
+        : (noData || !inverterOnline) ? "csb-str--nodata"
         : "csb-str--ok";
 
       const statusTxt = disabled ? "Desabilitada"
         : inAlarm ? (s.alarm_reason || s.alarm_state || "Alarme")
         : noData ? "Sem dados"
+        : !inverterOnline ? "Offline"
         : "OK";
 
       const ampTxt = amp != null ? `${amp.toFixed(2)} A` : "—";
@@ -5086,16 +5087,24 @@ function getInverterOnlineStateById(inverterRealId) {
   return isOnlineByFreshness(inv) && !isZeroSnapshot(inv);
 }
 
-function isStringInAlarm(str, inverterOnline) {
+function isStringInAlarm(str, inverterOnline, inverterRealId) {
   if (!isStringMonitorable(str)) return false;
   if (!inverterOnline) return false;
 
-  // futura integração backend: quando alarm_active vier pronto, ele manda na regra local.
   if (str.alarm_active === true) return true;
   if (str.alarm_active === false) return false;
 
   const noData = str.has_data !== true;
   const nullCurrent = str.current_a === null || str.current_a === undefined || str.current_a === "";
+
+  let zeroCurrent = false;
+  if (!nullCurrent && str.has_data && asNumber(str.current_a, -1) < 0.1 && inverterRealId != null) {
+    const inv = INVERTER_EXTRAS_BY_ID.get(String(inverterRealId));
+    if (inv) {
+      const powerKw = asNumber(inv.active_power_kw ?? inv.power_kw ?? inv.power ?? inv.active_power, 0);
+      zeroCurrent = powerKw > 0.5;
+    }
+  }
 
   let stale = false;
   if (str.last_ts) {
@@ -5105,7 +5114,7 @@ function isStringInAlarm(str, inverterOnline) {
     }
   }
 
-  return noData || nullCurrent || stale;
+  return noData || nullCurrent || zeroCurrent || stale;
 }
 
 function setInverterStringAlarmBadge(inverterRealId, show) {
@@ -5169,11 +5178,11 @@ function renderStringsGrid(gridEl, payload) {
     const el = document.createElement("div");
     el.className = "string-card";
     el.dataset.string = str.string_index;
-    const inAlarm = isStringInAlarm(str, inverterOnline);
+    const inAlarm = isStringInAlarm(str, inverterOnline, inverterRealId);
     if (inAlarm) {
       el.classList.add("string-alarm");
       hasAlarmOnAnyMonitorable = true;
-    } else if (!str.has_data) {
+    } else if (!str.has_data || !inverterOnline) {
       el.classList.add("nodata");
     } else {
       el.classList.add("active");
@@ -7288,17 +7297,18 @@ function _rondaRender(data, el) {
       <div class="ronda-kpi"><span class="ronda-kpi-label">PR Acumulado</span><span class="ronda-kpi-value">${_rondaFmt(ps.pr_accumulated_pct, 1)}%</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Fator Capac.</span><span class="ronda-kpi-value">${_rondaFmt(ps.capacity_factor_daily_pct, 1)}%</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Início Geração</span><span class="ronda-kpi-value">${ps.gen_start_time || "—"}</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label">Fim Geração</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Últ. Atualização</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
     </div>
   </div>`;
 
   // Weather
-  const irradCls = w.irradiance_classification;
   html += `<div class="ronda-section">
     <div class="ronda-section-title"><i class="fa-solid fa-cloud-sun"></i> Estação Solarimétrica</div>
     <div class="ronda-kpi-grid">
-      <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Média</span><span class="ronda-kpi-value">${_rondaFmt(w.irradiance_avg_wm2, 1)} W/m²</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label">Irrad. Máx</span><span class="ronda-kpi-value">${_rondaFmt(w.irradiance_max_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">POA Méd</span><span class="ronda-kpi-value">${_rondaFmt(w.poa_avg_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">GHI Méd</span><span class="ronda-kpi-value">${_rondaFmt(w.ghi_avg_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">POA Acum.</span><span class="ronda-kpi-value">${_rondaFmt(w.poa_acc_wh_m2, 1)} Wh/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">GHI Acum.</span><span class="ronda-kpi-value">${_rondaFmt(w.ghi_acc_wh_m2, 1)} Wh/m²</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Média</span><span class="ronda-kpi-value">${_rondaFmt(w.air_temp_avg_c, 1)} °C</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Máx</span><span class="ronda-kpi-value">${_rondaFmt(w.air_temp_max_c, 1)} °C</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Vento Méd</span><span class="ronda-kpi-value">${_rondaFmt(w.wind_speed_avg, 1)} m/s</span></div>
@@ -7351,29 +7361,6 @@ function _rondaRender(data, el) {
         <span style="width:36px;text-align:right;font-size:10.5px;font-weight:700;color:${hp >= 80 ? '#39e58c' : hp >= 50 ? '#eab308' : '#ef4444'}">${_rondaFmt(hp, 0)}%</span>
       </div>`;
     });
-    html += `</div>`;
-  }
-
-  // Alarms
-  if (alarms.length) {
-    html += `<div class="ronda-section">
-      <div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes (${data.alarm_count || alarms.length})</div>`;
-    const shown = alarms.slice(0, 20);
-    shown.forEach(a => {
-      const sevCls = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
-      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
-      html += `<div class="ronda-alarm-row">
-        <div class="ronda-alarm-dot ${sevCls}"></div>
-        <div class="ronda-alarm-body">
-          <div class="ronda-alarm-device">${a.device_name || "—"}</div>
-          <div class="ronda-alarm-desc">${a.description || a.code || "—"}</div>
-          <div class="ronda-alarm-ts">${ts}</div>
-        </div>
-      </div>`;
-    });
-    if (alarms.length > 20) {
-      html += `<div style="text-align:center;font-size:10px;color:rgba(255,255,255,0.4);padding:6px;">+${alarms.length - 20} alarmes</div>`;
-    }
     html += `</div>`;
   }
 
@@ -7456,7 +7443,7 @@ function _rondaOpenFullPanel(data) {
       <div class="ronda-full-kpi-row" style="margin-top:8px;">
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fator Capac.</div><div class="ronda-full-kpi-value">${_rondaFmt(ps.capacity_factor_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Início</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_start_time || "—"}</div></div>
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fim</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_end_time || "—"}</div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Últ. Atualização</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_end_time || "—"}</div></div>
       </div>
     </div>
   </div>`;
@@ -7469,14 +7456,18 @@ function _rondaOpenFullPanel(data) {
     </div>
     <div class="ronda-card-body">
       <div class="ronda-full-kpi-row">
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rondaFmt(w.irradiance_avg_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_rondaFmt(w.irradiance_max_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">POA Méd</div><div class="ronda-full-kpi-value">${_rondaFmt(w.poa_avg_wm2, 1)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">GHI Méd</div><div class="ronda-full-kpi-value">${_rondaFmt(w.ghi_avg_wm2, 1)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_rondaFmt(w.air_temp_avg_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
       </div>
       <div class="ronda-full-kpi-row" style="margin-top:8px;">
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Máx</div><div class="ronda-full-kpi-value">${_rondaFmt(w.air_temp_max_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">POA Acum.</div><div class="ronda-full-kpi-value">${_rondaFmt(w.poa_acc_wh_m2, 1)}<span class="ronda-full-kpi-unit">Wh/m²</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">GHI Acum.</div><div class="ronda-full-kpi-value">${_rondaFmt(w.ghi_acc_wh_m2, 1)}<span class="ronda-full-kpi-unit">Wh/m²</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_rondaFmt(w.wind_speed_avg, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div>
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_detected ? "\u{1F327}️ Sim" : "☀️ Não"}</div></div>
+      </div>
+      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Máx</div><div class="ronda-full-kpi-value">${_rondaFmt(w.air_temp_max_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_detected ? "Sim" : "Não"}</div></div>
       </div>
     </div>
   </div>`;
@@ -7543,32 +7534,6 @@ function _rondaOpenFullPanel(data) {
       </div>`;
     });
     body += `</div></div></div>`;
-  }
-
-  // Card: Alarms
-  if (alarms.length) {
-    body += `<div class="ronda-card span-full">
-      <div class="ronda-card-header">
-        <div class="ronda-card-icon icon-alarm">${svgAlarm}</div>
-        <div><div class="ronda-card-title">Alarmes</div><div class="ronda-card-subtitle">${data.alarm_count || alarms.length} eventos</div></div>
-      </div>
-      <div class="ronda-card-body">`;
-    alarms.forEach(a => {
-      const sevCls = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
-      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
-      const activeLabel = a.is_active ? "Ativo" : "Resolvido";
-      const activeCls = a.is_active ? "is-active" : "is-resolved";
-      body += `<div class="ronda-full-alarm">
-        <div class="ronda-full-alarm-severity ${sevCls}"></div>
-        <div class="ronda-full-alarm-body">
-          <div class="ronda-full-alarm-device">${a.device_name || "—"} <span style="color:rgba(255,255,255,0.3);font-weight:400;font-size:11px;">${a.device_type || ""}</span></div>
-          <div class="ronda-full-alarm-desc">${a.description || a.code || "—"}</div>
-          <div class="ronda-full-alarm-ts">${ts}</div>
-        </div>
-        <span class="ronda-full-alarm-active ${activeCls}">${activeLabel}</span>
-      </div>`;
-    });
-    body += `</div></div>`;
   }
 
   body += "</div>";
@@ -7937,7 +7902,7 @@ function _rondaDownloadCsv(data) {
   lines.push("PR Acumulado %," + (ps.pr_accumulated_pct || ""));
   lines.push("Fator Capacidade %," + (ps.capacity_factor_daily_pct || ""));
   lines.push("Inicio Geração," + (ps.gen_start_time || ""));
-  lines.push("Fim Geração," + (ps.gen_end_time || ""));
+  lines.push("Últ. Atualização Geração," + (ps.gen_end_time || ""));
   lines.push("");
 
   lines.push("Estação Solarimétrica");
@@ -8128,10 +8093,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!document.hidden) {
         await refreshRealtimeEverything();
       }
-    });
-
-    window.addEventListener("focus", async () => {
-      await refreshRealtimeEverything();
     });
   } catch (e) {
     console.error(e);

@@ -19,6 +19,7 @@
     <link rel="apple-touch-icon" href="img/icon-192.png" />
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/layout.css" />
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   </head>
 
   <body>
@@ -45,6 +46,12 @@
           </button>
           <button id="btnOS" class="sidebar-btn" type="button" title="Ordens de Serviço" aria-label="Ordens de Serviço">
             <i class="fa-solid fa-screwdriver-wrench"></i>
+          </button>
+          <button id="btnExplorer" class="sidebar-btn" type="button" title="Explorador de Dados" aria-label="Explorador de Dados">
+            <i class="fa-solid fa-database"></i>
+          </button>
+          <button id="btnSwagger" class="sidebar-btn" type="button" title="API Explorer" aria-label="API Explorer">
+            <i class="fa-solid fa-code"></i>
           </button>
         </nav>
 
@@ -479,6 +486,130 @@
   </div><!-- /ds-v2-shell -->
 </div>
 
+          <!-- TELA EXPLORADOR DE DADOS (CLIENTE) -->
+          <div id="explorerView" class="view-section hidden">
+            <div class="explorer-shell">
+
+              <div class="explorer-header">
+                <div class="explorer-header-left">
+                  <i class="fa-solid fa-database"></i>
+                  <div>
+                    <h2>Explorador de Dados</h2>
+                    <p>Consulte os dados da sua usina de forma simples e visual.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="explorer-controls">
+                <div class="explorer-ctrl-group">
+                  <label>Usina</label>
+                  <select id="explorerPlantSelect">
+                    <option value="">Selecione uma usina...</option>
+                  </select>
+                </div>
+
+                <div class="explorer-ctrl-group">
+                  <label>Tipo de dado</label>
+                  <select id="explorerDataType">
+                    <option value="raw_inverter">Inversores</option>
+                    <option value="raw_relay">Reles</option>
+                    <option value="raw_meter">Multimedidores</option>
+                    <option value="raw_weather_station">Estacao Meteorologica</option>
+                    <option value="raw_tracker">Trackers</option>
+                    <option value="raw_transformer">Transformadores</option>
+                    <option value="raw_nobreak">Nobreaks</option>
+                    <option value="raw_logger">Loggers</option>
+                  </select>
+                </div>
+
+                <div class="explorer-ctrl-group explorer-ctrl-date" id="explorerDateGroup">
+                  <label>Periodo</label>
+                  <div class="explorer-date-range">
+                    <input type="datetime-local" id="explorerStartDate" />
+                    <span class="explorer-date-sep">ate</span>
+                    <input type="datetime-local" id="explorerEndDate" />
+                  </div>
+                </div>
+
+                <div class="explorer-ctrl-group explorer-ctrl-limit" id="explorerLimitGroup">
+                  <label>Limite</label>
+                  <select id="explorerLimit">
+                    <option value="20">20 registros</option>
+                    <option value="50" selected>50 registros</option>
+                    <option value="100">100 registros</option>
+                    <option value="200">200 registros</option>
+                    <option value="500">500 registros</option>
+                  </select>
+                </div>
+
+                <button id="explorerLoadBtn" class="explorer-load-btn" type="button">
+                  <i class="fa-solid fa-magnifying-glass"></i> Consultar
+                </button>
+              </div>
+
+              <div id="explorerEmpty" class="explorer-empty-state">
+                <div class="explorer-empty-icon"><i class="fa-solid fa-solar-panel"></i></div>
+                <h3>Selecione uma usina para comecar</h3>
+                <p>Escolha a usina e o tipo de dado que deseja visualizar.</p>
+              </div>
+
+              <div id="explorerLoading" class="explorer-loading" style="display:none">
+                <div class="explorer-spinner"></div>
+                <span>Carregando dados...</span>
+              </div>
+
+              <div id="explorerError" class="explorer-error" style="display:none">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span id="explorerErrorMsg">Erro ao carregar dados.</span>
+              </div>
+
+              <div id="explorerResults" class="explorer-results" style="display:none">
+                <div class="explorer-results-header">
+                  <span id="explorerResultsTitle" class="explorer-results-title"></span>
+                  <span id="explorerResultsCount" class="explorer-results-count"></span>
+                  <button id="explorerExportCsv" class="explorer-export-btn" type="button" title="Exportar CSV">
+                    <i class="fa-solid fa-download"></i> CSV
+                  </button>
+                </div>
+
+                <div id="explorerTableContainer" class="explorer-table-container" style="display:none">
+                  <table class="explorer-table">
+                    <thead id="explorerTableHead"></thead>
+                    <tbody id="explorerTableBody"></tbody>
+                  </table>
+                </div>
+
+                <div id="explorerPagination" class="explorer-pagination" style="display:none">
+                  <button id="explorerPrevBtn" type="button" class="explorer-page-btn">
+                    <i class="fa-solid fa-chevron-left"></i> Anterior
+                  </button>
+                  <span id="explorerPageInfo" class="explorer-page-info"></span>
+                  <button id="explorerNextBtn" type="button" class="explorer-page-btn">
+                    Proximo <i class="fa-solid fa-chevron-right"></i>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- TELA API EXPLORER (SWAGGER) -->
+          <div id="swaggerView" class="view-section hidden">
+            <div class="card" style="height: calc(100vh - 70px); display: flex; flex-direction: column;">
+              <div class="card-header">
+                <span class="card-title">API Explorer</span>
+                <span class="tag"><i class="fa-solid fa-code"></i> Swagger</span>
+              </div>
+              <div id="swagger-plants-panel" style="display:none; padding:10px 16px; background:#f0f4f8; border-bottom:1px solid #dde3ea; font-size:13px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <strong style="color:#37474f;"><i class="fa-solid fa-solar-panel"></i> Plantas disponíveis:</strong>
+                  <span id="swagger-plants-list" style="color:#546e7a;">Carregando...</span>
+                </div>
+              </div>
+              <div id="swagger-ui" style="flex:1; overflow:auto; background:#fff; border-radius:0 0 16px 16px;"></div>
+            </div>
+          </div>
+
           <!-- TELA DE DIAGRAMA (OCULTA DO MENU) -->
           <div id="diagramView" class="view-section hidden">
             <div class="card diagram-card-full">
@@ -755,6 +886,10 @@
     const _btnOS = document.getElementById("btnOS")
     if (_btnOS) _btnOS.style.display = _canSeeOS ? "" : "none"
 
+    const _canSeeSwagger = _u.is_superuser === true || _u.username === "admin"
+    const _btnSwagger = document.getElementById("btnSwagger")
+    if (_btnSwagger) _btnSwagger.style.display = _canSeeSwagger ? "" : "none"
+
     document.getElementById("btnOS")?.addEventListener("click", () => {
       window.location.href = "os.html"
     })
@@ -845,6 +980,50 @@
 
   </div>
 
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+  (function() {
+    var swaggerInited = false;
+    document.getElementById("btnSwagger")?.addEventListener("click", function() {
+      showView("swagger");
+      if (!swaggerInited) {
+        swaggerInited = true;
+        apiFetch("/openapi.json")
+          .then(function(r) { return r.json(); })
+          .then(function(spec) {
+            SwaggerUIBundle({
+              spec: spec,
+              dom_id: "#swagger-ui",
+              presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+              layout: "BaseLayout",
+              deepLinking: true,
+              defaultModelsExpandDepth: -1,
+            });
+          })
+          .catch(function(err) {
+            document.getElementById("swagger-ui").innerHTML =
+              '<div style="padding:2rem;color:#d32f2f;">Erro ao carregar API spec: ' + err.message + '</div>';
+          });
+        apiFetch("/plants")
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            var plants = data.items || data || [];
+            var panel = document.getElementById("swagger-plants-panel");
+            var list = document.getElementById("swagger-plants-list");
+            if (!plants.length) { list.textContent = "Nenhuma planta encontrada"; panel.style.display = "block"; return; }
+            list.innerHTML = plants.map(function(p) {
+              return '<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #cfd8dc;border-radius:6px;padding:3px 8px;margin:2px;cursor:pointer;" title="Clique para copiar ID" onclick="navigator.clipboard.writeText(\'' + p.power_plant_id + '\');this.style.borderColor=\'#4caf50\';var s=this;setTimeout(function(){s.style.borderColor=\'#cfd8dc\'},800);">'
+                + '<strong style="color:#1565c0;">' + p.power_plant_id + '</strong>'
+                + '<span style="color:#546e7a;">' + (p.power_plant_name || p.display_name || '') + '</span>'
+                + '</span>';
+            }).join("");
+            panel.style.display = "block";
+          })
+          .catch(function() {});
+      }
+    });
+  })();
+  </script>
   <script src="js/pwa.js"></script>
   </body>
   </html>

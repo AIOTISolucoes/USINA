@@ -244,3 +244,445 @@ body {
   /* REMOVIDO: width:100% em topbar-left/right quebrava o CSS Grid do topbar */
   /* O layout.css gerencia o topbar mobile via grid-template-columns */
 }
+
+/* ================================
+   EXPLORADOR DE DADOS
+================================ */
+.explorer-shell {
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.explorer-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.explorer-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.explorer-header-left i {
+  font-size: 28px;
+  color: var(--accent-green);
+}
+
+.explorer-header h2 {
+  font-family: "Exo 2", sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.explorer-header p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 2px 0 0;
+}
+
+.explorer-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.explorer-ctrl-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.explorer-ctrl-group label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.explorer-ctrl-group select,
+.explorer-ctrl-group input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--text-main);
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 180px;
+}
+
+.explorer-ctrl-group select option {
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+.explorer-ctrl-group select:focus,
+.explorer-ctrl-group input:focus {
+  outline: none;
+  border-color: var(--accent-green);
+  box-shadow: 0 0 0 2px rgba(57,229,140,0.15);
+}
+
+.explorer-date-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.explorer-date-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.explorer-load-btn {
+  background: var(--accent-green);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.explorer-load-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.explorer-empty-state {
+  text-align: center;
+  padding: 80px 20px;
+  opacity: 0.7;
+}
+
+.explorer-empty-icon {
+  font-size: 48px;
+  color: var(--accent-green);
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.explorer-empty-state h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+  color: var(--text-main);
+}
+
+.explorer-empty-state p {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.explorer-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.explorer-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-soft);
+  border-top-color: var(--accent-green);
+  border-radius: 50%;
+  animation: explorerSpin 0.8s linear infinite;
+}
+
+@keyframes explorerSpin {
+  to { transform: rotate(360deg); }
+}
+
+.explorer-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  background: rgba(255,79,79,0.08);
+  border: 1px solid rgba(255,79,79,0.25);
+  border-radius: 10px;
+  color: #ff6b6b;
+  font-size: 14px;
+}
+
+.explorer-results-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.explorer-results-title {
+  font-family: "Exo 2", sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.explorer-results-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.explorer-export-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--accent-green);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.2s;
+}
+
+.explorer-export-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-green);
+}
+
+/* Cards (visao geral) */
+.explorer-cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.explorer-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  padding: 20px;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.explorer-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+}
+
+.explorer-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.explorer-card-header i {
+  font-size: 20px;
+}
+
+.explorer-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.explorer-card-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.explorer-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.explorer-stat-value {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* Tabela */
+.explorer-table-container {
+  overflow-x: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  cursor: pointer;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-green) transparent;
+  user-select: none;
+}
+
+.explorer-table-container:active {
+  cursor: grabbing;
+}
+
+.explorer-table td,
+.explorer-table th {
+  cursor: pointer;
+}
+
+.explorer-table-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.explorer-table-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.explorer-table-container::-webkit-scrollbar-thumb {
+  background: rgba(57, 229, 140, 0.3);
+  border-radius: 3px;
+}
+
+.explorer-table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(57, 229, 140, 0.5);
+}
+
+.explorer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.explorer-table th {
+  background: rgba(57,229,140,0.06);
+  color: var(--accent-green);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+}
+
+.explorer-table td {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  color: var(--text-main);
+  white-space: nowrap;
+}
+
+.explorer-table tr:hover td {
+  background: var(--accent-soft);
+}
+
+/* Paginacao */
+.explorer-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 0;
+}
+
+.explorer-page-btn {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  color: var(--accent-green);
+  padding: 6px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.explorer-page-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent-green);
+}
+
+.explorer-page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.explorer-page-info {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .explorer-shell {
+    padding: 12px;
+  }
+  .explorer-controls {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+    gap: 12px;
+  }
+  .explorer-ctrl-group select,
+  .explorer-ctrl-group input {
+    min-width: 100%;
+  }
+  .explorer-date-range {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .explorer-date-sep {
+    text-align: center;
+  }
+  .explorer-load-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .explorer-table {
+    font-size: 11px;
+  }
+  .explorer-table th {
+    padding: 8px 10px;
+    font-size: 10px;
+  }
+  .explorer-table td {
+    padding: 6px 10px;
+  }
+  .explorer-results-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .explorer-export-btn {
+    margin-left: 0;
+  }
+  .explorer-header h2 {
+    font-size: 18px;
+  }
+}

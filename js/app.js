@@ -23,7 +23,7 @@ function logout() {
 // =============================================================================
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const INVERTER_NO_COMM_AFTER_MS = 15 * 60 * 1000; // legado (chips usam status do mart)
-const DASHBOARD_REFRESH_INTERVAL_MS = 10000;
+const DASHBOARD_REFRESH_INTERVAL_MS = 30000;
 const DS_SERIES_PALETTE = [
   "#4da3ff", "#39e58c", "#ffd84d", "#ff8a65",
   "#b39ddb", "#80cbc4", "#f06292", "#aed581",
@@ -4375,7 +4375,9 @@ const views = {
   alarms: document.getElementById("alarmsView"),
   events: document.getElementById("eventsView"),
   diagram: document.getElementById("diagramView"),
-  datastudio: document.getElementById("dataStudioView")
+  datastudio: document.getElementById("dataStudioView"),
+  explorer: document.getElementById("explorerView"),
+  swagger: document.getElementById("swaggerView")
 };
 
 function syncTopSummaryLayout() {
@@ -4410,7 +4412,9 @@ function showView(viewName) {
     overview: "btnOverview",
     alarms: "btnAlarms",
     events: "btnEvents",
-    datastudio: "btnDataStudio"
+    datastudio: "btnDataStudio",
+    explorer: "btnExplorer",
+    swagger: "btnSwagger"
   };
   const activeBtn = document.getElementById(btnMap[viewName]);
   if (activeBtn) activeBtn.classList.add("active");
@@ -4430,6 +4434,10 @@ function showView(viewName) {
     populateDataStudioPlantSelect(lastValidPlants);
     syncDataStudioAggregationUI();
   }
+
+  if (viewName === "explorer") {
+    initExplorerOnce();
+  }
 }
 
 document.getElementById("btnOverview")?.addEventListener("click", () => showView("overview"));
@@ -4445,6 +4453,7 @@ document.getElementById("btnAlarms")?.addEventListener("click", async () => {
 
 document.getElementById("btnEvents")?.addEventListener("click", () => showView("events"));
 document.getElementById("btnDataStudio")?.addEventListener("click", () => showView("datastudio"));
+document.getElementById("btnExplorer")?.addEventListener("click", () => showView("explorer"));
 // Botão OS desabilitado temporariamente — não disponível para clientes ainda
 // document.getElementById("btnOS")?.addEventListener("click", () => {
 //   window.location.href = "os.html";
@@ -4485,14 +4494,18 @@ async function refreshDashboard() {
   let plants = [];
   let alarms = [];
 
-  try {
-    plants = await fetchPlants();
-    if (Array.isArray(plants) && plants.length > 0) {
-      lastValidPlants = plants;
-    }
-  } catch (err) {
-    console.error("Erro ao buscar plantas:", err);
-    plants = lastValidPlants;
+  const [plantsRes, alarmsRes, summaryRes] = await Promise.allSettled([
+    fetchPlants(),
+    fetchActiveAlarms(),
+    fetchPlantsSummary()
+  ]);
+
+  if (plantsRes.status === "fulfilled" && Array.isArray(plantsRes.value) && plantsRes.value.length > 0) {
+    plants = plantsRes.value;
+    lastValidPlants = plants;
+  } else {
+    if (plantsRes.status === "rejected") console.error("Erro ao buscar plantas:", plantsRes.reason);
+    plants = lastValidPlants.map(p => ({ ...p, updated_at: new Date().toISOString(), last_update: new Date().toISOString() }));
   }
 
   const dsViewEl = document.getElementById("dataStudioView");
@@ -4508,20 +4521,16 @@ async function refreshDashboard() {
   }
   populateEventsPlantSelect(lastValidPlants);
 
-  try {
-    const freshAlarms = await fetchActiveAlarms();
-    if (Array.isArray(freshAlarms)) {
-      alarms = freshAlarms;
-    }
-  } catch (err) {
-    console.error("Erro ao buscar alarmes ativos:", err);
+  if (alarmsRes.status === "fulfilled" && Array.isArray(alarmsRes.value)) {
+    alarms = alarmsRes.value;
+  } else {
+    if (alarmsRes.status === "rejected") console.error("Erro ao buscar alarmes ativos:", alarmsRes.reason);
   }
 
   if (alarms.length > 0 || lastAlarmSeverityByPlant.size === 0) {
     lastAlarmSeverityByPlant = buildPlantAlarmSeverityMap(alarms);
   }
 
-  // Ícone de alarme na sidebar pisca vermelho se houver qualquer alarme ativo
   const alarmBtn = document.getElementById("btnAlarms");
   if (alarmBtn) {
     if (lastAlarmSeverityByPlant.size > 0) {
@@ -4535,11 +4544,10 @@ async function refreshDashboard() {
     updatePortfolioCardAlarms();
   }
 
-  try {
-    const summary = await fetchPlantsSummary();
-    refreshTopChipsGlobalFromSummary(summary);
-  } catch (e) {
-    console.warn("[SUMMARY] falhou, fallback via /plants:", e?.message || e);
+  if (summaryRes.status === "fulfilled") {
+    refreshTopChipsGlobalFromSummary(summaryRes.value);
+  } else {
+    console.warn("[SUMMARY] falhou, fallback via /plants:", summaryRes.reason);
     refreshTopChipsGlobalFromPlants(lastValidPlants);
   }
   // topo sempre global: soma de todas as usinas visíveis para o usuário
@@ -4605,10 +4613,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!document.hidden) {
       await refreshDashboard();
     }
-  });
-
-  window.addEventListener("focus", async () => {
-    await refreshDashboard();
   });
 
   window.addEventListener("resize", () => {
@@ -6508,18 +6512,20 @@ function _appRondaRenderContent(data, el) {
       <div class="ronda-kpi"><span class="ronda-kpi-label">PR Acumulado ${_rondaInfoBtn(`${_rondaLabel("Performance Ratio — Acumulado no Mês")}<br>Consolida o PR de todos os dias do mês até a data selecionada.<br><br>${_rondaLabel("Fórmula:")}<br>${_rondaFormula("PR Acum. = Σ(Geração diária) / Σ(Cap. DC × Irradiação diária) × 100")}${_rondaNote("Dias sem irradiação são excluídos do cálculo.")}`)}</span><span class="ronda-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}%</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Fator Capac. Diário ${_rondaInfoBtn(`${_rondaLabel("Fator de Capacidade — Diário")}<br>Quanto a usina gerou em relação ao máximo teórico (potência nominal × 24h).<br><br>${_rondaLabel("Fórmula:")}<br>${_rondaFormula("FC = (Geração real [kWh]) / (Cap. DC [kWp] × 24h) × 100")}<br><br>${_rondaLabel("Referência:")}<br>Usinas fotovoltaicas no Nordeste: tipicamente <b>15–25%</b>.${_rondaNote("Diferente do PR, o FC não desconta a irradiação — reflete a proporção de uso em 24h.")}`)}</span><span class="ronda-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}%</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Início Geração</span><span class="ronda-kpi-value">${ps.gen_start_time || "—"}</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label">Fim Geração</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Últ. Atualização</span><span class="ronda-kpi-value">${ps.gen_end_time || "—"}</span></div>
     </div>
   </div>`;
 
   html += `<div class="ronda-section">
     <div class="ronda-section-title"><i class="fa-solid fa-cloud-sun"></i> Estação Solarimétrica</div>
     <div class="ronda-kpi-grid">
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Média da irradiância (W/m²) no plano do módulo (POA) durante horário solar. Prioridade: POA > GHI > genérico.">Irrad. Média</span><span class="ronda-kpi-value">${_appRondaFmt(w.irradiance_avg_wm2, 1)} W/m²</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Valor máximo instantâneo de irradiância (W/m²) registrado no dia.">Irrad. Máx</span><span class="ronda-kpi-value">${_appRondaFmt(w.irradiance_max_wm2, 1)} W/m²</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Temperatura ambiente média (°C) registrada pela estação meteorológica no dia.">Temp. Média</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)} °C</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Temperatura ambiente máxima (°C) registrada no dia.">Temp. Máx</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_max_c, 1)} °C</span></div>
-      <div class="ronda-kpi"><span class="ronda-kpi-label" title="Velocidade média do vento (m/s) registrada no dia.">Vento Méd</span><span class="ronda-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)} m/s</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">POA Méd</span><span class="ronda-kpi-value">${_appRondaFmt(w.poa_avg_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">GHI Méd</span><span class="ronda-kpi-value">${_appRondaFmt(w.ghi_avg_wm2, 1)} W/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">POA Acum.</span><span class="ronda-kpi-value">${_appRondaFmt(w.poa_acc_wh_m2, 1)} Wh/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">GHI Acum.</span><span class="ronda-kpi-value">${_appRondaFmt(w.ghi_acc_wh_m2, 1)} Wh/m²</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Média</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)} °C</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Temp. Máx</span><span class="ronda-kpi-value">${_appRondaFmt(w.air_temp_max_c, 1)} °C</span></div>
+      <div class="ronda-kpi"><span class="ronda-kpi-label">Vento Méd</span><span class="ronda-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)} m/s</span></div>
       <div class="ronda-kpi"><span class="ronda-kpi-label">Chuva</span><span class="ronda-kpi-value">${w.rain_detected ? "Sim" : "Não"}</span></div>
     </div>
   </div>`;
@@ -6575,14 +6581,21 @@ function _appRondaRenderContent(data, el) {
     html += `</div>`;
   }
 
-  if (alarms.length) {
-    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes (${data.alarm_count || alarms.length})</div>`;
-    alarms.slice(0, 20).forEach(a => {
-      const sevCls = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
-      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
-      html += `<div class="ronda-alarm-row"><div class="ronda-alarm-dot ${sevCls}"></div><div class="ronda-alarm-body"><div class="ronda-alarm-device">${a.device_name || "—"}</div><div class="ronda-alarm-desc">${a.description || a.code || "—"}</div><div class="ronda-alarm-ts">${ts}</div></div></div>`;
+  const trks = data.trackers || [];
+  if (trks.length) {
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-arrows-rotate"></i> Trackers (${trks.length})</div>`;
+    trks.forEach(t => {
+      const dev = t.avg_deviation != null ? t.avg_deviation.toFixed(1) + "°" : "—";
+      const devColor = (t.avg_deviation || 0) > 5 ? "#ef4444" : (t.avg_deviation || 0) > 2 ? "#eab308" : "#39e58c";
+      const pos = t.current_position != null ? t.current_position.toFixed(1) + "°" : "—";
+      const tgt = t.current_target != null ? t.current_target.toFixed(1) + "°" : "—";
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px;">
+        <span style="min-width:70px;font-weight:600;color:rgba(255,255,255,0.8);">${t.tracker_name || "Tracker"}</span>
+        <span style="color:rgba(255,255,255,0.5);">Pos: ${pos}</span>
+        <span style="color:rgba(255,255,255,0.5);">Alvo: ${tgt}</span>
+        <span style="font-weight:700;color:${devColor};">Desvio: ${dev}</span>
+      </div>`;
     });
-    if (alarms.length > 20) html += `<div style="text-align:center;font-size:10px;color:rgba(255,255,255,0.4);padding:6px;">+${alarms.length - 20} alarmes</div>`;
     html += `</div>`;
   }
 
@@ -6611,7 +6624,7 @@ function _appRondaDownloadCsv(data) {
   lines.push("PR Acumulado %," + (ps.pr_accumulated_pct || ""));
   lines.push("Fator Capacidade %," + (ps.capacity_factor_daily_pct || ""));
   lines.push("Inicio Geração," + (ps.gen_start_time || ""));
-  lines.push("Fim Geração," + (ps.gen_end_time || ""));
+  lines.push("Últ. Atualização Geração," + (ps.gen_end_time || ""));
   lines.push("");
   lines.push("ESTAÇÃO SOLARIMÉTRICA");
   lines.push("Irrad Media W/m2," + (w.irradiance_avg_wm2 || ""));
@@ -6715,8 +6728,23 @@ function _appRondaOpenFullPanel(data) {
   const prCls = (ps.pr_daily_pct || 0) >= 75 ? "val-good" : (ps.pr_daily_pct || 0) >= 60 ? "val-warn" : "val-bad";
 
   let body = '<div class="ronda-full-grid">';
-  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo da Usina</div><div class="ronda-card-subtitle">${data.date || ""}</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Diário</div><div class="ronda-full-kpi-value ${prCls}">${_appRondaFmt(ps.pr_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Acum.</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fator Capac. Diário</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Início</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_start_time || "—"}</div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fim</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_end_time || "—"}</div></div></div></div></div>`;
-  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">${w.irradiance_classification ? "Irradiância: " + w.irradiance_classification : ""}</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.irradiance_avg_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.irradiance_max_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_detected ? "Sim" : "Não"}</div></div></div></div></div>`;
+  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo da Usina</div><div class="ronda-card-subtitle">${data.date || ""}</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.generation_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Diário</div><div class="ronda-full-kpi-value ${prCls}">${_appRondaFmt(ps.pr_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Acum.</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.pr_accumulated_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Fator Capac. Diário</div><div class="ronda-full-kpi-value">${_appRondaFmt(ps.capacity_factor_daily_pct, 1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Início</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_start_time || "—"}</div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Últ. Atualização</div><div class="ronda-full-kpi-value" style="font-size:16px;">${ps.gen_end_time || "—"}</div></div></div></div></div>`;
+  body += `<div class="ronda-card"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Estação Solarimétrica</div><div class="ronda-card-subtitle">${w.irradiance_classification ? "Irradiância: " + w.irradiance_classification : ""}</div></div></div><div class="ronda-card-body">
+    <div class="ronda-full-kpi-row">
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">POA Méd</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.poa_avg_wm2, 1)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">GHI Méd</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.ghi_avg_wm2, 1)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.air_temp_avg_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+    </div>
+    <div class="ronda-full-kpi-row" style="margin-top:8px;">
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">POA Acum.</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.poa_acc_wh_m2, 1)}<span class="ronda-full-kpi-unit">Wh/m²</span></div></div>
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">GHI Acum.</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.ghi_acc_wh_m2, 1)}<span class="ronda-full-kpi-unit">Wh/m²</span></div></div>
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.wind_speed_avg, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div>
+    </div>
+    <div class="ronda-full-kpi-row" style="margin-top:8px;">
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Máx</div><div class="ronda-full-kpi-value">${_appRondaFmt(w.air_temp_max_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+      <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_detected ? "Sim" : "Não"}</div></div>
+    </div>
+  </div></div>`;
 
   if (invs.length) {
     body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Inversores</div><div class="ronda-card-subtitle">${invs.length} unidades</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Pot. Média</th><th>Pot. Máx</th><th>Energia</th><th>PR</th><th>Temp. Média</th><th>Performance</th><th>vs Média (Pot)</th><th>vs Média (PR)</th><th>Disponib.</th></tr></thead><tbody>`;
@@ -6754,17 +6782,42 @@ function _appRondaOpenFullPanel(data) {
     body += `</div></div>`;
   }
 
-  if (alarms.length) {
-    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes</div><div class="ronda-card-subtitle">${data.alarm_count || alarms.length} eventos</div></div></div><div class="ronda-card-body">`;
-    alarms.forEach(a => {
-      const sC = (a.severity === "high" || a.severity === "critical") ? "sev-high" : a.severity === "medium" ? "sev-medium" : "sev-low";
-      const ts = a.timestamp ? a.timestamp.replace(/T/, " ").slice(0, 19) : "";
-      const aL = a.is_active ? "Ativo" : "Resolvido";
-      const aC = a.is_active ? "is-active" : "is-resolved";
-      body += `<div class="ronda-full-alarm"><div class="ronda-full-alarm-severity ${sC}"></div><div class="ronda-full-alarm-body"><div class="ronda-full-alarm-device">${a.device_name || "—"}</div><div class="ronda-full-alarm-desc">${a.description || a.code || "—"}</div><div class="ronda-full-alarm-ts">${ts}</div></div><span class="ronda-full-alarm-active ${aC}">${aL}</span></div>`;
+  const _fTrks = data.trackers || [];
+  if (_fTrks.length) {
+    const svgTracker = '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><rect x="3" y="11" width="18" height="2" rx="1"/><path d="M12 6v5M8 4l4 2 4-2"/><circle cx="12" cy="19" r="2"/></svg>';
+    body += `<div class="ronda-card span-full"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgTracker}</div><div><div class="ronda-card-title">Trackers</div><div class="ronda-card-subtitle">${_fTrks.length} unidades</div></div></div><div class="ronda-card-body">`;
+    body += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">`;
+    _fTrks.forEach(t => {
+      const pos = t.current_position != null ? t.current_position : 0;
+      const tgt = t.current_target != null ? t.current_target : 0;
+      const dev = t.avg_deviation != null ? t.avg_deviation : 0;
+      const devColor = dev > 5 ? "#ef4444" : dev > 2 ? "#eab308" : "#39e58c";
+      const devStatus = dev > 5 ? "Desvio alto" : dev > 2 ? "Desvio moderado" : "Normal";
+      const angle = Math.max(-60, Math.min(60, pos));
+      body += `<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:12px;text-align:center;">
+        <div style="font-weight:700;font-size:12px;color:rgba(255,255,255,0.85);margin-bottom:8px;">${t.tracker_name || "Tracker"}</div>
+        <svg viewBox="0 0 120 80" width="120" height="80" style="display:block;margin:0 auto;">
+          <line x1="60" y1="75" x2="60" y2="30" stroke="rgba(255,255,255,0.15)" stroke-width="3" stroke-linecap="round"/>
+          <g transform="rotate(${angle}, 60, 30)">
+            <rect x="20" y="26" width="80" height="6" rx="2" fill="${devColor}" opacity="0.8">
+              <animateTransform attributeName="transform" type="rotate" from="${angle - 2} 60 30" to="${angle + 2} 60 30" dur="3s" repeatCount="indefinite" additive="sum" values="${angle - 2} 60 30;${angle + 2} 60 30;${angle - 2} 60 30"/>
+            </rect>
+            <circle cx="60" cy="29" r="4" fill="#facc15" opacity="0.6"/>
+          </g>
+          <circle cx="60" cy="75" r="3" fill="rgba(255,255,255,0.2)"/>
+          <text x="60" y="18" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.4)">☀</text>
+        </svg>
+        <div style="display:flex;justify-content:center;gap:14px;font-size:10px;margin-top:6px;">
+          <span style="color:rgba(255,255,255,0.5);">Pos: <strong style="color:rgba(255,255,255,0.85);">${pos.toFixed(1)}°</strong></span>
+          <span style="color:rgba(255,255,255,0.5);">Alvo: <strong style="color:rgba(255,255,255,0.85);">${tgt.toFixed(1)}°</strong></span>
+        </div>
+        <div style="font-size:10px;margin-top:4px;font-weight:700;color:${devColor};">Desvio: ${dev.toFixed(1)}° — ${devStatus}</div>
+        ${t.deviation_pct != null ? `<div style="font-size:9px;color:rgba(255,255,255,0.4);margin-top:2px;">${t.deviation_pct}% do tempo com desvio > 5°</div>` : ""}
+      </div>`;
     });
-    body += `</div></div>`;
+    body += `</div></div></div>`;
   }
+
   body += "</div>";
 
   const bodyEl = document.getElementById("rondaFullBody");
@@ -6917,18 +6970,16 @@ function _appReportRenderMini(data, el) {
     html += `</div>`;
   }
 
-  const totalAlarms = data.total_alarms || 0;
-  const critCount = alarms.reduce((s, a) => s + (a.critical_count || 0), 0);
-  const medCount = alarms.reduce((s, a) => s + (a.medium_count || 0), 0);
-  const lowCount = alarms.reduce((s, a) => s + (a.low_count || 0), 0);
-  html += `<div class="ronda-section">
-    <div class="ronda-section-title"><i class="fa-solid fa-bell"></i> Alarmes — ${totalAlarms} ocorrências</div>
-    <div style="display:flex;gap:12px;font-size:11px;">
-      <span style="color:#ef4444;">● ${critCount} críticos</span>
-      <span style="color:#eab308;">● ${medCount} médios</span>
-      <span style="color:#3b82f6;">● ${lowCount} baixos</span>
-    </div>
-  </div>`;
+  const _mTrks = data.trackers || [];
+  if (_mTrks.length) {
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-arrows-rotate"></i> Trackers (${_mTrks.length})</div>`;
+    _mTrks.forEach(t => {
+      const dev = t.avg_deviation != null ? t.avg_deviation.toFixed(1) + "°" : "—";
+      const devColor = (t.avg_deviation || 0) > 5 ? "#ef4444" : (t.avg_deviation || 0) > 2 ? "#eab308" : "#39e58c";
+      html += `<div style="display:flex;align-items:center;gap:8px;padding:2px 0;font-size:11px;"><span style="min-width:70px;font-weight:600;color:rgba(255,255,255,0.8);">${t.tracker_name || "Tracker"}</span><span style="font-weight:700;color:${devColor};">Desvio: ${dev}</span><span style="color:rgba(255,255,255,0.4);">${t.deviation_pct != null ? t.deviation_pct + "% >5°" : ""}</span></div>`;
+    });
+    html += `</div>`;
+  }
 
   html += `<div class="ronda-toolbar">
     <button class="ronda-btn" id="appReportExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
@@ -7221,27 +7272,31 @@ function _appReportOpenFullPanel(data) {
     </div>
   </div>`;
 
-  // Card: Alarmes por Dispositivo
-  body += `<div class="ronda-card" style="${cardDelay()}">
-    <div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes por Dispositivo ${_rondaInfoBtn(`${_rondaLabel('Alarmes por Dispositivo')} — Contagem de alarmes agrupados por dispositivo no período.<br>${_rondaLabel('Crít.')}: alarmes de severidade alta/crítica<br>${_rondaLabel('Méd.')}: alarmes de severidade média<br>${_rondaNote('Linhas com 3+ alarmes críticos ganham destaque vermelho. O alarme mais frequente de cada dispositivo é identificado para diagnóstico.')}`)}</div><div class="ronda-card-subtitle">${data.total_alarms || 0} ocorrências</div></div></div>
-    <div class="ronda-card-body">`;
-  if (alarms.length) {
-    body += `<table style="width:100%;border-collapse:collapse;font-size:11.5px;">
-      <thead><tr><th style="text-align:left;padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Dispositivo</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Crít.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Méd.</th><th style="padding:4px 6px;font-size:10px;color:rgba(255,255,255,0.35);border-bottom:1px solid rgba(255,255,255,0.08);">Total</th></tr></thead><tbody>`;
-    alarms.forEach(a => {
-      const glow = (a.critical_count || 0) >= 3 ? "box-shadow:inset 0 0 12px rgba(239,68,68,0.08);" : "";
-      body += `<tr style="${glow}">
-        <td style="padding:4px 6px;font-weight:600;color:rgba(255,255,255,0.85);">${a.device_name || "—"} <span style="font-size:9px;font-weight:400;color:rgba(255,255,255,0.3);">${a.device_type || ""}</span></td>
-        <td style="padding:4px 6px;text-align:center;color:#ef4444;font-weight:800;">${a.critical_count || 0}</td>
-        <td style="padding:4px 6px;text-align:center;color:#eab308;">${a.medium_count || 0}</td>
-        <td style="padding:4px 6px;text-align:center;"><span style="background:rgba(255,255,255,0.06);border-radius:10px;padding:2px 8px;">${a.total_count || 0}</span></td>
+  // Card: Trackers (if any)
+  const _rpTrks = data.trackers || [];
+  if (_rpTrks.length) {
+    const svgTrk = '<svg viewBox="0 0 24 24" fill="none" stroke="#facc15" stroke-width="2"><rect x="3" y="11" width="18" height="2" rx="1"/><path d="M12 6v5M8 4l4 2 4-2"/><circle cx="12" cy="19" r="2"/></svg>';
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgTrk}</div><div><div class="ronda-card-title">Trackers ${_rondaInfoBtn(`${_rondaLabel('Trackers')} — Posicionamento dos seguidores solares no período.<br>${_rondaFormula('Desvio = |Posição Atual - Posição Alvo|')}<br>🟢 ≤ 2° Normal&emsp;🟡 2°-5° Moderado&emsp;🔴 > 5° Alto<br>${_rondaNote('Sparkline mostra evolução do desvio médio diário. % de tempo com desvio > 5° indica frequência do problema.')}`)}</div><div class="ronda-card-subtitle">${_rpTrks.length} unidades</div></div></div>
+      <div class="ronda-card-body"><div style="overflow-x:auto;">
+        <table class="ronda-full-inv-table">
+          <thead><tr><th>Tracker</th><th>Pos. Média</th><th>Alvo Médio</th><th>Desvio Méd</th><th>Desvio Máx</th><th>% Desvio>5°</th><th>Tend.</th></tr></thead>
+          <tbody>`;
+    _rpTrks.forEach(t => {
+      const devColor = (t.avg_deviation||0) > 5 ? "#ef4444" : (t.avg_deviation||0) > 2 ? "#eab308" : "#39e58c";
+      const sparkColor = (t.avg_deviation||0) > 5 ? "#ef4444" : "#facc15";
+      body += `<tr>
+        <td style="font-weight:600;">${t.tracker_name || "Tracker"}</td>
+        <td>${_rpFmt(t.avg_position, 1)}°</td>
+        <td>${_rpFmt(t.avg_target, 1)}°</td>
+        <td style="font-weight:700;color:${devColor};">${_rpFmt(t.avg_deviation, 1)}°</td>
+        <td>${_rpFmt(t.max_deviation, 1)}°</td>
+        <td>${_rpFmt(t.deviation_pct, 1)}%</td>
+        <td>${_rpMiniSparkline(t.daily_deviation || [], sparkColor)}</td>
       </tr>`;
     });
-    body += `</tbody></table>`;
-  } else {
-    body += `<div style="color:rgba(255,255,255,0.4);font-style:italic;font-size:12px;">Nenhuma ocorrência no período</div>`;
+    body += `</tbody></table></div></div></div>`;
   }
-  body += `</div></div>`;
 
   // Card: Diagnóstico (full width)
   if (diag.length) {
@@ -7354,4 +7409,316 @@ function wireRobotAssistant() {
     const el = document.getElementById("robotAssistant");
     if (ROBOT_STATE.reportOpen && el && !el.contains(e.target)) robotToggleReport(false);
   });
+}
+
+// =============================================================================
+// EXPLORADOR DE DADOS (CLIENTE-FRIENDLY)
+// =============================================================================
+let _explorerInited = false;
+let _explorerOffset = 0;
+
+function initExplorerOnce() {
+  if (_explorerInited) return;
+  _explorerInited = true;
+
+  const plantSel = document.getElementById("explorerPlantSelect");
+  const dataType = document.getElementById("explorerDataType");
+  const loadBtn = document.getElementById("explorerLoadBtn");
+  const prevBtn = document.getElementById("explorerPrevBtn");
+  const nextBtn = document.getElementById("explorerNextBtn");
+  const exportBtn = document.getElementById("explorerExportCsv");
+
+  _explorerPopulatePlants(plantSel);
+
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const fmt = d => d.toISOString().slice(0, 16);
+  const startInput = document.getElementById("explorerStartDate");
+  const endInput = document.getElementById("explorerEndDate");
+  if (!startInput.value) startInput.value = fmt(yesterday);
+  if (!endInput.value) endInput.value = fmt(now);
+
+  const tableContainer = document.getElementById("explorerTableContainer");
+  if (tableContainer) {
+    let isDragging = false, startX = 0, scrollLeft = 0;
+
+    tableContainer.addEventListener("mousedown", e => {
+      isDragging = true;
+      startX = e.pageX - tableContainer.offsetLeft;
+      scrollLeft = tableContainer.scrollLeft;
+      tableContainer.style.cursor = "grabbing";
+    });
+
+    tableContainer.addEventListener("mouseleave", () => {
+      isDragging = false;
+      tableContainer.style.cursor = "";
+    });
+
+    tableContainer.addEventListener("mouseup", () => {
+      isDragging = false;
+      tableContainer.style.cursor = "";
+    });
+
+    tableContainer.addEventListener("mousemove", e => {
+      if (!isDragging) return;
+      e.preventDefault();
+      const x = e.pageX - tableContainer.offsetLeft;
+      tableContainer.scrollLeft = scrollLeft - (x - startX);
+    });
+  }
+
+  loadBtn.addEventListener("click", () => { _explorerOffset = 0; _explorerLoad(); });
+  prevBtn.addEventListener("click", () => {
+    const limit = parseInt(document.getElementById("explorerLimit").value) || 50;
+    _explorerOffset = Math.max(0, _explorerOffset - limit);
+    _explorerLoad();
+  });
+  nextBtn.addEventListener("click", () => {
+    const limit = parseInt(document.getElementById("explorerLimit").value) || 50;
+    _explorerOffset += limit;
+    _explorerLoad();
+  });
+  exportBtn.addEventListener("click", _explorerExportCsv);
+}
+
+async function _explorerPopulatePlants(sel) {
+  try {
+    const res = await apiFetch("/plants");
+    const data = await res.json();
+    const plants = data.items || data || [];
+    plants.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.power_plant_id;
+      opt.textContent = p.power_plant_name || p.display_name || `Usina ${p.power_plant_id}`;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    console.error("[Explorer] erro ao carregar usinas:", e);
+  }
+}
+
+async function _explorerLoad() {
+  const plantId = document.getElementById("explorerPlantSelect").value;
+  const dataType = document.getElementById("explorerDataType").value;
+
+  if (!plantId) {
+    _explorerShowError("Selecione uma usina para consultar.");
+    return;
+  }
+
+  _explorerShowLoading();
+
+  try {
+    const result = await _explorerLoadRaw(plantId, dataType);
+    if (result) _explorerShowResults(result);
+
+  } catch (e) {
+    console.error("[Explorer] erro:", e);
+    _explorerShowError("Erro ao carregar dados: " + e.message);
+  }
+}
+
+async function _explorerLoadRaw(plantId, tableName) {
+  const plantName = document.getElementById("explorerPlantSelect").selectedOptions[0]?.textContent || "";
+  const limit = parseInt(document.getElementById("explorerLimit").value) || 50;
+  const startVal = document.getElementById("explorerStartDate").value;
+  const endVal = document.getElementById("explorerEndDate").value;
+
+  const friendlyTable = {
+    raw_inverter: "Inversores", raw_relay: "Reles", raw_meter: "Multimedidores",
+    raw_weather_station: "Est. Meteorologica", raw_tracker: "Trackers",
+    raw_transformer: "Transformadores", raw_nobreak: "Nobreaks", raw_logger: "Loggers"
+  };
+
+  let effectiveStart = startVal;
+  if (!effectiveStart) {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    effectiveStart = yesterday.toISOString().slice(0, 16);
+  }
+
+  let url = `/raw/query?table=${encodeURIComponent(tableName)}&plant_id=${encodeURIComponent(plantId)}&limit=${limit}&offset=${_explorerOffset}`;
+  url += `&start=${encodeURIComponent(effectiveStart)}`;
+  if (endVal) url += `&end=${encodeURIComponent(endVal)}`;
+
+  let res;
+  try {
+    res = await apiFetch(url);
+  } catch (fetchErr) {
+    console.error("[Explorer] fetch /raw/query falhou:", fetchErr);
+    throw new Error(
+      "Dados brutos indisponiveis no momento. A rota /raw/query precisa ser adicionada no API Gateway. " +
+      "Use o Data Studio para consultar dados historicos processados."
+    );
+  }
+
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`;
+    try {
+      const errBody = await res.json();
+      errMsg = errBody.error || errBody.message || errMsg;
+    } catch {}
+    if (res.status === 404) {
+      throw new Error(
+        "Dados brutos indisponiveis: a rota /raw/query nao esta configurada no API Gateway. " +
+        "Entre em contato com o suporte tecnico para habilitar esta funcionalidade."
+      );
+    }
+    throw new Error(`Erro ao consultar dados brutos: ${errMsg}`);
+  }
+
+  const data = await res.json();
+  const items = data.items || [];
+  const total = data.total || 0;
+
+  const SKIP_RAW_KEYS = new Set(["mqtt_topic", "device_type", "received_at", "timestamp"]);
+
+  const RAW_LABELS = {
+    active_power: "Potencia Ativa (kW)", power_dc: "Potencia DC (kW)",
+    voltage_dc: "Tensao DC (V)", frequency: "Frequencia (Hz)",
+    efficiency: "Eficiencia (%)", power_factor: "Fator de Potencia",
+    total_energy: "Energia Total (kWh)", apparent_power: "Pot. Aparente (kVA)",
+    reactive_power: "Pot. Reativa (kvar)", isolation: "Isolamento (MOhm)",
+    temperature: "Temperatura (C)", irradiance: "Irradiancia (W/m2)",
+    wind_speed: "Vel. Vento (m/s)", humidity: "Umidade (%)",
+    ambient_temperature: "Temp. Ambiente (C)", module_temperature: "Temp. Modulo (C)",
+  };
+
+  const allKeys = new Set();
+  items.forEach(item => {
+    Object.keys(item.json_data || {}).forEach(k => {
+      if (!SKIP_RAW_KEYS.has(k.toLowerCase())) allKeys.add(k);
+    });
+  });
+
+  const idKeys = [];
+  const otherKeys = [];
+  allKeys.forEach(k => {
+    if (/^ID\d+$/i.test(k)) idKeys.push(k);
+    else otherKeys.push(k);
+  });
+  idKeys.sort((a, b) => parseInt(a.replace(/\D/g, "")) - parseInt(b.replace(/\D/g, "")));
+  const sortedKeys = [...otherKeys, ...idKeys];
+
+  const rows = items.map(item => {
+    const jd = item.json_data || {};
+    const base = {
+      "Data/Hora": _explorerFormatTs(item.timestamp),
+      "Dispositivo": item.device_id,
+    };
+    sortedKeys.forEach(k => {
+      const v = jd[k];
+      const label = RAW_LABELS[k.toLowerCase()] || _explorerFriendlyKey(k);
+      if (v == null) { base[label] = "—"; return; }
+      base[label] = typeof v === "number" && !Number.isInteger(v) ? parseFloat(v).toFixed(2) : v;
+    });
+    return base;
+  });
+
+  const hasMore = data.has_more === true;
+
+  return {
+    type: "table",
+    title: `Dados Brutos: ${friendlyTable[tableName] || tableName} - ${plantName}`,
+    rows,
+    count: items.length > 0 ? `${_explorerOffset + 1}-${_explorerOffset + items.length}` : 0,
+    pagination: { total: hasMore ? _explorerOffset + limit + 1 : _explorerOffset + items.length, limit, offset: _explorerOffset, hasMore }
+  };
+}
+
+function _explorerFriendlyKey(k) {
+  return k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function _explorerFormatTs(ts) {
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
+  } catch { return ts; }
+}
+
+function _explorerStatusLabel(s) {
+  const map = { RUNNING: "Em Operacao", OFF: "Desligado", NO_COMM: "Sem Comunicacao", UNKNOWN: "Desconhecido" };
+  return map[s] || s;
+}
+
+function _explorerShowLoading() {
+  document.getElementById("explorerEmpty").style.display = "none";
+  document.getElementById("explorerError").style.display = "none";
+  document.getElementById("explorerResults").style.display = "none";
+  document.getElementById("explorerLoading").style.display = "";
+}
+
+function _explorerShowError(msg) {
+  document.getElementById("explorerEmpty").style.display = "none";
+  document.getElementById("explorerLoading").style.display = "none";
+  document.getElementById("explorerResults").style.display = "none";
+  document.getElementById("explorerError").style.display = "";
+  document.getElementById("explorerErrorMsg").textContent = msg;
+}
+
+function _explorerShowResults(result) {
+  document.getElementById("explorerEmpty").style.display = "none";
+  document.getElementById("explorerLoading").style.display = "none";
+  document.getElementById("explorerError").style.display = "none";
+  document.getElementById("explorerResults").style.display = "";
+
+  document.getElementById("explorerResultsTitle").textContent = result.title;
+  document.getElementById("explorerResultsCount").textContent =
+    result.count > 0 ? `${result.count} registro(s)` : "";
+
+  const tableEl = document.getElementById("explorerTableContainer");
+  const paginationEl = document.getElementById("explorerPagination");
+
+  tableEl.style.display = "none";
+  paginationEl.style.display = "none";
+
+  if (result.type === "table" && result.rows.length > 0) {
+    tableEl.style.display = "";
+    const cols = Object.keys(result.rows[0]);
+    document.getElementById("explorerTableHead").innerHTML =
+      "<tr>" + cols.map(c => `<th>${c}</th>`).join("") + "</tr>";
+    document.getElementById("explorerTableBody").innerHTML =
+      result.rows.map(row => "<tr>" + cols.map(c => `<td>${row[c] ?? "—"}</td>`).join("") + "</tr>").join("");
+  } else if (result.type === "table" && result.rows.length === 0) {
+    tableEl.style.display = "";
+    document.getElementById("explorerTableHead").innerHTML = "";
+    document.getElementById("explorerTableBody").innerHTML =
+      '<tr><td style="padding:20px;text-align:center;opacity:.6">Nenhum registro encontrado para o periodo selecionado.</td></tr>';
+  }
+
+  if (result.pagination) {
+    const p = result.pagination;
+    paginationEl.style.display = "";
+    const pageNum = Math.floor(p.offset / p.limit) + 1;
+    document.getElementById("explorerPageInfo").textContent = `Pagina ${pageNum}`;
+    document.getElementById("explorerPrevBtn").disabled = p.offset === 0;
+    document.getElementById("explorerNextBtn").disabled = !p.hasMore;
+  }
+
+  window._explorerLastResult = result;
+}
+
+function _explorerExportCsv() {
+  const result = window._explorerLastResult;
+  if (!result || result.type !== "table" || !result.rows.length) return;
+
+  const cols = Object.keys(result.rows[0]);
+  const sep = ";";
+  const csvLines = [cols.join(sep)];
+  result.rows.forEach(row => {
+    csvLines.push(cols.map(c => {
+      let v = String(row[c] ?? "");
+      if (v.includes(sep) || v.includes('"') || v.includes("\n")) v = '"' + v.replace(/"/g, '""') + '"';
+      return v;
+    }).join(sep));
+  });
+
+  const blob = new Blob(["﻿" + csvLines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `explorador_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
