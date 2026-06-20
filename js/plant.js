@@ -4665,6 +4665,8 @@ function ensureMultimeterUiScaffold() {
 
   if (legacyRight) legacyRight.style.display = "none";
 
+  const detailsPanel = document.getElementById("multimeterDetailsPanel");
+
   if (leftBlock && onlineBadge && onlineBadge.parentElement !== leftBlock) {
     leftBlock.appendChild(onlineBadge);
   }
@@ -4674,6 +4676,14 @@ function ensureMultimeterUiScaffold() {
 
   row.classList.add("relay-row--table");
   row.style.gridTemplateColumns = "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px";
+
+  let expandIcon = row.querySelector("#multimeterExpandIcon");
+  if (!expandIcon) {
+    expandIcon = document.createElement("i");
+    expandIcon.id = "multimeterExpandIcon";
+    expandIcon.className = "fa-solid fa-chevron-down relay-expand-icon";
+    if (leftBlock) leftBlock.appendChild(expandIcon);
+  }
 
   const ensureMetricCell = (id, gridColumn) => {
     let el = row.querySelector(`#${id}`);
@@ -4706,13 +4716,36 @@ function ensureMultimeterUiScaffold() {
     if (!_canSendCommand()) commandBarWrap.style.visibility = "hidden";
   }
 
+  if (detailsPanel) {
+    detailsPanel.style.maxHeight = detailsPanel.classList.contains("open") ? "1200px" : "0px";
+  }
+
+  if (!row.dataset.toggleBound) {
+    row.dataset.toggleBound = "true";
+    row.addEventListener("click", (event) => {
+      if (
+        event.target.closest("#multimeterCommandBarWrap") ||
+        event.target.closest(".device-command-control") ||
+        event.target.closest(".device-command-popover")
+      ) return;
+
+      const nextOpen = !detailsPanel?.classList.contains("open");
+      row.classList.toggle("open", nextOpen);
+      detailsPanel?.classList.toggle("open", nextOpen);
+      if (detailsPanel) {
+        detailsPanel.style.maxHeight = nextOpen ? "1200px" : "0px";
+      }
+    });
+  }
+
   return {
     row,
     onlineBadge,
     activePowerEl,
     apparentPowerEl,
     reactivePowerEl,
-    tsEl
+    tsEl,
+    detailsPanel
   };
 }
 
@@ -4825,11 +4858,65 @@ function renderRelayCard(relayItem) {
   renderRelayCommandBar(deviceId, relayState);
 }
 
+function renderMultimeterDetailsPanel(item) {
+  const panel = document.getElementById("multimeterDetailsPanel");
+  if (!panel) return;
+
+  if (!item) {
+    panel.innerHTML = `<div class="relay-details-empty">Sem dados detalhados do multimedidor.</div>`;
+    return;
+  }
+
+  const analog = item?.analog ?? {};
+  const metric = (keys, unit, digits = 1) => formatMetricValue(pickDeviceMetricValue(item, analog, keys), unit, digits);
+
+  const electricalItems = [
+    ["V AB", metric(["voltage_ab_v", "voltage_ab", "line_voltage_ab_v", "volt_uab_line", "vab"], "V", 1)],
+    ["V BC", metric(["voltage_bc_v", "voltage_bc", "line_voltage_bc_v", "volt_ubc_line", "vbc"], "V", 1)],
+    ["V CA", metric(["voltage_ca_v", "voltage_ca", "line_voltage_ca_v", "volt_uca_line", "vca"], "V", 1)],
+    ["Ia", metric(["current_a_a", "current_a", "current_a_phase_a", "ia"], "A", 1)],
+    ["Ib", metric(["current_b_a", "current_b", "current_b_phase_b", "ib"], "A", 1)],
+    ["Ic", metric(["current_c_a", "current_c", "current_c_phase_c", "ic"], "A", 1)],
+  ];
+
+  const extraItems = [
+    ["Fator de Potencia", metric(["power_factor", "fp"], "", 3)],
+    ["Frequencia", metric(["frequency_hz", "frequency", "freq"], "Hz", 2)],
+    ["Energia Importada", metric(["energy_import_kwh", "energy_imp_kwh", "imported_active_energy_kwh"], "kWh", 1)],
+    ["Energia Exportada", metric(["energy_export_kwh", "energy_exp_kwh", "exported_active_energy_kwh"], "kWh", 1)],
+  ];
+
+  panel.innerHTML = `
+    <div class="relay-details-card">
+      <div class="relay-details-title">Leituras eletricas</div>
+      <div class="relay-details-grid">
+        ${electricalItems.map(([label, value]) => `
+          <div class="relay-detail-chip">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="relay-details-card">
+      <div class="relay-details-title">Medidas complementares</div>
+      <div class="relay-details-grid">
+        ${extraItems.map(([label, value]) => `
+          <div class="relay-detail-chip">
+            <span>${label}</span>
+            <strong>${value}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderMultimeterCard(item) {
   const ui = ensureMultimeterUiScaffold();
   if (!ui) return;
 
-  const { row, onlineBadge, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl } = ui;
+  const { row, onlineBadge, activePowerEl, apparentPowerEl, reactivePowerEl, tsEl, detailsPanel } = ui;
   const dot = document.getElementById("multimeterDot");
   ensureDeviceMiniHeaders();
 
@@ -4842,6 +4929,11 @@ function renderMultimeterCard(item) {
     reactivePowerEl.textContent = "—";
     tsEl.textContent = "—";
     if (dot) dot.style.opacity = "0.65";
+    if (detailsPanel) {
+      detailsPanel.classList.remove("open");
+      detailsPanel.style.maxHeight = "0px";
+    }
+    renderMultimeterDetailsPanel(null);
     renderMultimeterCommandBar(null);
     return;
   }
@@ -4869,6 +4961,7 @@ function renderMultimeterCard(item) {
   apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
   reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
   tsEl.textContent = fmtDatePtBR(lastUpdate);
+  renderMultimeterDetailsPanel(item);
 }
 
 // ======================================================

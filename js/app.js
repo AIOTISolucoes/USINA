@@ -3767,17 +3767,25 @@ async function loadFavoriteSelections(favs) {
     }
   }
 
+  // Atualizar datas para hoje (não ficar preso na data antiga)
+  if (typeof dsAutoSetDateRange === "function") dsAutoSetDateRange();
+
   // Buscar séries de TODOS os favoritos e mergear por planta
   setDataStudioLoadingSeries(true);
   try {
     DATASTUDIO_STATE.seriesByPlant = {};
+
+    const filters = getDataStudioMainFilters();
+    const dateOverrides = {};
+    if (filters.start_ts) dateOverrides.start_ts = filters.start_ts;
+    if (filters.end_ts) dateOverrides.end_ts = filters.end_ts;
 
     for (const [pid, plantFavs] of Object.entries(favsByPlant)) {
       let mergedSeries = [];
       console.log(`[datastudio] planta ${pid}: carregando ${plantFavs.length} favorito(s)`);
 
       for (const fav of plantFavs) {
-        const params = new URLSearchParams({ selection_id: String(fav.id) });
+        const params = new URLSearchParams({ selection_id: String(fav.id), ...dateOverrides });
         const res = await apiFetch(`/datastudio/series?${params.toString()}`);
         if (!res.ok) throw new Error(`Falha ao carregar séries para fav ${fav.id} (${res.status})`);
         const data = await res.json();
@@ -3790,7 +3798,6 @@ async function loadFavoriteSelections(favs) {
       }
 
       console.log(`[datastudio] planta ${pid}: total ${mergedSeries.length} série(s) mergeadas`);
-      // Monta payload mergeado
       const mergedPayload = { series: mergedSeries };
       DATASTUDIO_STATE.seriesByPlant[pid] = mergedPayload;
 
@@ -3829,8 +3836,13 @@ async function fetchDataStudioSeriesBySelection() {
   try {
     DATASTUDIO_STATE.seriesByPlant = {};
 
+    const filters = getDataStudioMainFilters();
+    const dateOverrides = {};
+    if (filters.start_ts) dateOverrides.start_ts = filters.start_ts;
+    if (filters.end_ts) dateOverrides.end_ts = filters.end_ts;
+
     for (const [plantId, selId] of selEntries) {
-      const params = new URLSearchParams({ selection_id: String(selId) });
+      const params = new URLSearchParams({ selection_id: String(selId), ...dateOverrides });
       const res = await apiFetch(`/datastudio/series?${params.toString()}`);
       if (!res.ok) throw new Error(`Falha ao carregar séries (${res.status})`);
 
