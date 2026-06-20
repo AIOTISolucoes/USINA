@@ -77,9 +77,35 @@
           </div>
 
           <div class="topbar-right">
+            <div class="notif-bell-wrap" id="notifBellWrap">
+              <button class="notif-bell-btn" id="notifBellBtn" type="button" title="Atualizações">
+                <i class="fa-solid fa-bell"></i>
+                <span class="notif-bell-badge" id="notifBellBadge" style="display:none"></span>
+              </button>
+              <div class="notif-panel" id="notifPanel" style="display:none">
+                <div class="notif-panel-header">
+                  <span>Atualizações</span>
+                  <button class="notif-panel-close" id="notifPanelClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="notif-panel-list" id="notifPanelList">
+                  <p class="notif-empty">Nenhuma atualização.</p>
+                </div>
+              </div>
+            </div>
             <div class="user-pill">
               <div class="avatar" id="userAvatar">—</div>
               <span id="userDisplayName">—</span>
+            </div>
+          </div>
+
+          <div class="notif-modal-overlay" id="notifModalOverlay" style="display:none">
+            <div class="notif-modal">
+              <div class="notif-modal-header">
+                <i class="fa-solid fa-sparkles"></i>
+                <span>Novidades na plataforma</span>
+              </div>
+              <div class="notif-modal-body" id="notifModalBody"></div>
+              <button class="notif-modal-close-btn" id="notifModalCloseBtn" type="button">Entendido</button>
             </div>
           </div>
         </header>

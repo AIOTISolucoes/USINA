@@ -7803,3 +7803,140 @@ function _explorerRenderLegend(items) {
     </div>`;
   }).join("");
 }
+
+// =============================================================================
+// SISTEMA DE ATUALIZAÇÕES (SININHO + MODAL)
+// =============================================================================
+const NOTIF_STORAGE_KEY = "platform_last_seen_update";
+
+async function initPlatformUpdates() {
+  const bellBtn = document.getElementById("notifBellBtn");
+  const panel = document.getElementById("notifPanel");
+  const closeBtn = document.getElementById("notifPanelClose");
+  const modalOverlay = document.getElementById("notifModalOverlay");
+  const modalCloseBtn = document.getElementById("notifModalCloseBtn");
+  if (!bellBtn) return;
+
+  bellBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = panel.style.display !== "none";
+    panel.style.display = open ? "none" : "";
+  });
+
+  if (closeBtn) closeBtn.addEventListener("click", () => { panel.style.display = "none"; });
+
+  document.addEventListener("click", (e) => {
+    if (panel.style.display !== "none" && !e.target.closest(".notif-bell-wrap")) {
+      panel.style.display = "none";
+    }
+  });
+
+  if (modalCloseBtn) {
+    modalCloseBtn.addEventListener("click", () => {
+      modalOverlay.style.display = "none";
+      _notifMarkAllSeen();
+    });
+  }
+  if (modalOverlay) {
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) {
+        modalOverlay.style.display = "none";
+        _notifMarkAllSeen();
+      }
+    });
+  }
+
+  await _notifFetchAndRender();
+}
+
+let _notifAllUpdates = [];
+
+async function _notifFetchAndRender() {
+  try {
+    const res = await apiFetch("/platform/updates?limit=20");
+    if (!res.ok) return;
+    const data = await res.json();
+    _notifAllUpdates = data.items || [];
+  } catch (e) {
+    console.warn("[updates] fetch falhou:", e);
+    return;
+  }
+
+  if (!_notifAllUpdates.length) return;
+
+  const lastSeen = parseInt(localStorage.getItem(NOTIF_STORAGE_KEY) || "0");
+  const unseen = _notifAllUpdates.filter(u => u.id > lastSeen);
+
+  _notifRenderBadge(unseen.length);
+  _notifRenderPanel(_notifAllUpdates, lastSeen);
+
+  if (unseen.length > 0) {
+    _notifShowModal(unseen);
+  }
+}
+
+function _notifRenderBadge(count) {
+  const badge = document.getElementById("notifBellBadge");
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 9 ? "9+" : String(count);
+    badge.style.display = "";
+  } else {
+    badge.style.display = "none";
+  }
+}
+
+function _notifRenderPanel(updates, lastSeen) {
+  const list = document.getElementById("notifPanelList");
+  if (!list) return;
+
+  if (!updates.length) {
+    list.innerHTML = '<p class="notif-empty">Nenhuma atualização.</p>';
+    return;
+  }
+
+  list.innerHTML = updates.map(u => {
+    const isUnread = u.id > lastSeen;
+    const d = u.created_at ? new Date(u.created_at).toLocaleDateString("pt-BR") : "";
+    return `<div class="notif-item${isUnread ? " unread" : ""}">
+      <div class="notif-item-title">${_notifEsc(u.title)}</div>
+      <div class="notif-item-desc">${_notifEsc(u.description || "")}</div>
+      ${d ? `<div class="notif-item-date">${d}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function _notifShowModal(unseen) {
+  const overlay = document.getElementById("notifModalOverlay");
+  const body = document.getElementById("notifModalBody");
+  if (!overlay || !body) return;
+
+  body.innerHTML = unseen.map(u => {
+    const d = u.created_at ? new Date(u.created_at).toLocaleDateString("pt-BR") : "";
+    return `<div class="notif-modal-entry">
+      <div class="notif-modal-entry-title">${_notifEsc(u.title)}</div>
+      <div class="notif-modal-entry-desc">${_notifEsc(u.description || "")}</div>
+      ${d ? `<div class="notif-modal-entry-date">${d}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  overlay.style.display = "";
+}
+
+function _notifMarkAllSeen() {
+  if (!_notifAllUpdates.length) return;
+  const maxId = Math.max(..._notifAllUpdates.map(u => u.id));
+  localStorage.setItem(NOTIF_STORAGE_KEY, String(maxId));
+  _notifRenderBadge(0);
+  _notifRenderPanel(_notifAllUpdates, maxId);
+}
+
+function _notifEsc(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(initPlatformUpdates, 1500);
+});
