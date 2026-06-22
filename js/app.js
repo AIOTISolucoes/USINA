@@ -7891,15 +7891,15 @@ async function tkPopulatePlants() {
       const res = await apiFetch("/plants");
       if (res.ok) {
         const data = await res.json();
-        plants = data.plants || data.items || [];
+        plants = Array.isArray(data) ? data : (data.plants || data.items || []);
       }
     } catch (e) { console.warn("[tickets] plantas:", e); }
   }
   if (sel.options.length > 1) return;
   plants.forEach(p => {
     const o = document.createElement("option");
-    o.value = p.id;
-    o.textContent = p.name;
+    o.value = p.power_plant_id || p.id;
+    o.textContent = p.power_plant_name || p.name;
     sel.appendChild(o);
   });
 }
@@ -8142,20 +8142,30 @@ async function tkSubmitTicket() {
 
 async function tkUploadImage(file) {
   try {
+    const ct = file.type || "application/octet-stream";
     const res = await apiFetch("/tickets/upload", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({filename: file.name, content_type: file.type})
+      body: JSON.stringify({filename: file.name, content_type: ct})
     });
-    if (!res.ok) throw new Error();
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error("[upload] presign failed:", res.status, errBody);
+      throw new Error("presign " + res.status);
+    }
     const data = await res.json();
+    console.log("[upload] presigned OK, uploading to S3...", data.upload_url?.substring(0, 80));
 
     const uploadRes = await fetch(data.upload_url, {
       method: "PUT",
-      headers: {"Content-Type": file.type},
+      headers: {"Content-Type": ct},
       body: file
     });
-    if (!uploadRes.ok) throw new Error();
+    if (!uploadRes.ok) {
+      const s3err = await uploadRes.text();
+      console.error("[upload] S3 PUT failed:", uploadRes.status, s3err);
+      throw new Error("s3 " + uploadRes.status);
+    }
     return data.s3_key;
   } catch (e) {
     console.warn("[upload]", e);

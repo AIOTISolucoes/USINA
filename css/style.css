@@ -1238,13 +1238,23 @@ body {
 
 /* Admin: dropdown status change */
 .tk-status-select {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: #1b1e24;
+  border: 1px solid rgba(255,255,255,0.15);
   color: #fff;
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 11px;
   cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  padding-right: 20px;
+}
+.tk-status-select option {
+  background: #1b1e24;
+  color: #fff;
 }
 
 /* Timeline */
@@ -1412,8 +1422,8 @@ body {
 .tk-form-group textarea,
 .tk-form-group select {
   width: 100%;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: #1b1e24;
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: 8px;
   color: #fff;
   font-size: 13px;
@@ -1426,8 +1436,15 @@ body {
   outline: none;
   border-color: rgba(57,229,140,0.4);
 }
+.tk-form-group select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
 .tk-form-group select option { background: #1b1e24; color: #fff; }
-.tk-form-group select { color: #fff; -webkit-appearance: none; }
 .tk-file-drop {
   display: flex;
   flex-direction: column;

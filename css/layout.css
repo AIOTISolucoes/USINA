@@ -5432,7 +5432,7 @@ body.plant-edit-modal-open {
 /* ── Balão de fala (acima do avatar) ── */
 .robot-bubble {
   position: relative;
-  max-width: 280px;
+  max-width: 320px;
   min-width: 100px;
   background: #1e2127;
   border: 1px solid rgba(156,163,175,0.45);
@@ -5472,8 +5472,8 @@ body.plant-edit-modal-open {
 
 .robot-bubble-text {
   font-family: 'Press Start 2P', monospace;
-  font-size: 0.52rem;
-  line-height: 1.8;
+  font-size: 0.62rem;
+  line-height: 1.9;
   color: var(--text-primary, #d1fae5);
   word-break: break-word;
   white-space: pre-wrap;
@@ -5651,8 +5651,8 @@ body.plant-edit-modal-open {
 @media (max-width: 640px) {
   .robot-assistant { right: 12px; bottom: 72px; }
   .robot-avatar { width: 72px; height: 72px; }
-  .robot-bubble { max-width: 240px; }
-  .robot-bubble-text { font-size: 0.48rem; }
+  .robot-bubble { max-width: 270px; }
+  .robot-bubble-text { font-size: 0.55rem; }
   .robot-report { width: calc(100vw - 24px); right: 0; max-height: 55vh; z-index: 20; }
   .robot-report.ronda-expanded { width: calc(100vw - 16px); max-height: 70vh; }
   .robot-tab { font-size: 0.42rem; padding: 6px 7px; }

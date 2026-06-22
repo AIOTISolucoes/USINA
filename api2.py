@@ -7818,6 +7818,13 @@ def _lambda_handler_impl(event, context):
         conn = get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
+            cur.execute("SELECT customer_id FROM app.tickets WHERE id = %(tid)s;", {"tid": ticket_id})
+            tk_row = cur.fetchone()
+            if not tk_row:
+                return http_response(404, {"error": "Ticket não encontrado"})
+            if not ctx["is_superuser"] and str(tk_row["customer_id"]) != str(ctx["customer_id"]):
+                return http_response(403, {"error": "Acesso negado"})
+
             b = parse_json_body(event) or {}
             new_status = (b.get("status") or "").strip()
             if new_status and new_status not in ("open", "in_progress", "resolved"):
@@ -7834,8 +7841,6 @@ def _lambda_handler_impl(event, context):
                 WHERE id = %(tid)s RETURNING *;
             """, vals)
             row = cur.fetchone()
-            if not row:
-                return http_response(404, {"error": "Ticket não encontrado"})
             conn.commit()
             return http_response(200, row)
         except Exception as e:
@@ -7853,6 +7858,13 @@ def _lambda_handler_impl(event, context):
         conn = get_conn()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
+            cur.execute("SELECT customer_id FROM app.tickets WHERE id = %(tid)s;", {"tid": ticket_id})
+            tk_row = cur.fetchone()
+            if not tk_row:
+                return http_response(404, {"error": "Ticket não encontrado"})
+            if not ctx["is_superuser"] and str(tk_row["customer_id"]) != str(ctx["customer_id"]):
+                return http_response(403, {"error": "Acesso negado"})
+
             b = parse_json_body(event) or {}
             text = (b.get("text") or "").strip()
             image_url = (b.get("image_url") or "").strip() or None
