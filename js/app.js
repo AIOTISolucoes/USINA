@@ -4389,6 +4389,7 @@ const views = {
   diagram: document.getElementById("diagramView"),
   datastudio: document.getElementById("dataStudioView"),
   explorer: document.getElementById("explorerView"),
+  tickets: document.getElementById("ticketsView"),
   swagger: document.getElementById("swaggerView")
 };
 
@@ -4426,6 +4427,7 @@ function showView(viewName) {
     events: "btnEvents",
     datastudio: "btnDataStudio",
     explorer: "btnExplorer",
+    tickets: "btnTickets",
     swagger: "btnSwagger"
   };
   const activeBtn = document.getElementById(btnMap[viewName]);
@@ -4450,6 +4452,10 @@ function showView(viewName) {
   if (viewName === "explorer") {
     initExplorerOnce();
   }
+
+  if (viewName === "tickets") {
+    initTicketsOnce();
+  }
 }
 
 document.getElementById("btnOverview")?.addEventListener("click", () => showView("overview"));
@@ -4466,6 +4472,7 @@ document.getElementById("btnAlarms")?.addEventListener("click", async () => {
 document.getElementById("btnEvents")?.addEventListener("click", () => showView("events"));
 document.getElementById("btnDataStudio")?.addEventListener("click", () => showView("datastudio"));
 document.getElementById("btnExplorer")?.addEventListener("click", () => showView("explorer"));
+document.getElementById("btnTickets")?.addEventListener("click", () => showView("tickets"));
 // Botão OS desabilitado temporariamente — não disponível para clientes ainda
 // document.getElementById("btnOS")?.addEventListener("click", () => {
 //   window.location.href = "os.html";
@@ -7802,6 +7809,365 @@ function _explorerRenderLegend(items) {
       <span class="explorer-legend-badge ${badgeClass}${sevClass}">${it.type || ""}</span>
     </div>`;
   }).join("");
+}
+
+// =============================================================================
+// SISTEMA DE TICKETS / SUPORTE
+// =============================================================================
+let _ticketsInited = false;
+let _tkCurrentFilter = "all";
+let _tkViewingId = null;
+
+function initTicketsOnce() {
+  if (_ticketsInited) { tkLoadList(); return; }
+  _ticketsInited = true;
+
+  const user = _getUser();
+  const subtitle = document.getElementById("tkSubtitle");
+  if (subtitle && user.is_superuser) subtitle.textContent = "Todos os chamados";
+
+  // Novo ticket
+  document.getElementById("tkBtnNew")?.addEventListener("click", tkOpenModal);
+  document.getElementById("tkModalClose")?.addEventListener("click", tkCloseModal);
+  document.getElementById("tkModalCancel")?.addEventListener("click", tkCloseModal);
+  document.getElementById("tkModalOverlay")?.addEventListener("click", e => {
+    if (e.target.id === "tkModalOverlay") tkCloseModal();
+  });
+  document.getElementById("tkModalSubmit")?.addEventListener("click", tkSubmitTicket);
+
+  // File upload preview
+  const fileInput = document.getElementById("tkFile");
+  const fileDrop = document.getElementById("tkFileDrop");
+  if (fileInput) {
+    fileInput.addEventListener("change", () => tkPreviewFile(fileInput));
+  }
+  if (fileDrop) {
+    fileDrop.addEventListener("dragover", e => { e.preventDefault(); fileDrop.style.borderColor = "rgba(57,229,140,0.5)"; });
+    fileDrop.addEventListener("dragleave", () => { fileDrop.style.borderColor = ""; });
+    fileDrop.addEventListener("drop", e => {
+      e.preventDefault();
+      fileDrop.style.borderColor = "";
+      if (e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        tkPreviewFile(fileInput);
+      }
+    });
+  }
+
+  // Reply file
+  document.getElementById("tkReplyFile")?.addEventListener("change", function() {
+    const nameEl = document.getElementById("tkReplyFileName");
+    if (nameEl) nameEl.textContent = this.files[0]?.name || "";
+  });
+
+  // Filtros
+  document.querySelectorAll(".tk-filter-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tk-filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      _tkCurrentFilter = btn.dataset.status;
+      tkLoadList();
+    });
+  });
+
+  // Back
+  document.getElementById("tkBackBtn")?.addEventListener("click", tkBackToList);
+
+  // Send reply
+  document.getElementById("tkSendReply")?.addEventListener("click", tkSendComment);
+
+  // Populate plant select
+  tkPopulatePlants();
+
+  tkLoadList();
+}
+
+async function tkPopulatePlants() {
+  const sel = document.getElementById("tkPlant");
+  if (!sel) return;
+  let plants = lastValidPlants || [];
+  if (!plants.length) {
+    try {
+      const res = await apiFetch("/plants");
+      if (res.ok) {
+        const data = await res.json();
+        plants = data.plants || data.items || [];
+      }
+    } catch (e) { console.warn("[tickets] plantas:", e); }
+  }
+  if (sel.options.length > 1) return;
+  plants.forEach(p => {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  });
+}
+
+async function tkLoadList() {
+  const list = document.getElementById("tkList");
+  if (!list) return;
+  list.innerHTML = '<div class="tk-empty">Carregando...</div>';
+  try {
+    const qs = _tkCurrentFilter && _tkCurrentFilter !== "all" ? `?status=${_tkCurrentFilter}` : "";
+    const res = await apiFetch(`/tickets${qs}`);
+    if (!res.ok) throw new Error("Erro ao carregar tickets");
+    const data = await res.json();
+    const items = data.items || [];
+    if (!items.length) {
+      list.innerHTML = '<div class="tk-empty">Nenhum chamado encontrado.</div>';
+      return;
+    }
+    list.innerHTML = items.map(t => {
+      const prioClass = `tk-priority-${t.priority || "medium"}`;
+      const prioLabel = {low: "Baixa", medium: "Média", high: "Alta"}[t.priority] || "Média";
+      const statusLabel = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[t.status] || t.status;
+      const d = t.created_at ? new Date(t.created_at).toLocaleDateString("pt-BR") : "";
+      return `<div class="tk-card" data-id="${t.id}">
+        <div class="tk-card-status ${t.status}"></div>
+        <div class="tk-card-body">
+          <div class="tk-card-top">
+            <div class="tk-card-title">${_tkEsc(t.title)}</div>
+            <span class="tk-card-id">#${t.id}</span>
+          </div>
+          <div class="tk-card-desc">${_tkEsc(t.description || "")}</div>
+          <div class="tk-card-meta">
+            <span><i class="fa-solid fa-circle-dot"></i> ${statusLabel}</span>
+            <span class="${prioClass}"><i class="fa-solid fa-flag"></i> ${prioLabel}</span>
+            ${t.plant_name ? `<span><i class="fa-solid fa-solar-panel"></i> ${_tkEsc(t.plant_name)}</span>` : ""}
+            <span><i class="fa-regular fa-calendar"></i> ${d}</span>
+            ${t.comment_count ? `<span><i class="fa-regular fa-comment"></i> ${t.comment_count}</span>` : ""}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+
+    list.querySelectorAll(".tk-card").forEach(card => {
+      card.addEventListener("click", () => tkOpenDetail(parseInt(card.dataset.id)));
+    });
+  } catch (e) {
+    console.warn("[tickets]", e);
+    list.innerHTML = '<div class="tk-empty">Erro ao carregar chamados.</div>';
+  }
+}
+
+async function tkOpenDetail(id) {
+  _tkViewingId = id;
+  const listEl = document.getElementById("tkList");
+  const filtersEl = document.querySelector(".tk-filters");
+  const headerEl = document.querySelector(".tk-header");
+  const detailEl = document.getElementById("tkDetail");
+  if (listEl) listEl.classList.add("hidden");
+  if (filtersEl) filtersEl.classList.add("hidden");
+  if (headerEl) headerEl.classList.add("hidden");
+  if (detailEl) detailEl.classList.remove("hidden");
+
+  const detailHeader = document.getElementById("tkDetailHeader");
+  const timeline = document.getElementById("tkTimeline");
+  detailHeader.innerHTML = '<div class="tk-empty">Carregando...</div>';
+  timeline.innerHTML = "";
+
+  try {
+    const res = await apiFetch(`/tickets/${id}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    const t = data.ticket;
+    const comments = data.comments || [];
+    const user = _getUser();
+
+    const statusLabel = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[t.status] || t.status;
+    const prioLabel = {low: "Baixa", medium: "Média", high: "Alta"}[t.priority] || "Média";
+    const d = t.created_at ? new Date(t.created_at).toLocaleString("pt-BR") : "";
+
+    let statusHtml;
+    if (user.is_superuser) {
+      statusHtml = `<select class="tk-status-select" id="tkStatusSelect" data-id="${t.id}">
+        <option value="open" ${t.status === "open" ? "selected" : ""}>Aberto</option>
+        <option value="in_progress" ${t.status === "in_progress" ? "selected" : ""}>Em Andamento</option>
+        <option value="resolved" ${t.status === "resolved" ? "selected" : ""}>Resolvido</option>
+      </select>`;
+    } else {
+      statusHtml = `<span class="tk-status-badge ${t.status}"><i class="fa-solid fa-circle-dot"></i> ${statusLabel}</span>`;
+    }
+
+    detailHeader.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="tk-detail-title">${_tkEsc(t.title)} <span class="tk-card-id">#${t.id}</span></div>
+        ${statusHtml}
+      </div>
+      <div class="tk-detail-info">
+        <span><i class="fa-solid fa-flag"></i> ${prioLabel}</span>
+        ${t.plant_name ? `<span><i class="fa-solid fa-solar-panel"></i> ${_tkEsc(t.plant_name)}</span>` : ""}
+        <span><i class="fa-regular fa-calendar"></i> ${d}</span>
+        <span><i class="fa-regular fa-user"></i> ${_tkEsc(t.username || "")}</span>
+      </div>
+      <div class="tk-detail-desc">${_tkEsc(t.description || "")}</div>
+      ${t.image_url ? `<img src="${_tkEsc(t.image_url)}" class="tk-detail-img" alt="Anexo">` : ""}
+    `;
+
+    if (user.is_superuser) {
+      document.getElementById("tkStatusSelect")?.addEventListener("change", async function() {
+        await apiFetch(`/tickets/${this.dataset.id}`, {
+          method: "PUT",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({status: this.value})
+        });
+      });
+    }
+
+    timeline.innerHTML = comments.map(c => {
+      const cd = c.created_at ? new Date(c.created_at).toLocaleString("pt-BR") : "";
+      const role = c.is_admin ? "admin" : "user";
+      const authorLabel = c.is_admin ? `<i class="fa-solid fa-headset"></i> ${_tkEsc(c.author)} (Suporte)` : `<i class="fa-regular fa-user"></i> ${_tkEsc(c.author)}`;
+      return `<div class="tk-timeline-item ${role}">
+        <div class="tk-timeline-author">
+          <span>${authorLabel}</span>
+          <span class="tk-timeline-date">${cd}</span>
+        </div>
+        ${c.text ? `<div class="tk-timeline-text">${_tkEsc(c.text)}</div>` : ""}
+        ${c.image_url ? `<img src="${_tkEsc(c.image_url)}" class="tk-timeline-img" alt="Anexo">` : ""}
+      </div>`;
+    }).join("");
+
+  } catch (e) {
+    console.warn("[ticket detail]", e);
+    detailHeader.innerHTML = '<div class="tk-empty">Erro ao carregar chamado.</div>';
+  }
+}
+
+function tkBackToList() {
+  _tkViewingId = null;
+  const listEl = document.getElementById("tkList");
+  const filtersEl = document.querySelector(".tk-filters");
+  const headerEl = document.querySelector(".tk-header");
+  const detailEl = document.getElementById("tkDetail");
+  if (listEl) listEl.classList.remove("hidden");
+  if (filtersEl) filtersEl.classList.remove("hidden");
+  if (headerEl) headerEl.classList.remove("hidden");
+  if (detailEl) detailEl.classList.add("hidden");
+  tkLoadList();
+}
+
+async function tkSendComment() {
+  if (!_tkViewingId) return;
+  const textEl = document.getElementById("tkReplyText");
+  const fileEl = document.getElementById("tkReplyFile");
+  const text = (textEl?.value || "").trim();
+  const file = fileEl?.files?.[0];
+
+  if (!text && !file) return;
+
+  let image_url = null;
+  if (file) {
+    image_url = await tkUploadImage(file);
+    if (!image_url) return;
+  }
+
+  try {
+    const res = await apiFetch(`/tickets/${_tkViewingId}/comments`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text, image_url})
+    });
+    if (!res.ok) throw new Error();
+    if (textEl) textEl.value = "";
+    if (fileEl) fileEl.value = "";
+    const nameEl = document.getElementById("tkReplyFileName");
+    if (nameEl) nameEl.textContent = "";
+    tkOpenDetail(_tkViewingId);
+  } catch (e) {
+    console.warn("[send comment]", e);
+  }
+}
+
+function tkOpenModal() {
+  document.getElementById("tkModalOverlay")?.classList.remove("hidden");
+  document.getElementById("tkTitle").value = "";
+  document.getElementById("tkDesc").value = "";
+  document.getElementById("tkFile").value = "";
+  document.getElementById("tkFilePreview")?.classList.add("hidden");
+  document.getElementById("tkFileLabel").textContent = "Clique ou arraste uma imagem";
+}
+
+function tkCloseModal() {
+  document.getElementById("tkModalOverlay")?.classList.add("hidden");
+}
+
+function tkPreviewFile(input) {
+  const preview = document.getElementById("tkFilePreview");
+  const label = document.getElementById("tkFileLabel");
+  if (!input.files[0]) return;
+  label.textContent = input.files[0].name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    preview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+    preview.classList.remove("hidden");
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+async function tkSubmitTicket() {
+  const title = (document.getElementById("tkTitle")?.value || "").trim();
+  const desc = (document.getElementById("tkDesc")?.value || "").trim();
+  const plantId = document.getElementById("tkPlant")?.value || null;
+  const priority = document.getElementById("tkPriority")?.value || "medium";
+  const fileInput = document.getElementById("tkFile");
+
+  if (!title) { alert("Preencha o título do chamado."); return; }
+
+  const submitBtn = document.getElementById("tkModalSubmit");
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando...'; }
+
+  let image_url = null;
+  if (fileInput?.files?.[0]) {
+    image_url = await tkUploadImage(fileInput.files[0]);
+  }
+
+  try {
+    const res = await apiFetch("/tickets", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({title, description: desc, plant_id: plantId || null, priority, image_url})
+    });
+    if (!res.ok) throw new Error();
+    tkCloseModal();
+    tkLoadList();
+  } catch (e) {
+    console.warn("[create ticket]", e);
+    alert("Erro ao criar chamado.");
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Enviar Chamado'; }
+  }
+}
+
+async function tkUploadImage(file) {
+  try {
+    const res = await apiFetch("/tickets/upload", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: file.name, content_type: file.type})
+    });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    const uploadRes = await fetch(data.upload_url, {
+      method: "PUT",
+      headers: {"Content-Type": file.type},
+      body: file
+    });
+    if (!uploadRes.ok) throw new Error();
+    return data.s3_key;
+  } catch (e) {
+    console.warn("[upload]", e);
+    alert("Erro ao enviar imagem.");
+    return null;
+  }
+}
+
+function _tkEsc(s) {
+  const d = document.createElement("div");
+  d.textContent = s || "";
+  return d.innerHTML;
 }
 
 // =============================================================================

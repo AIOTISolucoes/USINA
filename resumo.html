@@ -50,6 +50,9 @@
           <button id="btnExplorer" class="sidebar-btn" type="button" title="Explorador de Dados" aria-label="Explorador de Dados">
             <i class="fa-solid fa-database"></i>
           </button>
+          <button id="btnTickets" class="sidebar-btn" type="button" title="Suporte / Tickets" aria-label="Suporte / Tickets">
+            <i class="fa-solid fa-headset"></i>
+          </button>
           <button id="btnSwagger" class="sidebar-btn" type="button" title="API Explorer" aria-label="API Explorer">
             <i class="fa-solid fa-code"></i>
           </button>
@@ -627,6 +630,110 @@
                   <button id="explorerNextBtn" type="button" class="explorer-page-btn">
                     Proximo <i class="fa-solid fa-chevron-right"></i>
                   </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- TELA DE TICKETS / SUPORTE -->
+          <div id="ticketsView" class="view-section hidden">
+            <div class="tk-shell">
+
+              <!-- HEADER -->
+              <div class="tk-header">
+                <div class="tk-header-left">
+                  <h2 class="tk-title"><i class="fa-solid fa-headset"></i> Suporte</h2>
+                  <span class="tk-subtitle" id="tkSubtitle">Seus chamados</span>
+                </div>
+                <button class="tk-btn-new" id="tkBtnNew" type="button">
+                  <i class="fa-solid fa-plus"></i> Novo Chamado
+                </button>
+              </div>
+
+              <!-- FILTROS -->
+              <div class="tk-filters">
+                <button class="tk-filter-btn active" data-status="all">Todos</button>
+                <button class="tk-filter-btn" data-status="open">Abertos</button>
+                <button class="tk-filter-btn" data-status="in_progress">Em Andamento</button>
+                <button class="tk-filter-btn" data-status="resolved">Resolvidos</button>
+              </div>
+
+              <!-- LISTA DE TICKETS -->
+              <div class="tk-list" id="tkList">
+                <div class="tk-empty">Nenhum chamado encontrado.</div>
+              </div>
+
+              <!-- DETALHE DO TICKET (oculto por padrão) -->
+              <div class="tk-detail hidden" id="tkDetail">
+                <button class="tk-back-btn" id="tkBackBtn" type="button">
+                  <i class="fa-solid fa-arrow-left"></i> Voltar
+                </button>
+                <div class="tk-detail-header" id="tkDetailHeader"></div>
+                <div class="tk-timeline" id="tkTimeline"></div>
+                <div class="tk-reply-box">
+                  <textarea id="tkReplyText" placeholder="Escreva uma resposta..." rows="3"></textarea>
+                  <div class="tk-reply-actions">
+                    <label class="tk-attach-btn" title="Anexar imagem">
+                      <i class="fa-solid fa-paperclip"></i>
+                      <input type="file" id="tkReplyFile" accept="image/*" style="display:none">
+                      <span id="tkReplyFileName" class="tk-attach-name"></span>
+                    </label>
+                    <button class="tk-send-btn" id="tkSendReply" type="button">
+                      <i class="fa-solid fa-paper-plane"></i> Enviar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- MODAL NOVO TICKET -->
+              <div class="tk-modal-overlay hidden" id="tkModalOverlay">
+                <div class="tk-modal">
+                  <div class="tk-modal-header">
+                    <img src="assets/logo-aioti.png" alt="AIOTI" class="tk-modal-logo">
+                    <div>
+                      <div class="tk-modal-title">Novo Chamado</div>
+                      <div class="tk-modal-subtitle">Descreva sua solicitação</div>
+                    </div>
+                    <button class="tk-modal-close" id="tkModalClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                  <div class="tk-modal-body">
+                    <div class="tk-form-group">
+                      <label>Usina</label>
+                      <select id="tkPlant"><option value="">Selecione (opcional)</option></select>
+                    </div>
+                    <div class="tk-form-group">
+                      <label>Prioridade</label>
+                      <select id="tkPriority">
+                        <option value="low">Baixa</option>
+                        <option value="medium" selected>Média</option>
+                        <option value="high">Alta</option>
+                      </select>
+                    </div>
+                    <div class="tk-form-group">
+                      <label>Título</label>
+                      <input type="text" id="tkTitle" placeholder="Resumo do problema" maxlength="200">
+                    </div>
+                    <div class="tk-form-group">
+                      <label>Descrição</label>
+                      <textarea id="tkDesc" placeholder="Detalhe sua solicitação..." rows="4"></textarea>
+                    </div>
+                    <div class="tk-form-group">
+                      <label>Anexo (opcional)</label>
+                      <label class="tk-file-drop" id="tkFileDrop">
+                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                        <span id="tkFileLabel">Clique ou arraste uma imagem</span>
+                        <input type="file" id="tkFile" accept="image/*" style="display:none">
+                      </label>
+                      <div id="tkFilePreview" class="tk-file-preview hidden"></div>
+                    </div>
+                  </div>
+                  <div class="tk-modal-footer">
+                    <button class="tk-modal-cancel" id="tkModalCancel" type="button">Cancelar</button>
+                    <button class="tk-modal-submit" id="tkModalSubmit" type="button">
+                      <i class="fa-solid fa-paper-plane"></i> Enviar Chamado
+                    </button>
+                  </div>
                 </div>
               </div>
 
