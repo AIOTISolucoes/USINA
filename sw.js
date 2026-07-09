@@ -1,21 +1,23 @@
-const CACHE_NAME = "aioti-v2";
+const CACHE_NAME = "aioti-v3";
+// caminhos relativos ao sw.js: funcionam na raiz (produção) e em
+// subpath (pipeline de teste github.io/USINA/)
 const SHELL = [
-  "/resumo.html",
-  "/plant.html",
-  "/os.html",
-  "/index.html",
-  "/css/style.css",
-  "/css/layout.css",
-  "/css/plant.css",
-  "/css/login.css",
-  "/os.css",
-  "/js/app.js",
-  "/js/plant.js",
-  "/js/login.js",
-  "/js/pwa.js",
-  "/js/help_tour.js",
-  "/js/notify_sound.js",
-  "/manifest.json",
+  "./resumo.html",
+  "./plant.html",
+  "./os.html",
+  "./index.html",
+  "./css/style.css",
+  "./css/layout.css",
+  "./css/plant.css",
+  "./css/login.css",
+  "./os.css",
+  "./js/app.js",
+  "./js/plant.js",
+  "./js/login.js",
+  "./js/pwa.js",
+  "./js/help_tour.js",
+  "./js/notify_sound.js",
+  "./manifest.json",
 ];
 
 self.addEventListener("install", (e) => {
@@ -52,7 +54,7 @@ self.addEventListener("fetch", (e) => {
 
 // ── Push Notifications ──
 self.addEventListener("push", (e) => {
-  let data = { title: "AIOTI Solar", body: "Nova notificação", url: "/resumo.html" };
+  let data = { title: "AIOTI Solar", body: "Nova notificação", url: "./resumo.html" };
   try {
     data = Object.assign(data, e.data.json());
   } catch (_) {}
@@ -60,8 +62,8 @@ self.addEventListener("push", (e) => {
   e.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: "/img/icon-192.png",
-      badge: "/img/icon-192.png",
+      icon: "./img/icon-192.png",
+      badge: "./img/icon-192.png",
       tag: data.tag || "aioti-default",
       data: { url: data.url },
       vibrate: [200, 100, 200, 100, 300],
@@ -74,11 +76,11 @@ self.addEventListener("push", (e) => {
 
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const target = e.notification.data?.url || "/resumo.html";
+  const target = new URL(e.notification.data?.url || "./resumo.html", self.registration.scope).href;
   e.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
       for (const c of list) {
-        if (new URL(c.url).pathname === target && "focus" in c) return c.focus();
+        if (c.url === target && "focus" in c) return c.focus();
       }
       return clients.openWindow(target);
     })

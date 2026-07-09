@@ -22,7 +22,8 @@
   let deferredInstallPrompt = null;
 
   // ── Register SW ──
-  navigator.serviceWorker.register("/sw.js").then((reg) => {
+  // caminho relativo: funciona na raiz (produção) e em subpath (pipeline de teste github.io/USINA/)
+  navigator.serviceWorker.register("sw.js").then((reg) => {
     console.log("[PWA] SW registrado", reg.scope);
     if (Notification.permission === "granted") {
       subscribePush(reg);
