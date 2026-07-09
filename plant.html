@@ -26,6 +26,12 @@
 </head>
 
 <body>
+<div id="appLoader" class="app-loader">
+  <div class="app-loader-content">
+    <div class="app-loader-spinner"></div>
+    <div class="app-loader-text">Carregando...</div>
+  </div>
+</div>
 
 <main class="plant-layout">
 
@@ -191,6 +197,11 @@
         <span>Multimedidor</span>
       </button>
 
+      <button class="device-nav-btn" id="navBtnThermalRelay" type="button" data-target="#sec-thermalrelay">
+        <i class="fa-solid fa-temperature-high" aria-hidden="true"></i>
+        <span>Relé Térmico</span>
+      </button>
+
       <button class="device-nav-btn" id="trackersMenuToggle" type="button" data-target="#sec-trackers">
         <i class="fa-solid fa-satellite-dish" aria-hidden="true"></i>
         <span>Trackers</span>
@@ -208,17 +219,30 @@
         <div>
           <h2>Produção diária</h2>
 
-          <div class="chart-legend">
-            <span class="legend-bars" aria-hidden="true">
-              <span class="bar bar--gray"></span>
-              <span class="bar bar--green"></span>
-              <span class="bar bar--yellow"></span>
-            </span>
-
-            <div class="legend-text">
-              <span class="legend-line legend-line--gray">Expected Power</span>
-              <span class="legend-line legend-line--green">Active Power</span>
-              <span class="legend-line legend-line--yellow">Irradiance POA</span>
+          <div class="daily-chart-controls">
+            <div id="dailyPowerToggleWrap" class="chart-toggle-group" style="display:none">
+              <button id="dailyToggleInverter" class="chart-toggle-btn active" type="button" onclick="dailyChartSetPowerSource('inverter')">
+                <i class="fa-solid fa-bolt"></i> Inversores
+              </button>
+              <button id="dailyToggleMeter" class="chart-toggle-btn" type="button" onclick="dailyChartSetPowerSource('meter')">
+                <i class="fa-solid fa-gauge-high"></i> Multimedidor
+              </button>
+            </div>
+            <div id="dailyIrrToggleWrap" class="chart-toggle-group" style="display:none">
+              <button id="dailyTogglePoa" class="chart-toggle-btn active" type="button" onclick="dailyChartSetIrrSource('poa')">
+                POA
+              </button>
+              <button id="dailyToggleGhi" class="chart-toggle-btn" type="button" onclick="dailyChartSetIrrSource('ghi')">
+                GHI
+              </button>
+            </div>
+            <div id="dailyExpToggleWrap" class="chart-toggle-group" style="display:none">
+              <button id="dailyToggleExpPvsyst" class="chart-toggle-btn active" type="button" onclick="dailyChartSetExpectedSource('pvsyst')">
+                Exp. PVSyst
+              </button>
+              <button id="dailyToggleExpCap" class="chart-toggle-btn" type="button" onclick="dailyChartSetExpectedSource('capacity')">
+                Cap. AC
+              </button>
             </div>
           </div>
         </div>
@@ -235,7 +259,10 @@
         </div>
       </div>
 
-      <div class="chart-wrapper">
+      <div class="chart-wrapper" style="position:relative">
+        <div id="dailyChartLoader" class="chart-loader hidden">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+        </div>
         <canvas id="plantMainChart"></canvas>
       </div>
     </section>
@@ -395,6 +422,11 @@
         </div>
 
         <div style="flex:1"></div>
+
+        <!-- Botão PDF da planta -->
+        <button class="unif-pdf-btn" id="unifilarPdfBtn" style="display:none;" title="Abrir diagrama unifilar em PDF">
+          <i class="fa-solid fa-file-pdf"></i> PDF
+        </button>
 
         <!-- Legenda de status -->
         <div class="unif-legend">
@@ -588,6 +620,48 @@
       </div>
     </section>
 
+    <!-- THERMAL RELAY -->
+    <div id="sec-thermalrelay" class="scroll-anchor"></div>
+    <section id="thermalRelaySection" style="margin-top:24px; display:none;">
+      <h3 class="card-title relay-title-heading">
+        <svg class="relay-svg-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
+          <defs>
+            <filter id="thermalGlow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="2.2" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <g filter="url(#thermalGlow)">
+            <!-- corpo do transformador -->
+            <rect x="10" y="10" width="44" height="44" rx="6"
+                  fill="none" stroke="rgba(57,229,140,0.85)" stroke-width="2"/>
+            <!-- termômetro central -->
+            <rect x="28" y="16" width="8" height="24" rx="4"
+                  fill="none" stroke="rgba(57,229,140,0.7)" stroke-width="1.6"/>
+            <rect x="29.5" y="26" width="5" height="13" rx="2.5"
+                  fill="rgba(57,229,140,0.35)"/>
+            <circle cx="32" cy="44" r="5"
+                    fill="none" stroke="rgba(57,229,140,0.7)" stroke-width="1.6"/>
+            <circle cx="32" cy="44" r="2.8"
+                    fill="rgba(57,229,140,0.4)"/>
+            <!-- linhas de calor -->
+            <path d="M18 20 Q20 24 18 28" fill="none" stroke="rgba(57,229,140,0.45)" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M14 22 Q16 26 14 30" fill="none" stroke="rgba(57,229,140,0.3)" stroke-width="1.2" stroke-linecap="round"/>
+            <path d="M46 20 Q44 24 46 28" fill="none" stroke="rgba(57,229,140,0.45)" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M50 22 Q48 26 50 30" fill="none" stroke="rgba(57,229,140,0.3)" stroke-width="1.2" stroke-linecap="round"/>
+            <!-- terminais -->
+            <line x1="22" y1="6" x2="22" y2="10" stroke="rgba(57,229,140,0.6)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="42" y1="6" x2="42" y2="10" stroke="rgba(57,229,140,0.6)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="22" y1="54" x2="22" y2="58" stroke="rgba(57,229,140,0.6)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="42" y1="54" x2="42" y2="58" stroke="rgba(57,229,140,0.6)" stroke-width="2" stroke-linecap="round"/>
+          </g>
+        </svg>
+        Relé Térmico
+      </h3>
+
+      <div id="thermalRelayContainer"></div>
+    </section>
+
     <!-- TRACKERS -->
     <div id="sec-trackers" class="scroll-anchor"></div>
     <section id="trackersSection" class="trackers-section is-collapsed trackers-hidden" style="margin-top:24px">
@@ -714,7 +788,9 @@
 </svg>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/notify_sound.js"></script>
 <script src="js/plant.js"></script>
+<script src="js/help_tour.js"></script>
 <script src="js/pwa.js"></script>
 </body>
 </html>

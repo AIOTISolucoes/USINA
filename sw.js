@@ -1,4 +1,4 @@
-const CACHE_NAME = "aioti-v1";
+const CACHE_NAME = "aioti-v2";
 const SHELL = [
   "/resumo.html",
   "/plant.html",
@@ -13,6 +13,8 @@ const SHELL = [
   "/js/plant.js",
   "/js/login.js",
   "/js/pwa.js",
+  "/js/help_tour.js",
+  "/js/notify_sound.js",
   "/manifest.json",
 ];
 
@@ -62,7 +64,9 @@ self.addEventListener("push", (e) => {
       badge: "/img/icon-192.png",
       tag: data.tag || "aioti-default",
       data: { url: data.url },
-      vibrate: [200, 100, 200],
+      vibrate: [200, 100, 200, 100, 300],
+      silent: false,          // garante o som padrão do sistema (Android/iOS)
+      renotify: true,         // mesma tag volta a tocar/vibrar em alarme repetido
       requireInteraction: data.priority === "high",
     })
   );

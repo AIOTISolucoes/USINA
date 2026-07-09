@@ -2780,23 +2780,24 @@ tbody tr:hover td {
 .plant-card__stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 5px;
 }
 @media (min-width: 360px) {
   .plant-card__stats {
-    grid-template-columns: 1fr 1fr 1fr 1fr;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 .plant-card__stat {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   background: rgba(57,229,140,0.04);
   border: 1px solid rgba(57,229,140,0.08);
   border-radius: 7px;
-  padding: 5px 6px;
+  padding: 5px 7px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .plant-card__stat-label {
@@ -2822,11 +2823,13 @@ tbody tr:hover td {
 
 .plant-card__stat-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   color: var(--text-main);
   line-height: 1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .plant-card__stat-value.active { color: var(--accent-green); }
@@ -2909,6 +2912,139 @@ tbody tr:hover td {
 .pcc-leg--power::before { background: rgba(57,229,140,0.9); }
 .pcc-leg--irr::before   { background: rgba(255,200,50,0.85); }
 .pcc-leg--pr::before    { background: rgba(80,200,255,0.75); }
+
+/* === BADGE DE ACONTECIMENTOS DA USINA (issues do robô no card) === */
+.plant-card__issue-badge {
+  position: absolute;
+  top: 10px;
+  right: 42px;
+  z-index: 9;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffb020;
+  background: radial-gradient(circle, rgba(255,176,32,0.20) 0%, rgba(255,176,32,0.06) 100%);
+  border: 1px solid rgba(255,176,32,0.65);
+  box-shadow: 0 0 10px rgba(255,176,32,0.35);
+  cursor: pointer;
+  animation: issueBadgePulse 1.8s ease-in-out infinite;
+}
+
+.plant-card__issue-badge.is-critical {
+  color: #ff4d4f;
+  background: radial-gradient(circle, rgba(255,77,79,0.24) 0%, rgba(255,77,79,0.07) 100%);
+  border-color: rgba(255,77,79,0.75);
+  box-shadow: 0 0 12px rgba(255,77,79,0.45);
+}
+
+.plant-card__issue-count {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.plant-card__issue-count:empty { display: none; }
+
+@keyframes issueBadgePulse {
+  0%, 100% { transform: scale(1);    filter: brightness(1); }
+  50%      { transform: scale(1.10); filter: brightness(1.35); }
+}
+
+/* Popover de acontecimentos (hover no badge) */
+.plant-issue-pop {
+  position: fixed;
+  z-index: 3000;
+  width: 272px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: linear-gradient(160deg, rgba(8,20,12,0.98) 0%, rgba(4,12,7,0.99) 100%);
+  border: 1px solid rgba(255,77,79,0.30);
+  border-radius: 12px;
+  padding: 10px 12px 8px;
+  box-shadow: 0 10px 34px rgba(0,0,0,0.6), 0 0 18px rgba(255,77,79,0.08);
+  backdrop-filter: blur(6px);
+  animation: issuePopIn 0.16s ease-out;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,77,79,0.30) transparent;
+}
+
+.plant-issue-pop::-webkit-scrollbar {
+  width: 5px;
+}
+
+.plant-issue-pop::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 8px 0;
+}
+
+.plant-issue-pop::-webkit-scrollbar-thumb {
+  background: rgba(255,77,79,0.28);
+  border-radius: 8px;
+}
+
+.plant-issue-pop::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,77,79,0.50);
+}
+
+.plant-issue-pop.hidden { display: none; }
+
+.plant-issue-pop__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #ff8a8c;
+  margin-bottom: 6px;
+}
+
+.plant-issue-pop__item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+.plant-issue-pop__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.plant-issue-pop__msg {
+  font-size: 12px;
+  color: rgba(255,255,255,0.88);
+  line-height: 1.35;
+}
+
+.plant-issue-pop__meta {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+}
+
+.plant-issue-pop__hint {
+  font-size: 10px;
+  color: rgba(255,255,255,0.32);
+  margin-top: 8px;
+  text-align: center;
+  font-style: italic;
+}
+
+@keyframes issuePopIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
 
 /* === PLANT EDIT BUTTON === */
 .plant-card__edit-btn {
@@ -3163,6 +3299,33 @@ body.plant-edit-modal-open {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 8px;
+}
+
+.plant-edit-section input[type="text"],
+.plant-edit-section input[type="number"],
+.plant-edit-section select {
+  width: 100%;
+  background: var(--input-bg, rgba(255,255,255,0.06));
+  border: 1px solid var(--card-border, var(--border));
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  line-height: 1.25;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+}
+
+.plant-edit-section input[type="text"]:focus,
+.plant-edit-section input[type="number"]:focus,
+.plant-edit-section select:focus {
+  border-color: #39e58c;
+  box-shadow: 0 0 0 2px rgba(57, 229, 140, 0.15);
+}
+
+.plant-edit-section input::placeholder {
+  color: var(--text-muted, rgba(255,255,255,0.35));
 }
 
 .plant-edit-inline {
@@ -4112,6 +4275,17 @@ body.plant-edit-modal-open {
 }
 
 .ds-v2-found-count { font-size: 10px; color: var(--text-muted, #4dab7a); }
+.ds-v2-select-all-btn {
+  padding: 3px 10px;
+  font-size: 10px;
+  background: rgba(57,229,140,0.1);
+  color: #39e58c;
+  border: 1px solid rgba(57,229,140,0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ds-v2-select-all-btn:hover { background: rgba(57,229,140,0.2); }
 
 .ds-v2-auto-status {
   display: inline-flex;
@@ -4869,12 +5043,35 @@ body.plant-edit-modal-open {
   outline: none;
 }
 
+select.pem-ctrl option {
+  background: #0b1a12;
+  color: #d4f5e4;
+}
+
 .pem-ctrl:focus {
   border-color: rgba(57,229,140,0.45);
   box-shadow: 0 0 0 2px rgba(57,229,140,0.08);
 }
 
 .pem-ctrl--grow { flex: 2; }
+.pem-ctrl--qty { flex: 0 0 60px; min-width: 60px; text-align: center; }
+
+.pem-cabin-select {
+  flex: 0 0 130px;
+  min-width: 100px;
+  height: 30px;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+}
+.pem-cabin-select:focus {
+  border-color: rgba(57,229,140,0.45);
+  outline: none;
+}
 
 .pem-action-btn {
   height: 34px;
@@ -5023,7 +5220,7 @@ body.plant-edit-modal-open {
 }
 
 /* Modais de auth / run */
-.device-command-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: rgba(3,8,7,.7); }
+.device-command-modal { position: fixed; inset: 0; z-index: 9500; display: grid; place-items: center; background: rgba(3,8,7,.7); }
 .device-command-modal.hidden { display: none; }
 .device-command-modal-card {
   width: min(420px, calc(100vw - 28px));
@@ -5045,7 +5242,7 @@ body.plant-edit-modal-open {
 
 /* Console de Comandos */
 .cmd-console-overlay {
-  position: fixed; inset: 0; z-index: 2000;
+  position: fixed; inset: 0; z-index: 9200;
   background: rgba(0,0,0,.72); backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center; padding: 16px;
   animation: cmdFadeIn .18s ease;
@@ -5822,7 +6019,10 @@ body.plant-edit-modal-open {
 .robot-ronda-content.hidden { display: none; }
 .robot-report.ronda-expanded .robot-prefs-footer { display: none; }
 
-.ronda-loading { padding: 32px 14px; text-align: center; font-family: 'Press Start 2P', monospace; font-size: 0.45rem; color: rgba(255,255,255,0.5); line-height: 2; }
+.ronda-loading { padding: 32px 14px; text-align: center; font-family: 'Inter', sans-serif; font-size: 12px; color: rgba(255,255,255,0.6); line-height: 2; }
+.ronda-loading i { display: inline-block; font-size: 28px; color: #39e58c; margin-bottom: 8px; filter: drop-shadow(0 0 6px rgba(57,229,140,0.4)); animation: rondaSpin 0.8s linear infinite; }
+.ronda-loading .fa-spin { animation: none; }
+@keyframes rondaSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .ronda-error { padding: 24px 14px; text-align: center; font-size: 12px; color: #ef4444; }
 .ronda-section { border-bottom: 1px solid rgba(255,255,255,0.06); padding: 10px 14px; }
 .ronda-section:last-child { border-bottom: none; }
@@ -5951,4 +6151,112 @@ body.plant-edit-modal-open {
 .robot-muted-peek #robotImg:hover {
   opacity: 0.95;
   transform: translateY(6px);
+}
+
+/* ======================================================
+   CHART TOGGLE BUTTONS (shared with plant.css)
+   ====================================================== */
+.chart-toggle-group {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(57, 229, 140, 0.15);
+  background: rgba(6, 18, 14, 0.5);
+}
+.chart-toggle-btn {
+  background: transparent;
+  border: none;
+  color: rgba(154, 219, 184, 0.55);
+  font-family: 'Inter', 'JetBrains Mono', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 160ms ease-out, color 160ms ease-out;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.chart-toggle-btn:not(:last-child) {
+  border-right: 1px solid rgba(57, 229, 140, 0.12);
+}
+.chart-toggle-btn:hover {
+  background: rgba(57, 229, 140, 0.08);
+  color: rgba(154, 219, 184, 0.85);
+}
+.chart-toggle-btn:active {
+  transform: scale(0.97);
+}
+.chart-toggle-btn.active {
+  background: rgba(57, 229, 140, 0.18);
+  color: #39e58c;
+  box-shadow: inset 0 0 8px rgba(57, 229, 140, 0.1);
+}
+.mini-chart-toggle {
+  margin-right: 8px;
+}
+
+/* ======================================================
+   FULL-PAGE LOADING OVERLAY
+   ====================================================== */
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #030a05;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.4s ease;
+}
+.app-loader.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+.app-loader-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.app-loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(57, 229, 140, 0.15);
+  border-top-color: #39e58c;
+  border-radius: 50%;
+  animation: appLoaderSpin 0.8s linear infinite;
+}
+.app-loader-text {
+  margin-top: 14px;
+  color: rgba(57, 229, 140, 0.5);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+@keyframes appLoaderSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ======================================================
+   CHART INLINE LOADER (toggle switch feedback)
+   ====================================================== */
+.chart-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 10, 5, 0.7);
+  border-radius: 8px;
+  transition: opacity 0.2s ease;
+}
+.chart-loader i {
+  font-size: 22px;
+  color: #39e58c;
+  filter: drop-shadow(0 0 6px rgba(57, 229, 140, 0.4));
+}
+.chart-loader.hidden {
+  display: none;
 }

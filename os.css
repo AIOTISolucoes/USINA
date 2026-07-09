@@ -642,3 +642,31 @@
 /* ── CARD DELETE BTN ── */
 .kb-card-action-btn--delete{color:#f87171!important;}
 .kb-card-action-btn--delete:hover{color:#ef4444!important;border-color:rgba(248,113,113,.3)!important;background:rgba(248,113,113,.08)!important;}
+
+
+/* ── Notas da OS: feedback + comentarios ─────────────────────── */
+.osd-note-list{display:flex;flex-direction:column;gap:10px;}
+.osd-note-item{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:12px;border:1px solid var(--border-soft);background:var(--bg-card);}
+.osd-note-item.feedback{border-color:rgba(77,184,72,.28);background:rgba(77,184,72,.05);}
+.osd-note-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.osd-note-author{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-main);}
+.osd-note-avatar{width:22px;height:22px;border-radius:50%;background:var(--bg-card-alt);border:1px solid var(--border-soft);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--text-muted);}
+.osd-note-date{font-size:11px;color:var(--text-muted);font-family:"JetBrains Mono",monospace;}
+.osd-note-text{font-size:13px;line-height:1.55;color:var(--text-main);white-space:pre-wrap;word-break:break-word;}
+.osd-note-empty{font-size:12px;color:var(--text-muted);padding:6px 2px;}
+.osd-note-input{min-height:72px;}
+.osd-note-actions{display:flex;justify-content:flex-end;}
+.osd-note-btn{font-size:12px;padding:8px 14px;}
+/* Rating (estrelas) do feedback */
+.osd-rating{display:flex;align-items:center;gap:4px;}
+.osd-star{background:none;border:none;padding:4px;cursor:pointer;font-size:20px;color:var(--border-soft);transition:color .12s, transform .12s;line-height:1;}
+.osd-star:hover{transform:scale(1.15);color:#f59e0b;}
+.osd-star.active{color:#f59e0b;}
+.osd-rating-label{margin-left:8px;font-size:12px;font-weight:700;color:var(--text-muted);}
+.osd-note-stars{display:flex;align-items:center;gap:3px;font-size:14px;color:var(--border-soft);}
+.osd-note-stars .on{color:#f59e0b;}
+.osd-note-stars span{margin-left:6px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;}
+
+/* Comentarios em estilo chat */
+.osd-note-item.chat{max-width:88%;margin-right:auto;}
+.osd-note-item.chat.mine{margin-right:0;margin-left:auto;border-color:rgba(77,184,72,.28);background:rgba(77,184,72,.06);}

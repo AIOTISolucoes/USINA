@@ -18,6 +18,13 @@ function logout() {
   window.location.href = "index.html";
 }
 
+function _dismissAppLoader() {
+  const el = document.getElementById("appLoader");
+  if (!el) return;
+  el.classList.add("fade-out");
+  setTimeout(() => el.remove(), 450);
+}
+
 // =============================================================================
 // API FETCH COM CONTEXTO DO USUÁRIO LOGADO
 // =============================================================================
@@ -60,6 +67,10 @@ function _canEditPlantUI() {
   return u.is_superuser === true || u.role_key === "admin_customer";
 }
 function _canAckAlarmUI() {
+  const u = _getUser();
+  return u.is_superuser === true || u.role_key === "admin_customer" || u.role_key === "operator";
+}
+function _canSendCommand() {
   const u = _getUser();
   return u.is_superuser === true || u.role_key === "admin_customer" || u.role_key === "operator";
 }
@@ -1799,7 +1810,10 @@ function updateSummaryUI(plants) {
     totalCapacityAc += Number(p?.capacity_ac ?? 0) || 0;
   });
 
-  const loadPct = totalRatedPower > 0 ? (totalActivePower / totalRatedPower) * 100 : 0;
+  // % de carga sobre a capacidade AC (o que a usina consegue entregar);
+  // rated DC so como fallback se nao houver capacity_ac cadastrada
+  const capacityBase = totalCapacityAc > 0 ? totalCapacityAc : totalRatedPower;
+  const loadPct = capacityBase > 0 ? (totalActivePower / capacityBase) * 100 : 0;
 
   const elActive = document.querySelector("#activePower");
   const elRated = document.querySelector("#ratedPower");
@@ -2269,7 +2283,11 @@ function _plantBlockHTML(plantId, plantName, plantColor, plantIdx) {
           </select>
         </div>
 
-        <div class="ds-v2-found-count" id="dsFoundCount_${pid}">0 medidas encontradas</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div class="ds-v2-found-count" id="dsFoundCount_${pid}" style="flex:1;min-width:120px;">0 medidas encontradas</div>
+          <button class="ds-v2-select-all-btn" data-action="selectAllTags" data-plant="${pid}" type="button">Selecionar todas</button>
+          <button class="ds-v2-select-all-btn" data-action="deselectAllTags" data-plant="${pid}" type="button" style="display:none;">Desmarcar todas</button>
+        </div>
         <div class="ds-v2-context-info hidden" id="dsContextInfo_${pid}"></div>
 
         <div class="ds-v2-catalog-table-wrap">
@@ -2476,6 +2494,7 @@ function applyTagFiltersForPlant(plantId) {
   updateContextInfoForPlant(plantId);
   updateFoundCountForPlant(plantId, filtered.length);
   renderDataStudioTagsTableForPlant(plantId, filtered);
+  dsUpdateSelectAllButtons(plantId);
   return filtered;
 }
 
@@ -2505,6 +2524,59 @@ function populateContextSelectForPlant(plantId, tags) {
   if (ps) ps.selectedContext = sel.value || "all";
 }
 
+// --- Select all / deselect all ---
+
+function dsSelectAllTagsForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  const visible = Array.isArray(ps.availableTags) ? ps.availableTags : [];
+  let added = 0;
+  for (const tag of visible) {
+    if (ps.selectedTags.length >= 50) break;
+    const pathname = dsSafeTrim(tag?.pathname || tag?.path_name || tag?.tag);
+    if (!pathname) continue;
+    if (isTagSelectedForPlant(plantId, tag)) continue;
+    ps.selectedTags.push({
+      id: tag?.id ?? null, tag_id: tag?.id ?? null,
+      device_type: tag?.device_type ?? null, device_id: tag?.device_id ?? null,
+      point_name: tag?.point_name ?? null,
+      power_plant_id: tag?.power_plant_id ?? null,
+      power_plant_name: tag?.power_plant_name ?? null,
+      context: dsSafeTrim(tag?.context) || "PLANT",
+      pathname, source: dsSafeTrim(tag?.source) || "historico",
+      data_kind: dsSafeTrim(tag?.data_kind) || "analog",
+      unit: tag?.unit ?? null, description: tag?.description ?? null
+    });
+    added++;
+  }
+  if (added) {
+    updateStageUIForPlant(plantId);
+    renderDataStudioTagsTableForPlant(plantId, visible);
+  }
+  dsUpdateSelectAllButtons(plantId);
+}
+
+function dsDeselectAllTagsForPlant(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  if (!ps) return;
+  const visible = Array.isArray(ps.availableTags) ? ps.availableTags : [];
+  const visibleKeys = new Set(visible.map(t => selectedTagKey(t)).filter(Boolean));
+  ps.selectedTags = ps.selectedTags.filter(t => !visibleKeys.has(selectedTagKey(t)));
+  updateStageUIForPlant(plantId);
+  renderDataStudioTagsTableForPlant(plantId, visible);
+  dsUpdateSelectAllButtons(plantId);
+}
+
+function dsUpdateSelectAllButtons(plantId) {
+  const ps = DATASTUDIO_PLANTS[String(plantId)];
+  const visible = Array.isArray(ps?.availableTags) ? ps.availableTags : [];
+  const allSelected = visible.length > 0 && visible.every(t => isTagSelectedForPlant(plantId, t));
+  const btnSel = document.querySelector(`[data-action="selectAllTags"][data-plant="${plantId}"]`);
+  const btnDes = document.querySelector(`[data-action="deselectAllTags"][data-plant="${plantId}"]`);
+  if (btnSel) btnSel.style.display = allSelected ? "none" : "";
+  if (btnDes) btnDes.style.display = allSelected ? "" : "none";
+}
+
 // --- Per-plant tag selection ---
 
 function isTagSelectedForPlant(plantId, tagOrPath) {
@@ -2531,9 +2603,29 @@ function addSelectedTagForPlant(plantId, tag) {
 function removeSelectedTagForPlant(plantId, tagOrPath) {
   const ps = DATASTUDIO_PLANTS[String(plantId)];
   if (!ps) return;
+  // selectedTagKey devolve "id:<id>" para tags com id e "path:<pathname>" para
+  // strings — comparar só pela key nunca casa quando o chip remove por pathname.
   const key = selectedTagKey(tagOrPath);
-  ps.selectedTags = ps.selectedTags.filter(t => selectedTagKey(t) !== key);
+  const path = dsSafeTrim(typeof tagOrPath === "string" ? tagOrPath : tagOrPath?.pathname);
+  ps.selectedTags = ps.selectedTags.filter(t => {
+    if (selectedTagKey(t) === key) return false;
+    if (path && dsSafeTrim(t?.pathname) === path) return false;
+    return true;
+  });
   updateStageUIForPlant(plantId);
+  _removeSeriesFromRenderedChart(plantId, path);
+}
+
+function _removeSeriesFromRenderedChart(plantId, pathname) {
+  if (!pathname) return;
+  const pid = String(plantId);
+  const ps = DATASTUDIO_PLANTS[pid];
+  const payload = DATASTUDIO_STATE.seriesByPlant?.[pid];
+  if (!ps || !ps.chartInstance || !payload) return;
+  const series = _extractSeriesList(payload).filter(s => dsSafeTrim(s?.pathname) !== pathname);
+  const newPayload = { ...(typeof payload === "object" && !Array.isArray(payload) ? payload : {}), series };
+  DATASTUDIO_STATE.seriesByPlant[pid] = newPayload;
+  renderChartForPlant(pid, newPayload);
 }
 
 function updateSelectedTagsCounterForPlant(plantId) {
@@ -2713,7 +2805,19 @@ async function confirmCatalogSelectionForPlant(plantId) {
   ps.catalogOpen = false;
   updateStageUIForPlant(plantId);
 
-  // Salvar seleção e plotar gráfico automaticamente
+  const chartWrap = document.getElementById(`dsChartWrap_${plantId}`);
+  if (chartWrap) {
+    chartWrap.style.position = "relative";
+    let loader = chartWrap.querySelector(".chart-loader");
+    if (!loader) {
+      loader = document.createElement("div");
+      loader.className = "chart-loader";
+      loader.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      chartWrap.prepend(loader);
+    }
+    loader.classList.remove("hidden");
+  }
+
   try {
     const payload = buildPayloadForPlant(plantId, ps.selectedTags);
     const res = await apiFetch("/datastudio/selection", {
@@ -2730,7 +2834,6 @@ async function confirmCatalogSelectionForPlant(plantId) {
       DATASTUDIO_STATE.selectionId = DATASTUDIO_STATE.selectionId || selectionId;
     }
 
-    // Buscar e plotar séries
     if (selectionId) {
       const seriesRes = await apiFetch(`/datastudio/series?selection_id=${selectionId}`);
       if (seriesRes.ok) {
@@ -2743,6 +2846,9 @@ async function confirmCatalogSelectionForPlant(plantId) {
   } catch (e) {
     console.error("[DataStudio] erro ao confirmar e plotar:", e);
     window.alert(`Erro ao carregar gráfico: ${e.message || e}`);
+  } finally {
+    const loader = chartWrap?.querySelector(".chart-loader");
+    if (loader) loader.classList.add("hidden");
   }
 }
 
@@ -2794,7 +2900,25 @@ async function fetchDataStudioTagsForPlant(plantId) {
       return [];
     };
 
-    const tags = normalizeTagsResponse(parsed);
+    const rawTags = normalizeTagsResponse(parsed);
+
+    // app.tag_catalog pode ter o mesmo pathname em mais de uma linha (ids
+    // diferentes) — só uma rota devolve dados. Mantém uma por pathname,
+    // priorizando source=historico.
+    const byPath = new Map();
+    for (const t of rawTags) {
+      const p = dsSafeTrim(t?.pathname || t?.path_name || t?.tag);
+      if (!p) continue;
+      const prev = byPath.get(p);
+      if (!prev) { byPath.set(p, t); continue; }
+      const rank = x => (dsSafeTrim(x?.source).toLowerCase() === "historico" ? 0 : 1);
+      if (rank(t) < rank(prev)) byPath.set(p, t);
+    }
+    const tags = [...byPath.values()];
+    if (tags.length < rawTags.length) {
+      console.warn(`[DataStudio] Plant ${plantId}: ${rawTags.length - tags.length} tags duplicadas (mesmo pathname) removidas do catálogo`);
+    }
+
     const plantName = dsGetPlantNameById(plantId);
     tags.forEach(t => {
       if (!t.power_plant_name && plantName) t.power_plant_name = plantName;
@@ -3770,6 +3894,22 @@ async function loadFavoriteSelections(favs) {
   // Atualizar datas para hoje (não ficar preso na data antiga)
   if (typeof dsAutoSetDateRange === "function") dsAutoSetDateRange();
 
+  // Mostrar spinners nos chart wraps
+  for (const pid of Object.keys(favsByPlant)) {
+    const chartWrap = document.getElementById(`dsChartWrap_${pid}`);
+    if (chartWrap) {
+      chartWrap.style.position = "relative";
+      let loader = chartWrap.querySelector(".chart-loader");
+      if (!loader) {
+        loader = document.createElement("div");
+        loader.className = "chart-loader";
+        loader.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        chartWrap.prepend(loader);
+      }
+      loader.classList.remove("hidden");
+    }
+  }
+
   // Buscar séries de TODOS os favoritos e mergear por planta
   setDataStudioLoadingSeries(true);
   try {
@@ -3782,28 +3922,25 @@ async function loadFavoriteSelections(favs) {
 
     for (const [pid, plantFavs] of Object.entries(favsByPlant)) {
       let mergedSeries = [];
-      console.log(`[datastudio] planta ${pid}: carregando ${plantFavs.length} favorito(s)`);
 
       for (const fav of plantFavs) {
         const params = new URLSearchParams({ selection_id: String(fav.id), ...dateOverrides });
         const res = await apiFetch(`/datastudio/series?${params.toString()}`);
         if (!res.ok) throw new Error(`Falha ao carregar séries para fav ${fav.id} (${res.status})`);
         const data = await res.json();
-        console.log(`[datastudio]   fav ${fav.id} raw keys:`, Object.keys(data || {}));
         const parsed = dsNormalizeApiBody(data);
-        console.log(`[datastudio]   fav ${fav.id} parsed keys:`, Object.keys(parsed || {}));
         const seriesList = _extractSeriesList(parsed);
-        console.log(`[datastudio]   fav ${fav.id}: ${seriesList.length} série(s)`);
         mergedSeries = mergedSeries.concat(seriesList);
       }
 
-      console.log(`[datastudio] planta ${pid}: total ${mergedSeries.length} série(s) mergeadas`);
       const mergedPayload = { series: mergedSeries };
       DATASTUDIO_STATE.seriesByPlant[pid] = mergedPayload;
 
       const ps = DATASTUDIO_PLANTS[pid];
       if (ps) {
         ps.catalogConfirmed = true;
+        const favTags = mergedSeries.map(s => ({ pathname: s.pathname, ...s }));
+        ps.selectedTags = favTags;
         updateStageUIForPlant(pid);
       }
       renderChartForPlant(pid, mergedPayload);
@@ -3813,6 +3950,10 @@ async function loadFavoriteSelections(favs) {
     window.alert(`Não foi possível carregar favoritos: ${err.message || err}`);
   } finally {
     setDataStudioLoadingSeries(false);
+    for (const pid of Object.keys(favsByPlant)) {
+      const loader = document.getElementById(`dsChartWrap_${pid}`)?.querySelector(".chart-loader");
+      if (loader) loader.classList.add("hidden");
+    }
   }
 }
 
@@ -3830,6 +3971,21 @@ async function fetchDataStudioSeriesBySelection() {
   if (!selEntries.length) {
     window.alert("Salve uma seleção antes de carregar séries.");
     return;
+  }
+
+  for (const [plantId] of selEntries) {
+    const chartWrap = document.getElementById(`dsChartWrap_${plantId}`);
+    if (chartWrap) {
+      chartWrap.style.position = "relative";
+      let loader = chartWrap.querySelector(".chart-loader");
+      if (!loader) {
+        loader = document.createElement("div");
+        loader.className = "chart-loader";
+        loader.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        chartWrap.prepend(loader);
+      }
+      loader.classList.remove("hidden");
+    }
   }
 
   setDataStudioLoadingSeries(true);
@@ -3851,12 +4007,10 @@ async function fetchDataStudioSeriesBySelection() {
       DATASTUDIO_STATE.seriesByPlant[plantId] = parsed;
     }
 
-    // Render chart for each plant
     for (const [plantId, seriesPayload] of Object.entries(DATASTUDIO_STATE.seriesByPlant)) {
       const ps = DATASTUDIO_PLANTS[plantId];
       if (ps) {
         ps.catalogConfirmed = true;
-        // keep catalog open — don't force close
         updateStageUIForPlant(plantId);
       }
       renderChartForPlant(plantId, seriesPayload);
@@ -3866,6 +4020,10 @@ async function fetchDataStudioSeriesBySelection() {
     window.alert(`Não foi possível carregar séries: ${err.message || err}`);
   } finally {
     setDataStudioLoadingSeries(false);
+    for (const [plantId] of selEntries) {
+      const loader = document.getElementById(`dsChartWrap_${plantId}`)?.querySelector(".chart-loader");
+      if (loader) loader.classList.add("hidden");
+    }
   }
 }
 
@@ -4144,6 +4302,12 @@ function _wireDataStudioPlantBlocksDelegation() {
         break;
       case "confirmCatalog":
         confirmCatalogSelectionForPlant(plantId);
+        break;
+      case "selectAllTags":
+        dsSelectAllTagsForPlant(plantId);
+        break;
+      case "deselectAllTags":
+        dsDeselectAllTagsForPlant(plantId);
         break;
       case "removeTag": {
         const path = target.dataset.path;
@@ -4625,6 +4789,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncTopSummaryLayout();
 
   wirePortfolioControls();
+  _dismissAppLoader();
   await refreshDashboard();
   setInterval(refreshDashboard, DASHBOARD_REFRESH_INTERVAL_MS);
 
@@ -4651,6 +4816,56 @@ let _portfolioMiniCharts = new Map();
 let _portfolioRenderGen = 0;
 const _miniChartDataCache = new Map(); // plantId → { ts, body }
 const _MINI_CHART_CACHE_TTL_MS = 5 * 60 * 1000;
+let _miniChartPowerSource = "inverter"; // "inverter" | "meter"
+let _miniChartIrrSource = "poa";        // "poa" | "ghi"
+let _miniChartAnyMeter = false;
+let _miniChartAnyGhi = false;
+
+function miniChartSetPowerSource(source) {
+  _miniChartPowerSource = source;
+  const invBtn = document.getElementById("miniToggleInverter");
+  const meterBtn = document.getElementById("miniToggleMeter");
+  if (invBtn) invBtn.classList.toggle("active", source === "inverter");
+  if (meterBtn) meterBtn.classList.toggle("active", source === "meter");
+  _showMiniChartLoader(() => _reRenderAllMiniCharts());
+}
+
+function miniChartSetIrrSource(source) {
+  _miniChartIrrSource = source;
+  const poaBtn = document.getElementById("miniTogglePoa");
+  const ghiBtn = document.getElementById("miniToggleGhi");
+  if (poaBtn) poaBtn.classList.toggle("active", source === "poa");
+  if (ghiBtn) ghiBtn.classList.toggle("active", source === "ghi");
+  _showMiniChartLoader(() => _reRenderAllMiniCharts());
+}
+
+function _showMiniChartLoader(renderFn) {
+  const loader = document.getElementById("miniChartLoader");
+  if (loader) loader.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      renderFn();
+      if (loader) loader.classList.add("hidden");
+    });
+  });
+}
+
+function _reRenderAllMiniCharts() {
+  _miniChartDataCache.forEach((cached, plantId) => {
+    const canvasId = "mini-chart-" + plantId;
+    const canvas = document.getElementById(canvasId);
+    if (canvas && cached?.body) {
+      _renderMiniChartOnCanvas(canvas, plantId, cached.body);
+    }
+  });
+}
+
+function _updateMiniChartToggleVisibility() {
+  const powerWrap = document.getElementById("miniChartPowerToggleWrap");
+  const irrWrap = document.getElementById("miniChartIrrToggleWrap");
+  if (powerWrap) powerWrap.style.display = _miniChartAnyMeter ? "" : "none";
+  if (irrWrap) irrWrap.style.display = _miniChartAnyGhi ? "" : "none";
+}
 
 function portfolioSetView(view) {
   _portfolioCurrentView = view;
@@ -4825,6 +5040,118 @@ function updatePortfolioCardAlarms() {
   });
 }
 
+// ======================================================
+// BADGE DE ACONTECIMENTOS NO CARD
+// Mostra um sinal de exclamação pulsando no topo do card
+// para TODA issue que o robô detectou naquela usina
+// (usina desligada/potência 0, temperatura alta, PR caindo,
+// clipping, mudanças de estado etc.). Vermelho = tem crítico;
+// âmbar = só avisos. Tooltip lista os acontecimentos; clique
+// abre o relatório do robô.
+// ======================================================
+let _issuePopEl = null;
+
+function _ensureIssuePop() {
+  if (_issuePopEl) return _issuePopEl;
+  _issuePopEl = document.createElement("div");
+  _issuePopEl.className = "plant-issue-pop hidden";
+  document.body.appendChild(_issuePopEl);
+  _issuePopEl.addEventListener("mouseleave", () => _issuePopEl.classList.add("hidden"));
+  window.addEventListener("scroll", () => _issuePopEl.classList.add("hidden"), { passive: true });
+  return _issuePopEl;
+}
+
+function _showIssuePop(badge, plantName, plantIssues) {
+  if (!plantIssues || !plantIssues.length) return;
+  const pop = _ensureIssuePop();
+  const sevMeta = s => (String(s || "").toLowerCase() === "critical")
+    ? ["crítico", "#ff4d4f"]
+    : ["aviso", "#ffb020"];
+
+  pop.innerHTML = `
+    <div class="plant-issue-pop__title">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      ${plantName || "Usina"} · ${plantIssues.length} acontecimento${plantIssues.length > 1 ? "s" : ""}
+    </div>
+    ${plantIssues.map(i => {
+      const [lbl, color] = sevMeta(i.severity);
+      return `
+      <div class="plant-issue-pop__item">
+        <span class="plant-issue-pop__dot" style="background:${color};box-shadow:0 0 6px ${color};"></span>
+        <div class="plant-issue-pop__body">
+          <div class="plant-issue-pop__msg">${i.message || i.type || "acontecimento"}</div>
+          <div class="plant-issue-pop__meta">${i.device_name ? i.device_name + " · " : ""}<span style="color:${color};">${lbl}</span></div>
+        </div>
+      </div>`;
+    }).join("")}
+    <div class="plant-issue-pop__hint">clique no badge para abrir o relatório completo</div>`;
+
+  pop.classList.remove("hidden");
+  const r = badge.getBoundingClientRect();
+  const w = pop.offsetWidth || 272;
+  const h = pop.offsetHeight || 0;
+  let left = Math.min(r.right - w, window.innerWidth - w - 8);
+  if (left < 8) left = 8;
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+}
+
+function updatePlantCardIssueBadges() {
+  const grid = document.getElementById("portfolioCardView");
+  if (!grid) return;
+  const issues = Array.isArray(ROBOT_STATE?.issues) ? ROBOT_STATE.issues : [];
+  const byPlant = new Map();
+  issues.forEach(i => {
+    const pid = String(i.plant_id ?? "");
+    if (!pid) return;
+    if (!byPlant.has(pid)) byPlant.set(pid, []);
+    byPlant.get(pid).push(i);
+  });
+
+  grid.querySelectorAll(".plant-card[data-plant-id]").forEach(card => {
+    const pid = String(card.dataset.plantId);
+    const plantIssues = byPlant.get(pid) || [];
+    let badge = card.querySelector(".plant-card__issue-badge");
+
+    if (!plantIssues.length) {
+      if (badge) badge.remove();
+      return;
+    }
+
+    const hasCritical = plantIssues.some(i => (i.severity || "").toLowerCase() === "critical");
+
+    if (!badge) {
+      badge = document.createElement("div");
+      badge.className = "plant-card__issue-badge";
+      badge.setAttribute("role", "button");
+      badge.setAttribute("aria-label", "Acontecimentos da usina");
+      badge.innerHTML = `<i class="fa-solid fa-exclamation"></i><span class="plant-card__issue-count"></span>`;
+      badge.addEventListener("click", (e) => {
+        e.stopPropagation();
+        try { robotToggleReport(true); } catch (_) {}
+      });
+      badge.addEventListener("mouseenter", () => {
+        _showIssuePop(badge, badge._plantName, badge._issues || []);
+      });
+      badge.addEventListener("mouseleave", () => {
+        setTimeout(() => {
+          if (_issuePopEl && !_issuePopEl.matches(":hover") && !badge.matches(":hover")) {
+            _issuePopEl.classList.add("hidden");
+          }
+        }, 160);
+      });
+      card.appendChild(badge);
+    }
+    badge._issues = plantIssues;
+    badge._plantName = card.dataset.plantName || "";
+    badge.classList.toggle("is-critical", hasCritical);
+    const countEl = badge.querySelector(".plant-card__issue-count");
+    if (countEl) countEl.textContent = plantIssues.length > 1 ? String(plantIssues.length) : "";
+  });
+}
+
 function renderPortfolioCards(plants) {
   const grid = document.getElementById("portfolioCardView");
   if (!grid) return;
@@ -4994,6 +5321,9 @@ function renderPortfolioCards(plants) {
   if (chartTargets.length > 0) {
     _startMiniChartBatch(chartTargets, renderGen);
   }
+
+  // Reaplica os badges de acontecimentos (o re-render zera o grid)
+  try { updatePlantCardIssueBadges(); } catch (_) {}
 }
 
 /**
@@ -5097,8 +5427,23 @@ async function _fetchAndRenderOneMiniChart(canvasId, plantId, renderGen) {
 
 function _renderMiniChartOnCanvas(canvas, plantId, body) {
   const labels   = body?.labels || [];
-  const powerRaw = body?.activePower || body?.active_power_kw || body?.power_kw || [];
-  const irrRaw   = body?.irradiance  || body?.irradiance_wm2  || [];
+  const meterRaw = body?.meterPower || [];
+  const irrGhiRaw = body?.irradianceGhi || [];
+  const hasMeter = Array.isArray(meterRaw) && meterRaw.some(v => v != null);
+  const hasGhi = Array.isArray(irrGhiRaw) && irrGhiRaw.some(v => v != null);
+
+  if (hasMeter && !_miniChartAnyMeter) { _miniChartAnyMeter = true; _updateMiniChartToggleVisibility(); }
+  if (hasGhi && !_miniChartAnyGhi) { _miniChartAnyGhi = true; _updateMiniChartToggleVisibility(); }
+
+  const useMeter = _miniChartPowerSource === "meter" && hasMeter;
+  const useGhi = _miniChartIrrSource === "ghi" && hasGhi;
+
+  const powerRaw = useMeter
+    ? meterRaw
+    : (body?.activePower || body?.active_power_kw || body?.power_kw || []);
+  const irrRaw = useGhi
+    ? irrGhiRaw
+    : (body?.irradiance || body?.irradiance_wm2 || []);
   const prRaw    = body?.pr          || body?.pr_pct          || body?.performance_ratio || [];
 
   if (!labels.length || (!powerRaw.length && !irrRaw.length)) return;
@@ -5120,21 +5465,27 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
 
   const datasets = [];
 
+  const powerLabel = useMeter ? "Multimedidor" : "Active Power";
+  const powerBorderColor = useMeter ? "rgba(77,163,255,0.9)" : "rgba(127,208,85,0.9)";
+  const powerBgColor = useMeter ? "rgba(77,163,255,0.07)" : "rgba(127,208,85,0.07)";
+  const powerHoverColor = useMeter ? "#4da3ff" : "#7fd055";
+  const irrLabel = useGhi ? "Irrad. GHI" : "Irrad. POA";
+
   if (powerRaw.length) {
     datasets.push({
-      label: "Active Power", _raw: powerRaw, _unit: "kW",
+      label: powerLabel, _raw: powerRaw, _unit: "kW",
       data: pNums, yAxisID: "y",
-      borderColor: "rgba(127,208,85,0.9)",
-      backgroundColor: "rgba(127,208,85,0.07)",
+      borderColor: powerBorderColor,
+      backgroundColor: powerBgColor,
       borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
-      pointHoverBackgroundColor: "#7fd055",
+      pointHoverBackgroundColor: powerHoverColor,
       tension: 0.4, fill: true,
     });
   }
 
   if (irrRaw.length) {
     datasets.push({
-      label: "Irrad. POA", _raw: irrRaw, _unit: "W/m\u00B2",
+      label: irrLabel, _raw: irrRaw, _unit: "W/m\u00B2",
       data: iNums, yAxisID: "y1",
       borderColor: "rgba(255,200,50,0.85)",
       backgroundColor: "transparent",
@@ -5284,12 +5635,13 @@ function closePlantEditModal() {
   _PLANT_EDIT_ID = null;
 }
 
+let _pemCabinsCache = [];
+
 async function _pemLoadDevices(plantId) {
   const list = document.getElementById("pemDevicesList");
   if (!list) return;
   list.innerHTML = `<div class="plant-edit-empty">Carregando…</div>`;
   try {
-    // Carregar device types para o select (uma vez)
     const selEl = document.getElementById("pemDeviceTypeSelect");
     if (selEl && selEl.options.length <= 1) {
       try {
@@ -5303,22 +5655,45 @@ async function _pemLoadDevices(plantId) {
         });
       } catch(_) {}
     }
-    // Carregar dispositivos
-    const res   = await apiFetch(`/plants/${plantId}/devices/options`);
-    const data  = await res.json();
-    const items = data?.items || [];
+
+    const [devRes, cabRes] = await Promise.all([
+      apiFetch(`/plants/${plantId}/devices/options`),
+      apiFetch(`/plants/${plantId}/cabin-groups`)
+    ]);
+    const devData = await devRes.json();
+    const cabData = await cabRes.json();
+    const items  = devData?.items || [];
+    _pemCabinsCache = cabData?.items || [];
+
     if (!items.length) { list.innerHTML = `<div class="plant-edit-empty">Nenhum dispositivo.</div>`; return; }
     const canCmd = _canSendCommand();
-    list.innerHTML = items.map(d => `
+
+    const cabinOptions = (currentCabinId) => {
+      let html = `<option value="">Sem cabine</option>`;
+      for (const c of _pemCabinsCache) {
+        const sel = c.id === currentCabinId ? " selected" : "";
+        html += `<option value="${c.id}"${sel}>${c.name}</option>`;
+      }
+      return html;
+    };
+
+    list.innerHTML = items.map(d => {
+      const isInverter = (d.device_type || "").toLowerCase() === "inverter";
+      const cabinSelect = isInverter && _pemCabinsCache.length
+        ? `<select class="pem-cabin-select pem-ctrl" data-device-id="${d.device_id}"
+             title="Cabine">${cabinOptions(d.cabin_id)}</select>`
+        : "";
+      return `
       <div class="plant-edit-device-row" data-device-id="${d.device_id}">
         <div class="plant-edit-device-info">
           <span class="plant-edit-device-type">${d.device_type || "—"}</span>
-          <span class="plant-edit-device-meta">#${d.device_id}</span>
+          <span class="plant-edit-device-meta">#${d.device_id}${d.cabin_name ? ` · ${d.cabin_name}` : ""}</span>
         </div>
         <div class="plant-edit-inline">
           <input class="plant-edit-device-name" type="text"
             value="${(d.device_name || "").replace(/"/g,'&quot;')}"
             placeholder="Nome do dispositivo"/>
+          ${cabinSelect}
           <button class="plant-edit-device-save" type="button" title="Salvar nome">
             <i class="fa-solid fa-check"></i>
           </button>
@@ -5329,14 +5704,19 @@ async function _pemLoadDevices(plantId) {
           </button>
         </div>
         <div class="plant-edit-device-feedback" id="pem-devfb-${d.device_id}"></div>
-      </div>`).join("");
+      </div>`;
+    }).join("");
+
     _pemWireCommandButtons(list);
+
     list.querySelectorAll(".plant-edit-device-row").forEach(row => {
       const did     = row.dataset.deviceId;
       const inp     = row.querySelector(".plant-edit-device-name");
       const saveBtn = row.querySelector(".plant-edit-device-save");
       const delBtn  = row.querySelector(".pem-del-device-btn");
+      const cabSel  = row.querySelector(".pem-cabin-select");
       const fb      = row.querySelector(".plant-edit-device-feedback");
+
       saveBtn?.addEventListener("click", async () => {
         const n = inp.value.trim();
         if (!n) { fb.textContent = "Nome vazio."; fb.className = "plant-edit-device-feedback err"; return; }
@@ -5351,6 +5731,24 @@ async function _pemLoadDevices(plantId) {
         } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; }
         finally    { saveBtn.disabled = false; }
       });
+
+      cabSel?.addEventListener("change", async () => {
+        const cabinId = cabSel.value ? parseInt(cabSel.value) : null;
+        fb.textContent = "Vinculando…"; fb.className = "plant-edit-device-feedback";
+        try {
+          const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices/${did}/cabin`, {
+            method: "PATCH", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({cabin_id: cabinId})
+          });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          const cabName = cabinId ? _pemCabinsCache.find(c => c.id === cabinId)?.name : null;
+          const meta = row.querySelector(".plant-edit-device-meta");
+          if (meta) meta.textContent = `#${did}${cabName ? ` · ${cabName}` : ""}`;
+          fb.textContent = cabinId ? `✓ Vinculado à ${cabName}` : "✓ Desvinculado";
+          fb.className = "plant-edit-device-feedback ok";
+        } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; }
+      });
+
       delBtn?.addEventListener("click", async () => {
         if (!confirm(`Excluir dispositivo #${did}? Esta ação desativa o dispositivo.`)) return;
         delBtn.disabled = true; fb.textContent = "Excluindo…"; fb.className = "plant-edit-device-feedback";
@@ -5379,12 +5777,57 @@ async function _pemLoadCabins(plantId) {
     const items = data?.items || [];
     if (!items.length) { list.innerHTML = `<div class="plant-edit-empty">Nenhuma cabine.</div>`; return; }
     list.innerHTML = items.map(c => `
-      <div class="plant-edit-device-row">
+      <div class="plant-edit-device-row" data-cabin-id="${c.id}">
         <div class="plant-edit-device-info">
-          <span class="plant-edit-device-type">${c.name}</span>
           <span class="plant-edit-device-meta">${c.inverter_count} inv.</span>
         </div>
+        <div class="plant-edit-inline">
+          <input class="plant-edit-device-name" type="text"
+            value="${(c.name || "").replace(/"/g,'&quot;')}"
+            placeholder="Nome da cabine"/>
+          <button class="plant-edit-device-save" type="button" title="Salvar nome">
+            <i class="fa-solid fa-check"></i>
+          </button>
+          <button class="pem-del-cabin-btn" type="button" title="Excluir cabine">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+        <div class="plant-edit-device-feedback" id="pem-cabfb-${c.id}"></div>
       </div>`).join("");
+
+    list.querySelectorAll(".plant-edit-device-row").forEach(row => {
+      const cid     = row.dataset.cabinId;
+      const inp     = row.querySelector(".plant-edit-device-name");
+      const saveBtn = row.querySelector(".plant-edit-device-save");
+      const delBtn  = row.querySelector(".pem-del-cabin-btn");
+      const fb      = row.querySelector(".plant-edit-device-feedback");
+
+      saveBtn?.addEventListener("click", async () => {
+        const n = inp.value.trim();
+        if (!n) { fb.textContent = "Nome vazio."; fb.className = "plant-edit-device-feedback err"; return; }
+        saveBtn.disabled = true; fb.textContent = "Salvando…"; fb.className = "plant-edit-device-feedback";
+        try {
+          const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/cabin-groups/${cid}`, {
+            method: "PATCH", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({name: n})
+          });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          fb.textContent = "✓ Salvo!"; fb.className = "plant-edit-device-feedback ok";
+        } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; }
+        finally    { saveBtn.disabled = false; }
+      });
+
+      delBtn?.addEventListener("click", async () => {
+        if (!confirm(`Excluir cabine #${cid}? Inversores vinculados serão desvinculados.`)) return;
+        delBtn.disabled = true; fb.textContent = "Excluindo…"; fb.className = "plant-edit-device-feedback";
+        try {
+          const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/cabin-groups/${cid}`, { method: "DELETE" });
+          if (!r.ok) throw new Error((await r.json())?.error || `HTTP ${r.status}`);
+          fb.textContent = "✓ Removida!"; fb.className = "plant-edit-device-feedback ok";
+          setTimeout(() => row.remove(), 900);
+        } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-device-feedback err"; delBtn.disabled = false; }
+      });
+    });
   } catch(e) {
     console.error("[_pemLoadCabins]", e);
     list.innerHTML = `<div class="plant-edit-empty plant-edit-empty--error">Erro ao carregar cabines.</div>`;
@@ -5395,23 +5838,49 @@ async function pemAddDevice() {
   if (!_PLANT_EDIT_ID) return;
   const selEl  = document.getElementById("pemDeviceTypeSelect");
   const nameEl = document.getElementById("pemDeviceNameInput");
+  const qtyEl  = document.getElementById("pemDeviceQtyInput");
   const fb     = document.getElementById("pemAddDeviceFeedback");
   const dtId   = selEl?.value;
-  const name   = nameEl?.value?.trim();
+  const displayBase = nameEl?.value?.trim() || "";
+  const qty    = Math.max(1, Math.min(100, parseInt(qtyEl?.value) || 1));
   if (!dtId) { fb.textContent = "Selecione o tipo."; fb.className = "plant-edit-feedback err"; return; }
-  if (!name) { fb.textContent = "Nome obrigatório."; fb.className = "plant-edit-feedback err"; return; }
-  fb.textContent = "Adicionando…"; fb.className = "plant-edit-feedback";
-  try {
-    const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices`, {
-      method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({device_type_id: parseInt(dtId), name, display_name: name})
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
-    fb.textContent = `✓ Dispositivo #${d.device_id} adicionado.`; fb.className = "plant-edit-feedback ok";
-    if (nameEl) nameEl.value = "";
-    _pemLoadDevices(_PLANT_EDIT_ID);
-  } catch(e) { fb.textContent = e.message || "Erro."; fb.className = "plant-edit-feedback err"; }
+
+  fb.textContent = qty > 1 ? `Adicionando 0/${qty}…` : "Adicionando…";
+  fb.className = "plant-edit-feedback";
+
+  const created = [];
+  const errors = [];
+  for (let i = 0; i < qty; i++) {
+    const dname = displayBase ? (qty > 1 ? `${displayBase} ${i + 1}` : displayBase) : undefined;
+    try {
+      const payload = {device_type_id: parseInt(dtId)};
+      if (dname) payload.display_name = dname;
+      const r = await apiFetch(`/plants/${_PLANT_EDIT_ID}/devices`, {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `HTTP ${r.status}`);
+      created.push(d.device_id);
+      if (qty > 1) fb.textContent = `Adicionando ${i + 1}/${qty}…`;
+    } catch(e) {
+      errors.push(`${dname || `#${i+1}`}: ${e.message}`);
+    }
+  }
+
+  if (errors.length) {
+    fb.textContent = `${created.length} criados, ${errors.length} erro(s): ${errors[0]}`;
+    fb.className = "plant-edit-feedback err";
+  } else if (qty === 1) {
+    fb.textContent = `✓ Dispositivo #${created[0]} adicionado.`;
+    fb.className = "plant-edit-feedback ok";
+  } else {
+    fb.textContent = `✓ ${created.length} dispositivos adicionados.`;
+    fb.className = "plant-edit-feedback ok";
+  }
+  if (nameEl) nameEl.value = "";
+  if (qtyEl) qtyEl.value = "1";
+  _pemLoadDevices(_PLANT_EDIT_ID);
 }
 
 async function pemAddCabin() {
@@ -5801,11 +6270,11 @@ document.addEventListener("DOMContentLoaded",()=>{
 // ─────────────────────────────────────────────────
 // CRIAR USINA
 // ─────────────────────────────────────────────────
-function openPlantCreateModal() {
+async function openPlantCreateModal() {
   const modal = document.getElementById("plantCreateModal");
   if (!modal) return;
   ["plantCreateNameInput","plantCreateDcInput","plantCreateAcInput",
-   "plantCreateLocationInput","plantCreateCustomerInput"].forEach(id => {
+   "plantCreateLocationInput"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
@@ -5814,7 +6283,22 @@ function openPlantCreateModal() {
 
   const _u = JSON.parse(localStorage.getItem("user") || "{}");
   const customerSection = document.getElementById("plantCreateCustomerSection");
-  if (customerSection) customerSection.style.display = _u.is_superuser ? "" : "none";
+  const custSelect = document.getElementById("plantCreateCustomerInput");
+  if (customerSection) {
+    customerSection.style.display = _u.is_superuser ? "" : "none";
+    if (_u.is_superuser && custSelect) {
+      custSelect.innerHTML = `<option value="">Carregando...</option>`;
+      try {
+        const res = await apiFetch("/plants/customers");
+        const data = await res.json();
+        const items = data?.items || [];
+        custSelect.innerHTML = `<option value="">Selecione o cliente</option>` +
+          items.map(c => `<option value="${c.id}">${c.name} (${c.plant_count} usinas)</option>`).join("");
+      } catch(e) {
+        custSelect.innerHTML = `<option value="">Erro ao carregar</option>`;
+      }
+    }
+  }
 
   modal.classList.remove("hidden");
   modal.setAttribute("aria-hidden", "false");
@@ -5866,9 +6350,10 @@ async function createNewPlant() {
       fb.textContent = `✓ Usina "${data.plant_name}" criada (ID ${data.plant_id}).`;
       fb.className = "plant-edit-feedback ok";
     }
-    setTimeout(async () => {
+    setTimeout(() => {
       closePlantCreateModal();
-      try { await loadPortfolio(); } catch(_) {}
+      openPlantEditModal(data.plant_id, data.plant_name, payload.capacity_dc || 0);
+      switchPlantEditTab("devices");
     }, 1200);
   } catch(e) {
     if (fb) { fb.textContent = e.message || "Erro ao criar usina."; fb.className = "plant-edit-feedback err"; }
@@ -6277,6 +6762,7 @@ async function robotRefresh() {
   robotUpdateBubble(state);
   robotUpdateBadge(issues.length);
   robotUpdateExpandBtn(issues.length > 1);
+  try { updatePlantCardIssueBadges(); } catch (_) {}
 
   if (!issues.length) {
     ROBOT_STATE.currentIndex = 0;
@@ -6300,8 +6786,19 @@ async function robotRefresh() {
     ROBOT_STATE.currentIndex = 0;
     robotUpdateAvatar(state);
     robotStartCycle();
+
+    // Som de notificação — só após o primeiro refresh (não toca no load)
+    if (_robotSoundPrimed) {
+      try {
+        const hasCritical = issues.some(i => (i.severity || "").toLowerCase() === "critical");
+        window.NotifySound?.play(hasCritical ? "critical" : "warning");
+      } catch (_) {}
+    }
   }
+  _robotSoundPrimed = true;
 }
+
+let _robotSoundPrimed = false;
 
 function _robotApplyMutedState() {
   robotShowBubble(false);
@@ -7748,7 +8245,10 @@ function _explorerExportCsv() {
   const csvLines = [cols.join(sep)];
   result.rows.forEach(row => {
     csvLines.push(cols.map(c => {
-      let v = String(row[c] ?? "");
+      let v = row[c];
+      if (v == null) return "";
+      if (typeof v === "number") return String(v).replace(".", ",");
+      v = String(v);
       if (v.includes(sep) || v.includes('"') || v.includes("\n")) v = '"' + v.replace(/"/g, '""') + '"';
       return v;
     }).join(sep));
@@ -7817,8 +8317,115 @@ function _explorerRenderLegend(items) {
 let _ticketsInited = false;
 let _tkCurrentFilter = "all";
 let _tkViewingId = null;
+const TK_SEEN_KEY = "tk_last_seen";
+let _tkBadgeInterval = null;
+let _tkPrevUnseen = 0;
+
+function _tkGetLastSeen() {
+  return localStorage.getItem(TK_SEEN_KEY) || "2000-01-01T00:00:00Z";
+}
+function _tkMarkSeen() {
+  localStorage.setItem(TK_SEEN_KEY, new Date().toISOString());
+  _tkPrevUnseen = 0;
+  const b = document.getElementById("tkBadge");
+  if (b) b.style.display = "none";
+  const btn = document.getElementById("btnTickets");
+  if (btn) btn.classList.remove("tk-btn-pulse");
+  _tkUpdateBellPanel([]);
+}
+
+function _tkPlaySound() {
+  // Centralizado: respeita a preferência de mudo e o desbloqueio de áudio
+  if (window.NotifySound) { try { NotifySound.play("ticket"); } catch (_) {} return; }
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const notes = [880, 1108.73, 1318.51];
+    notes.forEach((freq, i) => {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, ac.currentTime + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + i * 0.12 + 0.3);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start(ac.currentTime + i * 0.12);
+      osc.stop(ac.currentTime + i * 0.12 + 0.3);
+    });
+  } catch (e) { /* silent */ }
+}
+
+function _tkUpdateBellPanel(items) {
+  const badge = document.getElementById("notifBellBadge");
+  const list = document.getElementById("notifPanelList");
+  const platformUnseen = (typeof _notifAllUpdates !== "undefined" ? _notifAllUpdates : []).filter(u => {
+    const lastSeen = parseInt(localStorage.getItem("platform_last_seen_update") || "0");
+    return u.id > lastSeen;
+  }).length;
+  const totalUnseen = items.length + platformUnseen;
+
+  if (badge) {
+    if (totalUnseen > 0) {
+      badge.textContent = totalUnseen > 9 ? "9+" : totalUnseen;
+      badge.style.display = "";
+    } else {
+      badge.style.display = "none";
+    }
+  }
+
+  if (list && items.length > 0) {
+    const ticketHtml = items.map(t => {
+      const preview = t.last_comment ? t.last_comment.substring(0, 80) + (t.last_comment.length > 80 ? "…" : "") : "";
+      const statusLabel = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[t.status] || t.status;
+      const who = t.username ? `<span class="notif-item-date">${_tkEsc(t.username)}</span>` : "";
+      return `<div class="notif-item unread" style="cursor:pointer;" onclick="document.getElementById('btnTickets')?.click();">
+        <div class="notif-item-title"><i class="fa-solid fa-headset" style="margin-right:6px;color:#39e58c;"></i>Ticket #${t.id} — ${_tkEsc(t.title)}</div>
+        <div class="notif-item-desc">${preview ? _tkEsc(preview) : statusLabel}</div>
+        ${who}
+      </div>`;
+    }).join("");
+
+    const existingTickets = list.querySelectorAll('.tk-notif-section');
+    existingTickets.forEach(el => el.remove());
+
+    list.insertAdjacentHTML("afterbegin",
+      `<div class="tk-notif-section">${ticketHtml}</div>`
+    );
+  }
+}
+
+async function _tkPollUnseen() {
+  try {
+    const since = _tkGetLastSeen();
+    const res = await apiFetch(`/tickets/unseen?since=${encodeURIComponent(since)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const count = data.unseen || 0;
+    const items = data.items || [];
+
+    const b = document.getElementById("tkBadge");
+    const btn = document.getElementById("btnTickets");
+
+    if (count > 0) {
+      if (b) { b.textContent = count > 9 ? "9+" : count; b.style.display = "flex"; }
+      if (btn) btn.classList.add("tk-btn-pulse");
+      _tkUpdateBellPanel(items);
+      if (count > _tkPrevUnseen) _tkPlaySound();
+    } else {
+      if (b) b.style.display = "none";
+      if (btn) btn.classList.remove("tk-btn-pulse");
+    }
+    _tkPrevUnseen = count;
+  } catch (e) { /* silent */ }
+}
+function _tkStartPolling() {
+  if (_tkBadgeInterval) return;
+  _tkPollUnseen();
+  _tkBadgeInterval = setInterval(_tkPollUnseen, 30000);
+}
 
 function initTicketsOnce() {
+  _tkMarkSeen();
   if (_ticketsInited) { tkLoadList(); return; }
   _ticketsInited = true;
 
@@ -8007,11 +8614,23 @@ async function tkOpenDetail(id) {
 
     if (user.is_superuser) {
       document.getElementById("tkStatusSelect")?.addEventListener("change", async function() {
-        await apiFetch(`/tickets/${this.dataset.id}`, {
-          method: "PUT",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({status: this.value})
-        });
+        const sel = this;
+        const newStatus = sel.value;
+        const tid = sel.dataset.id;
+        sel.disabled = true;
+        try {
+          const r = await apiFetch(`/tickets/${tid}`, {
+            method: "PUT",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({status: newStatus})
+          });
+          if (r.ok) {
+            const lbl = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[newStatus] || newStatus;
+            sel.style.borderColor = "rgba(57,229,140,0.5)";
+            setTimeout(() => { sel.style.borderColor = ""; }, 1500);
+          }
+        } catch (e) { console.warn("[status update]", e); }
+        sel.disabled = false;
       });
     }
 
@@ -8315,4 +8934,5 @@ function _notifEsc(s) {
 
 document.addEventListener("DOMContentLoaded", () => {
   setTimeout(initPlatformUpdates, 1500);
+  setTimeout(_tkStartPolling, 2000);
 });

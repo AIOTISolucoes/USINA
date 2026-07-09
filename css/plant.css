@@ -5595,6 +5595,7 @@ body.plant-map-mode #sec-trackers,
 body.plant-map-mode #multimeterSection,
 body.plant-map-mode #relaySection,
 body.plant-map-mode #trackersSection,
+body.plant-map-mode #thermalRelaySection,
 body.plant-map-mode #cabineMapChartDock {
   display: none !important;
 }
@@ -6365,6 +6366,23 @@ body.plant-map-mode .cabine-map-stage {
   width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
 }
 .unif-leg-dot--online  { background: #7fd055; box-shadow: 0 0 5px rgba(127,208,85,.8); }
+
+/* Botão PDF na topbar do unifilar */
+.unif-pdf-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 7px;
+  font-size: 12px; font-weight: 600;
+  font-family: var(--font-display); letter-spacing: .04em;
+  color: #ef4444; background: rgba(239,68,68,.10);
+  border: 1px solid rgba(239,68,68,.25);
+  cursor: pointer; transition: background .2s, box-shadow .2s;
+  flex-shrink: 0;
+}
+.unif-pdf-btn:hover {
+  background: rgba(239,68,68,.20);
+  box-shadow: 0 0 10px rgba(239,68,68,.15);
+}
+.unif-pdf-btn i { font-size: 13px; }
 .unif-leg-dot--alarm   { background: #ef9f27; box-shadow: 0 0 5px rgba(239,159,39,.8); }
 .unif-leg-dot--offline { background: rgba(100,120,110,.5); border: 1px solid rgba(100,120,110,.3); }
 
@@ -9668,4 +9686,130 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   .ronda-fullpanel-header { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .ronda-fullpanel-title { font-size: 13px; }
   .ronda-full-kpi-row { flex-direction: column; }
+}
+
+/* ======================================================
+   DAILY CHART TOGGLE BUTTONS
+   ====================================================== */
+.daily-chart-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.chart-toggle-group {
+  display: inline-flex;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(57, 229, 140, 0.15);
+  background: rgba(6, 18, 14, 0.5);
+}
+.chart-toggle-btn {
+  background: transparent;
+  border: none;
+  color: rgba(154, 219, 184, 0.55);
+  font-family: 'Inter', 'JetBrains Mono', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 160ms ease-out, color 160ms ease-out;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.chart-toggle-btn:not(:last-child) {
+  border-right: 1px solid rgba(57, 229, 140, 0.12);
+}
+.chart-toggle-btn:hover {
+  background: rgba(57, 229, 140, 0.08);
+  color: rgba(154, 219, 184, 0.85);
+}
+.chart-toggle-btn:active {
+  transform: scale(0.97);
+}
+.chart-toggle-btn.active {
+  background: rgba(57, 229, 140, 0.18);
+  color: #39e58c;
+  box-shadow: inset 0 0 8px rgba(57, 229, 140, 0.1);
+}
+
+/* ======================================================
+   FULL-PAGE LOADING OVERLAY
+   ====================================================== */
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #030a05;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.4s ease;
+}
+.app-loader.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+.app-loader-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.app-loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(57, 229, 140, 0.15);
+  border-top-color: #39e58c;
+  border-radius: 50%;
+  animation: appLoaderSpin 0.8s linear infinite;
+}
+.app-loader-text {
+  margin-top: 14px;
+  color: rgba(57, 229, 140, 0.5);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+@keyframes appLoaderSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ======================================================
+   CHART INLINE LOADER (toggle switch feedback)
+   ====================================================== */
+.chart-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+}
+
+/* ======================================================
+   THERMAL RELAY — reuses relay-row / relay-details styles
+   ====================================================== */
+#thermalRelaySection .device-mini-header,
+#thermalRelaySection .relay-row--table {
+  grid-template-columns: 14px minmax(220px,1.45fr) minmax(130px,0.95fr) minmax(130px,0.95fr) minmax(130px,0.95fr) minmax(160px,1fr) !important;
+}
+#thermalRelaySection .relay-details-panel.open {
+  grid-template-columns: 1fr 1fr;
+}
+#thermalRelaySection .relay-flag-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-content: center;
+  background: rgba(3, 10, 5, 0.7);
+  border-radius: 8px;
+  transition: opacity 0.2s ease;
+}
+.chart-loader i {
+  font-size: 22px;
+  color: #39e58c;
+  filter: drop-shadow(0 0 6px rgba(57, 229, 140, 0.4));
+}
+.chart-loader.hidden {
+  display: none;
 }

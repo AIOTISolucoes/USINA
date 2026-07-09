@@ -23,6 +23,12 @@
   </head>
 
   <body>
+    <div id="appLoader" class="app-loader">
+      <div class="app-loader-content">
+        <div class="app-loader-spinner"></div>
+        <div class="app-loader-text">Carregando...</div>
+      </div>
+    </div>
     <div class="layout">
       <!-- MENU LATERAL (APENAS 3 ÍCONES) -->
       <aside class="sidebar">
@@ -50,8 +56,9 @@
           <button id="btnExplorer" class="sidebar-btn" type="button" title="Explorador de Dados" aria-label="Explorador de Dados">
             <i class="fa-solid fa-database"></i>
           </button>
-          <button id="btnTickets" class="sidebar-btn" type="button" title="Suporte / Tickets" aria-label="Suporte / Tickets">
+          <button id="btnTickets" class="sidebar-btn" type="button" title="Suporte / Tickets" aria-label="Suporte / Tickets" style="position:relative;">
             <i class="fa-solid fa-headset"></i>
+            <span id="tkBadge" class="tk-badge" style="display:none;"></span>
           </button>
           <button id="btnSwagger" class="sidebar-btn" type="button" title="API Explorer" aria-label="API Explorer">
             <i class="fa-solid fa-code"></i>
@@ -199,6 +206,22 @@
                       <i class="fa-solid fa-magnifying-glass portfolio-search-icon"></i>
                       <input id="portfolioSearchInput" class="portfolio-search-input" type="text" placeholder="Buscar usina..." autocomplete="off"/>
                     </div>
+                    <div id="miniChartPowerToggleWrap" class="chart-toggle-group mini-chart-toggle" style="display:none">
+                      <button id="miniToggleInverter" class="chart-toggle-btn active" type="button" onclick="miniChartSetPowerSource('inverter')">
+                        <i class="fa-solid fa-bolt"></i> Inv
+                      </button>
+                      <button id="miniToggleMeter" class="chart-toggle-btn" type="button" onclick="miniChartSetPowerSource('meter')">
+                        <i class="fa-solid fa-gauge-high"></i> Med
+                      </button>
+                    </div>
+                    <div id="miniChartIrrToggleWrap" class="chart-toggle-group mini-chart-toggle" style="display:none">
+                      <button id="miniTogglePoa" class="chart-toggle-btn active" type="button" onclick="miniChartSetIrrSource('poa')">
+                        POA
+                      </button>
+                      <button id="miniToggleGhi" class="chart-toggle-btn" type="button" onclick="miniChartSetIrrSource('ghi')">
+                        GHI
+                      </button>
+                    </div>
                     <div class="portfolio-view-toggle">
                       <button id="btnViewList" class="view-toggle-btn active" title="Visualização em lista">
                         <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="4" width="16" height="2" rx="1" fill="currentColor"/><rect x="2" y="9" width="16" height="2" rx="1" fill="currentColor"/><rect x="2" y="14" width="16" height="2" rx="1" fill="currentColor"/></svg>
@@ -239,7 +262,12 @@
                     <tbody id="portfolioTbody"></tbody>
                   </table>
                 </div>
-                <div class="portfolio-cards-grid hidden" id="portfolioCardView"></div>
+                <div style="position:relative">
+                  <div id="miniChartLoader" class="chart-loader hidden">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                  </div>
+                  <div class="portfolio-cards-grid hidden" id="portfolioCardView"></div>
+                </div>
               </section>
             </div>
           </div>
@@ -809,8 +837,10 @@
         </div>
 
         <div class="plant-edit-section" id="plantCreateCustomerSection" style="display:none">
-          <label for="plantCreateCustomerInput">Customer ID (superuser)</label>
-          <input type="number" id="plantCreateCustomerInput" placeholder="ID do cliente" min="1" step="1" />
+          <label for="plantCreateCustomerInput">Cliente</label>
+          <select id="plantCreateCustomerInput" class="pem-ctrl">
+            <option value="">Carregando...</option>
+          </select>
         </div>
 
         <div id="plantCreateFeedback" class="plant-edit-feedback" aria-live="polite"></div>
@@ -884,7 +914,8 @@
               <select id="pemDeviceTypeSelect" class="pem-ctrl">
                 <option value="">Tipo...</option>
               </select>
-              <input type="text" id="pemDeviceNameInput" class="pem-ctrl" placeholder="Nome do dispositivo" />
+              <input type="text" id="pemDeviceNameInput" class="pem-ctrl" placeholder="Display name (opcional)" />
+              <input type="number" id="pemDeviceQtyInput" class="pem-ctrl pem-ctrl--qty" placeholder="Qtd" min="1" max="100" value="1" />
               <button type="button" class="pem-action-btn pem-action-btn--add" onclick="pemAddDevice()">
                 <i class="fa-solid fa-plus"></i> Adicionar
               </button>
@@ -1004,7 +1035,9 @@
     });
     </script>
 
+    <script src="js/notify_sound.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/help_tour.js"></script>
 
     <!-- Portfolio: forçar card view no mobile após app.js inicializar -->
     <script>

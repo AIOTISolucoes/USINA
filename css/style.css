@@ -1030,6 +1030,40 @@ body {
 /* =============================================================================
    TICKETS / SUPORTE
    ============================================================================= */
+.tk-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  min-width: 16px; height: 16px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-shadow: 0 0 6px rgba(239,68,68,0.5);
+  animation: tk-badge-pulse 2s infinite;
+}
+@keyframes tk-badge-pulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+  50% { box-shadow: 0 0 12px rgba(239,68,68,0.8); }
+}
+
+.tk-btn-pulse {
+  animation: tk-icon-blink 1.2s ease-in-out infinite;
+}
+@keyframes tk-icon-blink {
+  0%, 100% { color: inherit; }
+  50% { color: #39e58c; filter: drop-shadow(0 0 6px rgba(57,229,140,0.7)); }
+}
+
+.tk-notif-section {
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 4px;
+}
+
 .tk-shell {
   padding: 24px 28px;
   max-width: 960px;

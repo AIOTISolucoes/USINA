@@ -79,8 +79,12 @@ const KB = {
   attachmentsLoading: false,
   wizardPendingAttachments: [],
   opts: null,
-  classifications: null
+  classifications: null,
+  osNotes: { workOrderId: null, loading: false, items: [], error: null },
+  osNoteDrafts: { comment: "", feedback: "", feedbackRating: 0 }
 }
+
+const OS_RATING_LABELS = { 1: "Muito Ruim", 2: "Ruim", 3: "Médio", 4: "Bom", 5: "Ótimo" }
 
 document.addEventListener("DOMContentLoaded", () => {
   initUser()
@@ -704,6 +708,8 @@ function closeDetail() {
   document.getElementById("osdBody").innerHTML = ""
   KB.currentOs = null
   KB.currentOsDetail = null
+  KB.osNotes = { workOrderId: null, loading: false, items: [], error: null }
+  KB.osNoteDrafts = { comment: "", feedback: "", feedbackRating: 0 }
 }
 
 function openDeleteModal() {
@@ -908,6 +914,38 @@ function renderOsDetail(detail) {
         ${tasks.length ? tasks.map((task) => renderOsDetailTaskCard(task)).join("") : '<div class="task-empty">Nenhuma tarefa encontrada para este filtro.</div>'}
       </div>
     </section>
+
+    <section class="osd-section-card">
+      <div class="osd-section-head">
+        <div>
+          <div class="osd-section-title">Feedback</div>
+          <div class="osd-section-meta" id="osdFeedbackMeta">Retorno da execução</div>
+        </div>
+      </div>
+      <div id="osdFeedbackList" class="osd-note-list"></div>
+      <div class="osd-rating" id="osdFeedbackRating">
+        ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="osd-star ${KB.osNoteDrafts.feedbackRating >= n ? "active" : ""}" data-rating="${n}" title="${OS_RATING_LABELS[n]}"><i class="fa-solid fa-star"></i></button>`).join("")}
+        <span class="osd-rating-label" id="osdFeedbackRatingLabel">${KB.osNoteDrafts.feedbackRating ? OS_RATING_LABELS[KB.osNoteDrafts.feedbackRating] : "Avalie a execução"}</span>
+      </div>
+      <textarea id="osdFeedbackInput" class="osd-textarea osd-note-input" placeholder="Escreva o feedback da execução...">${esc(KB.osNoteDrafts.feedback || "")}</textarea>
+      <div class="osd-note-actions">
+        <button type="button" id="osdFeedbackBtn" class="wz-btn-primary osd-note-btn"><i class="fa-solid fa-clipboard-check"></i> Registrar feedback</button>
+      </div>
+    </section>
+
+    <section class="osd-section-card">
+      <div class="osd-section-head">
+        <div>
+          <div class="osd-section-title">Comentários</div>
+          <div class="osd-section-meta" id="osdCommentsMeta"></div>
+        </div>
+      </div>
+      <div id="osdCommentList" class="osd-note-list"></div>
+      <textarea id="osdCommentInput" class="osd-textarea osd-note-input" placeholder="Escreva um comentário...">${esc(KB.osNoteDrafts.comment || "")}</textarea>
+      <div class="osd-note-actions">
+        <button type="button" id="osdCommentBtn" class="wz-btn-primary osd-note-btn"><i class="fa-solid fa-comment"></i> Comentar</button>
+      </div>
+    </section>
   `
 
   document.getElementById("osdTaskFilter")?.addEventListener("change", (event) => {
@@ -922,6 +960,18 @@ function renderOsDetail(detail) {
       if (task) openTaskModal(task)
     })
   })
+
+  document.getElementById("osdFeedbackBtn")?.addEventListener("click", () => submitWorkOrderNote("feedback"))
+  document.getElementById("osdCommentBtn")?.addEventListener("click", () => submitWorkOrderNote("comment"))
+  document.getElementById("osdFeedbackInput")?.addEventListener("input", (event) => { KB.osNoteDrafts.feedback = event.target.value })
+  document.getElementById("osdCommentInput")?.addEventListener("input", (event) => { KB.osNoteDrafts.comment = event.target.value })
+  document.querySelectorAll("#osdFeedbackRating .osd-star").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      KB.osNoteDrafts.feedbackRating = Number(btn.dataset.rating) || 0
+      updateFeedbackRatingWidget()
+    })
+  })
+  loadWorkOrderNotes(detail)
 }
 
 function renderOsDetailTaskCard(task) {
@@ -955,6 +1005,180 @@ function renderOsDetailTaskCard(task) {
       </div>
     </button>
   `
+}
+
+// =============================================================================
+// Notas da OS (feedback + comentarios) — "OS".os_work_order_note via /work-orders/{id}/notes
+// =============================================================================
+
+async function loadWorkOrderNotes(detail) {
+  const workOrderId = getWorkOrderId(detail)
+  if (!workOrderId) return
+
+  if (String(KB.osNotes.workOrderId) === String(workOrderId) && !KB.osNotes.error) {
+    renderWorkOrderNotes()
+    return
+  }
+
+  KB.osNotes = { workOrderId, loading: true, items: [], error: null }
+  renderWorkOrderNotes()
+
+  try {
+    const data = await apiJson(`/work-orders/${workOrderId}/notes`)
+    if (String(KB.osNotes.workOrderId) !== String(workOrderId)) return
+    const items = Array.isArray(data?.items) ? data.items : []
+    KB.osNotes = { workOrderId, loading: false, items, error: null }
+  } catch (error) {
+    console.warn("[OS] notes", error)
+    if (String(KB.osNotes.workOrderId) !== String(workOrderId)) return
+    KB.osNotes = { workOrderId, loading: false, items: [], error: error.message || "Erro ao carregar" }
+  }
+  renderWorkOrderNotes()
+}
+
+function renderWorkOrderNotes() {
+  const feedbackList = document.getElementById("osdFeedbackList")
+  const commentList = document.getElementById("osdCommentList")
+  if (!feedbackList || !commentList) return
+  if (KB.currentOsDetail && String(getWorkOrderId(KB.currentOsDetail)) !== String(KB.osNotes.workOrderId)) return
+
+  if (KB.osNotes.loading) {
+    const loading = '<div class="osd-note-empty"><span class="kb-spinner"></span></div>'
+    feedbackList.innerHTML = loading
+    commentList.innerHTML = loading
+    return
+  }
+
+  if (KB.osNotes.error) {
+    const err = `<div class="osd-note-empty">Erro ao carregar: ${esc(KB.osNotes.error)}</div>`
+    feedbackList.innerHTML = err
+    commentList.innerHTML = err
+    return
+  }
+
+  const feedbacks = KB.osNotes.items.filter((note) => note.note_type === "feedback")
+  const comments = KB.osNotes.items.filter((note) => note.note_type !== "feedback")
+
+  feedbackList.innerHTML = feedbacks.length
+    ? feedbacks.map(renderWorkOrderNoteItem).join("")
+    : '<div class="osd-note-empty">Nenhum feedback registrado.</div>'
+  commentList.innerHTML = comments.length
+    ? comments.map(renderWorkOrderNoteItem).join("")
+    : '<div class="osd-note-empty">Nenhum comentário ainda.</div>'
+
+  const fbMeta = document.getElementById("osdFeedbackMeta")
+  if (fbMeta) fbMeta.textContent = feedbacks.length ? `Total: ${feedbacks.length}` : "Retorno da execução"
+  const cmMeta = document.getElementById("osdCommentsMeta")
+  if (cmMeta) cmMeta.textContent = comments.length ? `Total: ${comments.length}` : ""
+}
+
+function noteAuthorLabel(note) {
+  if (note.author_name) return note.author_name
+  const user = getCurrentUser()
+  if (note.created_by_user_id && user?.id && String(note.created_by_user_id) === String(user.id)) {
+    return user.username || "Você"
+  }
+  if (note.created_by_user_id) return `Usuário #${note.created_by_user_id}`
+  return "Sem autor"
+}
+
+function fmtNoteDateTime(value) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+}
+
+function updateFeedbackRatingWidget() {
+  const rating = KB.osNoteDrafts.feedbackRating || 0
+  document.querySelectorAll("#osdFeedbackRating .osd-star").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.rating) <= rating)
+  })
+  const label = document.getElementById("osdFeedbackRatingLabel")
+  if (label) label.textContent = rating ? OS_RATING_LABELS[rating] : "Avalie a execução"
+}
+
+function renderNoteStars(rating) {
+  const value = Number(rating) || 0
+  if (!value) return ""
+  const stars = [1, 2, 3, 4, 5]
+    .map((n) => `<i class="fa-solid fa-star ${n <= value ? "on" : ""}"></i>`)
+    .join("")
+  return `<div class="osd-note-stars">${stars}<span>${OS_RATING_LABELS[value] || ""}</span></div>`
+}
+
+function renderWorkOrderNoteItem(note) {
+  const author = noteAuthorLabel(note)
+  const isFeedback = note.note_type === "feedback"
+  const user = getCurrentUser()
+  const mine = !isFeedback && note.created_by_user_id && user?.id &&
+    String(note.created_by_user_id) === String(user.id)
+  return `
+    <div class="osd-note-item ${isFeedback ? "feedback" : "chat"} ${mine ? "mine" : ""}">
+      <div class="osd-note-head">
+        <span class="osd-note-author"><span class="osd-note-avatar">${avatarInitials(author)}</span>${esc(author)}</span>
+        <span class="osd-note-date">${esc(fmtNoteDateTime(note.created_at))}</span>
+      </div>
+      ${isFeedback ? renderNoteStars(note.rating) : ""}
+      ${note.content ? `<div class="osd-note-text">${esc(note.content)}</div>` : ""}
+    </div>
+  `
+}
+
+async function submitWorkOrderNote(noteType) {
+  if (!KB.currentOsDetail) return
+  const workOrderId = getWorkOrderId(KB.currentOsDetail)
+  if (!workOrderId) return
+
+  const inputId = noteType === "feedback" ? "osdFeedbackInput" : "osdCommentInput"
+  const btnId = noteType === "feedback" ? "osdFeedbackBtn" : "osdCommentBtn"
+  const input = document.getElementById(inputId)
+  const content = (input?.value || "").trim()
+  const rating = noteType === "feedback" ? (KB.osNoteDrafts.feedbackRating || 0) : 0
+
+  if (noteType === "feedback" && !rating) {
+    showToast("Selecione uma avaliação (estrelas) para o feedback", "error")
+    return
+  }
+  if (noteType === "comment" && !content) {
+    showToast("Escreva o comentário antes de enviar", "error")
+    return
+  }
+
+  const btn = document.getElementById(btnId)
+  const prevHtml = btn?.innerHTML
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando' }
+
+  try {
+    const user = getCurrentUser()
+    await apiJson(`/work-orders/${workOrderId}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        note_type: noteType,
+        created_by_user_id: user?.id || null,
+        rating: rating || null
+      })
+    })
+
+    if (input) input.value = ""
+    if (noteType === "feedback") {
+      KB.osNoteDrafts.feedback = ""
+      KB.osNoteDrafts.feedbackRating = 0
+      updateFeedbackRatingWidget()
+    } else {
+      KB.osNoteDrafts.comment = ""
+    }
+    showToast(noteType === "feedback" ? "Feedback registrado" : "Comentário adicionado", "success")
+
+    KB.osNotes = { workOrderId: null, loading: false, items: [], error: null }
+    await loadWorkOrderNotes(KB.currentOsDetail)
+  } catch (error) {
+    showToast(`Erro ao salvar: ${error.message}`, "error")
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = prevHtml }
+  }
 }
 
 async function saveCurrentWorkOrderDetail() {
@@ -2279,7 +2503,6 @@ async function searchAssets() {
   } catch (error) {
     console.error("[OS] search assets", error)
     loading?.classList.add("hidden")
-    if (footer) footer.textContent = ""
     if (list) {
       list.innerHTML =
         '<div class="asset-empty"><i class="fa-solid fa-triangle-exclamation"></i><span>Erro ao buscar ativos</span></div>'
@@ -2352,9 +2575,8 @@ async function loadRespUsers() {
   }
 
   try {
-    const date = document.getElementById("respDatePicker")?.value || new Date().toISOString().split("T")[0]
-    const data = await apiJson(`/users?date=${encodeURIComponent(date)}`)
-    const users = Array.isArray(data?.users) ? data.users : Array.isArray(data) ? data : []
+    const data = await apiJson(`/workers`)
+    const users = Array.isArray(data?.items) ? data.items : Array.isArray(data?.users) ? data.users : Array.isArray(data) ? data : []
     KB.respUsers = users
     filterRespTable(document.getElementById("respSearchInput")?.value || "")
   } catch (error) {

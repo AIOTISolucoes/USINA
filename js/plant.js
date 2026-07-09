@@ -13,6 +13,13 @@ function _canSendCommand() {
   return ["superuser", "operator", "admin_customer"].includes(r);
 }
 
+function _dismissAppLoader() {
+  const el = document.getElementById("appLoader");
+  if (!el) return;
+  el.classList.add("fade-out");
+  setTimeout(() => el.remove(), 450);
+}
+
 // ======================================================
 // ESTADO ÚNICO DA USINA (FONTE DA VERDADE NO FRONT)
 // ======================================================
@@ -233,6 +240,14 @@ function normalizeDailyPayload(payload) {
     Array.isArray(payload.irradiance_wm2) ? payload.irradiance_wm2.slice() :
     [];
 
+  const irrGhiRaw =
+    Array.isArray(payload.irradianceGhi) ? payload.irradianceGhi.slice() :
+    [];
+
+  const meterRaw =
+    Array.isArray(payload.meterPower) ? payload.meterPower.slice() :
+    [];
+
   const expectedRaw =
     Array.isArray(payload.expectedPower) ? payload.expectedPower.slice() :
     Array.isArray(payload.expected_power_kw) ? payload.expected_power_kw.slice() :
@@ -284,6 +299,8 @@ function normalizeDailyPayload(payload) {
       minute,
       power: powerRaw[i] != null ? asNumber(powerRaw[i], 0) : 0,
       irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : 0,
+      irrGhi: irrGhiRaw[i] != null ? asNumber(irrGhiRaw[i], 0) : null,
+      meter: meterRaw[i] != null ? asNumber(meterRaw[i], 0) : null,
       expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : 0
     });
   }
@@ -313,10 +330,14 @@ function normalizeDailyPayload(payload) {
 
   const mapP = new Map();
   const mapI = new Map();
+  const mapIG = new Map();
+  const mapM = new Map();
   const mapE = new Map();
   points.forEach(p => {
     mapP.set(p.minute, p.power);
     mapI.set(p.minute, p.irr);
+    if (p.irrGhi != null) mapIG.set(p.minute, p.irrGhi);
+    if (p.meter != null) mapM.set(p.minute, p.meter);
     mapE.set(p.minute, p.expected);
   });
 
@@ -326,6 +347,8 @@ function normalizeDailyPayload(payload) {
   const labels = [];
   const activePower = [];
   const irradiance = [];
+  const irradianceGhi = [];
+  const meterPower = [];
   const expectedPower = [];
 
   for (let m = 0; m <= lastMin; m += step) {
@@ -333,18 +356,26 @@ function normalizeDailyPayload(payload) {
     const mm = String(m % 60).padStart(2, "0");
     labels.push(`${hh}:${mm}`);
 
-    // sem buraco visual: minutos faltantes viram 0
     activePower.push(mapP.has(m) ? mapP.get(m) : 0);
     irradiance.push(mapI.has(m) ? mapI.get(m) : 0);
+    irradianceGhi.push(mapIG.has(m) ? mapIG.get(m) : null);
+    meterPower.push(mapM.has(m) ? mapM.get(m) : null);
     expectedPower.push(mapE.has(m) ? mapE.get(m) : 0);
   }
+
+  const hasMeter = meterPower.some(v => v != null);
+  const hasGhi = irradianceGhi.some(v => v != null);
 
   return {
     ...payload,
     labels,
     activePower,
     irradiance,
-    expectedPower
+    irradianceGhi,
+    meterPower,
+    expectedPower,
+    hasMeter,
+    hasGhi
   };
 }
 
@@ -354,11 +385,16 @@ function normalizeDailyPayload(payload) {
 // ======================================================
 let DAILY = null;
 let MONTHLY = null;
+let DAILY_CHART_POWER_SOURCE = "inverter"; // "inverter" | "meter"
+let DAILY_CHART_IRR_SOURCE = "poa";        // "poa" | "ghi"
+let DAILY_CHART_EXPECTED_SOURCE = "pvsyst"; // "pvsyst" | "capacity" (linha reta no capacity AC)
 let ACTIVE_ALARMS = [];
+let _plantAlarmSoundPrimed = false;
 let PLANT_ALARMS_MENU_OPEN = false;
 let INVERTERS_REALTIME = [];
-let RELAY_REALTIME = null; // ✅ NEW
+let RELAY_REALTIME = null;
 let MULTIMETER_REALTIME = null;
+let THERMALRELAY_REALTIME = [];
 window.INVERTERS_REALTIME = INVERTERS_REALTIME;
 window.RELAY_REALTIME = RELAY_REALTIME;
 window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
@@ -379,10 +415,13 @@ let PLANT_CAPABILITIES = {
   hasRelay: null,
   hasTransformer: null,
   hasMultimeter: null,
+  hasTracker: null,
+  hasWeatherStation: null,
+  hasThermalRelay: null,
   relayDeviceId: null,
   transformerDeviceId: null,
   multimeterDeviceId: null,
-  breakers: [],          // [{id, level, name, cabin_id, device_id}]
+  breakers: [],
 };
 
 /* ── Breaker helpers ── */
@@ -1354,6 +1393,8 @@ async function acknowledgePlantAlarm(alarm) {
 }
 
 async function fetchTrackersRealtime(plantId) {
+  if (PLANT_CAPABILITIES.hasTracker === false) return { items: [], plant_center: null, plant_bounds: null };
+
   const res = await fetch(`${API_BASE}/plants/${plantId}/trackers/realtime`, {
     headers: buildAuthHeaders()
   });
@@ -1399,6 +1440,7 @@ async function fetchMonthlyEnergy(plantId) {
 }
 
 async function safeFetchRelayIfSupported(plantId) {
+  if (PLANT_CAPABILITIES.hasRelay === false) return null;
   if (RELAY_SUPPORTED === false) return null;
 
   const url = `${API_BASE}/plants/${plantId}/relay/realtime`;
@@ -1420,6 +1462,7 @@ async function safeFetchRelayIfSupported(plantId) {
 }
 
 async function safeFetchMultimeterIfSupported(plantId) {
+  if (PLANT_CAPABILITIES.hasMultimeter === false) return null;
   if (MULTIMETER_SUPPORTED === false) return null;
 
   const url = `${API_BASE}/plants/${plantId}/multimeter/realtime`;
@@ -1447,9 +1490,12 @@ async function fetchPlantCapabilities(plantId) {
     });
     if (!res.ok) return;
     const data = normalizeApiBody(await res.json());
-    PLANT_CAPABILITIES.hasRelay       = !!data.has_relay;
-    PLANT_CAPABILITIES.hasTransformer = !!data.has_transformer;
-    PLANT_CAPABILITIES.hasMultimeter  = !!data.has_multimeter;
+    PLANT_CAPABILITIES.hasRelay          = !!data.has_relay;
+    PLANT_CAPABILITIES.hasTransformer    = !!data.has_transformer;
+    PLANT_CAPABILITIES.hasMultimeter     = !!data.has_multimeter;
+    PLANT_CAPABILITIES.hasTracker        = !!data.has_tracker;
+    PLANT_CAPABILITIES.hasWeatherStation = !!data.has_weather_station;
+    PLANT_CAPABILITIES.hasThermalRelay   = !!data.has_thermalrelay;
     PLANT_CAPABILITIES.relayDeviceId       = data.relay_device_id != null ? String(data.relay_device_id) : null;
     PLANT_CAPABILITIES.transformerDeviceId = data.transformer_device_id != null ? String(data.transformer_device_id) : null;
     PLANT_CAPABILITIES.multimeterDeviceId  = data.multimeter_device_id != null ? String(data.multimeter_device_id) : null;
@@ -1471,6 +1517,182 @@ function setMultimeterSectionVisible(visible) {
   if (section) section.style.display = visible ? "" : "none";
   const btn = document.getElementById("navBtnMultimeter");
   if (btn) btn.style.display = visible ? "" : "none";
+}
+
+// ============================================================
+// THERMAL RELAY
+// ============================================================
+
+function setThermalRelaySectionVisible(visible) {
+  const section = document.getElementById("thermalRelaySection");
+  if (section) section.style.display = visible ? "" : "none";
+  const btn = document.getElementById("navBtnThermalRelay");
+  if (btn) btn.style.display = visible ? "" : "none";
+}
+
+async function fetchThermalRelayRealtime(plantId) {
+  if (PLANT_CAPABILITIES.hasThermalRelay === false) return [];
+  try {
+    const url = `${API_BASE}/plants/${plantId}/thermalrelay/realtime`;
+    const res = await fetch(url, { headers: buildAuthHeaders() });
+    if (!res.ok) return [];
+    const payload = normalizeApiBody(await res.json());
+    return Array.isArray(payload?.items) ? payload.items : [];
+  } catch (e) {
+    console.warn("[thermalrelay/realtime]", e);
+    return [];
+  }
+}
+
+function _trVal(v, unit, decimals = 1) {
+  if (v == null || v === "" || v === "N/A") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toFixed(decimals) + (unit ? " " + unit : "");
+}
+
+
+function renderThermalRelayPanel(items) {
+  const container = document.getElementById("thermalRelayContainer");
+  if (!container) return;
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="relay-details-empty">Nenhum dado disponível.</div>';
+    return;
+  }
+
+  container.innerHTML = items.map((item, idx) => {
+    const d = item.data || {};
+    const online = item.is_online;
+    const onlineCls = online ? "online" : "offline";
+    const badgeCls = online ? "relay-state--online" : "relay-state--offline";
+    const badgeTxt = online ? "Online" : "Offline";
+    const age = item.age_seconds != null ? _formatThermalAge(item.age_seconds) : "—";
+    const maxTemp = _thermalMaxTemp(d);
+    const uid = `thermalRelay_${idx}`;
+
+    return `
+    <div class="device-mini-table" style="margin-bottom:10px;">
+      ${idx === 0 ? `
+      <div class="device-mini-header">
+        <span></span>
+        <span>Relé Térmico</span>
+        <span>TEMP. MÁX</span>
+        <span>CORRENTE</span>
+        <span>STATUS</span>
+        <span>ÚLTIMA LEITURA</span>
+      </div>` : ""}
+      <div class="device-mini-stack">
+        <div class="relay-row relay-row--table ${onlineCls}" id="${uid}Row"
+             style="cursor:pointer;">
+          <span class="status-dot"></span>
+          <div class="relay-left">
+            <div class="relay-title">${_thermalRelayDisplayName(item.device_name)}
+              <i class="fa-solid fa-chevron-down relay-expand-icon"></i>
+            </div>
+          </div>
+          <div class="device-metric-cell" data-label="TEMP. MÁX"><strong>${maxTemp}</strong></div>
+          <div class="device-metric-cell" data-label="CORRENTE"><strong>${_trVal(d.load_current, "A")}</strong></div>
+          <div class="device-metric-cell" data-label="STATUS"><span class="relay-state ${badgeCls}">${badgeTxt}</span></div>
+          <div class="device-metric-cell relay-timestamp-cell" data-label="ÚLTIMA LEITURA"><strong>${age}</strong></div>
+        </div>
+
+        <div class="relay-details-panel" id="${uid}Details" style="max-height:0;">
+          <div class="relay-details-card">
+            <div class="relay-details-title">Temperaturas</div>
+            <div class="relay-details-grid">
+              ${_trChip("S1", d.temp_atual_s1, "°C", d.temp_max_s1)}
+              ${_trChip("S2", d.temp_atual_s2, "°C", d.temp_max_s2)}
+              ${_trChip("S3", d.temp_atual_s3, "°C", d.temp_max_s3)}
+              ${_trChip("Ambiente", d.temp_atual_amb, "°C")}
+              ${_trChip("Óleo Topo", d.temp_top_oil, "°C")}
+              ${_trChip("Óleo Base", d.temp_bottom_oil, "°C")}
+              ${_trChip("Enrolamento", d.temp_winding, "°C")}
+            </div>
+          </div>
+          <div class="relay-details-card">
+            <div class="relay-details-title">Óleo &amp; Carga</div>
+            <div class="relay-details-grid">
+              ${_trChip("Nível Óleo", d.oil_level_pct, "%")}
+              ${_trChip("Pressão", d.oil_pressure, "bar")}
+              ${_trChip("Umidade", d.moisture_in_oil, "ppm")}
+              ${_trChip("DGA Gás", d.dga_total_gas, "ppm")}
+              ${_trChip("Corrente", d.load_current, "A")}
+              ${_trFlagChip("Ventiladores", d.fan_on, "Ligados", "Desligados")}
+              ${_trFlagChip("Falha Ventil.", d.fan_fault, "FALHA", "OK")}
+              ${_trFlagChip("Falha Sensor", d.sensor_fault, "FALHA", "OK")}
+            </div>
+          </div>
+          <div class="relay-details-card" style="grid-column:1/-1;">
+            <div class="relay-details-title">Alarmes / Trips</div>
+            <div class="relay-flag-grid">
+              ${_trFlag("Geral", d.alarm_general)}
+              ${_trFlag("Trip Geral", d.trip_general)}
+              ${_trFlag("Temp Óleo", d.oil_temp_alarm)}
+              ${_trFlag("Trip Óleo", d.oil_temp_trip)}
+              ${_trFlag("Temp Enrol.", d.winding_temp_alarm)}
+              ${_trFlag("Trip Enrol.", d.winding_temp_trip)}
+              ${_trFlag("Buchholz", d.buchholz_alarm)}
+              ${_trFlag("Trip Buchholz", d.buchholz_trip)}
+              ${_trFlag("Alív. Pressão", d.pressure_relief_trip)}
+              ${_trFlag("Óleo Baixo", d.oil_level_low)}
+              ${_trFlag("Alarme S1", d.temp_alarm_s1)}
+              ${_trFlag("Trip S1", d.temp_trip_s1)}
+              ${_trFlag("Alarme S2", d.temp_alarm_s2)}
+              ${_trFlag("Trip S2", d.temp_trip_s2)}
+              ${_trFlag("Alarme S3", d.temp_alarm_s3)}
+              ${_trFlag("Trip S3", d.temp_trip_s3)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  items.forEach((_, idx) => {
+    const uid = `thermalRelay_${idx}`;
+    const row = document.getElementById(`${uid}Row`);
+    const panel = document.getElementById(`${uid}Details`);
+    if (!row || !panel) return;
+    row.addEventListener("click", () => {
+      const opening = !panel.classList.contains("open");
+      row.classList.toggle("open", opening);
+      panel.classList.toggle("open", opening);
+      panel.style.maxHeight = opening ? "1200px" : "0px";
+    });
+  });
+}
+
+function _thermalRelayDisplayName() {
+  return "Relé Térmico";
+}
+
+function _formatThermalAge(seconds) {
+  if (seconds < 60) return `${seconds}s atrás`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min atrás`;
+  return `${(seconds / 3600).toFixed(1)}h atrás`;
+}
+
+function _thermalMaxTemp(d) {
+  const vals = [d.temp_atual_s1, d.temp_atual_s2, d.temp_atual_s3].map(Number).filter(Number.isFinite);
+  if (vals.length === 0) return "—";
+  return Math.max(...vals).toFixed(1) + " °C";
+}
+
+function _trChip(label, value, unit, maxVal) {
+  const v = _trVal(value, unit);
+  const maxPart = maxVal != null && Number.isFinite(Number(maxVal)) ? ` <small style="opacity:.5">(máx ${Number(maxVal).toFixed(1)})</small>` : "";
+  return `<div class="relay-detail-chip"><span>${label}</span><strong>${v}${maxPart}</strong></div>`;
+}
+
+function _trFlagChip(label, value, onTxt, offTxt) {
+  const isOn = String(value ?? "").trim() === "1" || String(value ?? "").toLowerCase() === "true";
+  const txt = value == null ? "—" : (isOn ? onTxt : offTxt);
+  return `<div class="relay-detail-chip"><span>${label}</span><strong>${txt}</strong></div>`;
+}
+
+function _trFlag(label, value) {
+  const isOn = String(value ?? "0").trim() === "1";
+  return `<div class="relay-flag-pill ${isOn ? "is-on" : "is-off"}"><span>${label}</span></div>`;
 }
 
 function setTrackersSectionVisible(visible) {
@@ -3189,9 +3411,10 @@ function openBulkCommandConsole() {
 }
 
 /* ── Overview: constrói HTML do diagrama completo ── */
-function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
+function buildUnifilarOverviewHTML(groups, relayData, multimeterData, thermalRelayData) {
   const relayItem   = Array.isArray(relayData)     ? relayData[0]     : relayData;
   const meterItem   = Array.isArray(multimeterData) ? multimeterData[0] : multimeterData;
+  const trItem      = Array.isArray(thermalRelayData) ? thermalRelayData[0] : thermalRelayData;
   const relayOnline = relayItem  ? relayOnlineFromPayload(relayItem)      : null;
   const meterOnline = meterItem  ? multimeterOnlineFromPayload(meterItem) : null;
 
@@ -3207,6 +3430,10 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
   const relayPowerStr = relayPowerRaw != null ? `${cabinMapFormat(relayPowerRaw, 1)} kW` : '—';
   const relayName     = relayItem?.device_name || relayItem?.name || 'Relé';
 
+  const trOnline = trItem ? (trItem.is_online === true || trItem.is_online === 'true') : null;
+  const trTempStr = trItem ? _thermalMaxTemp(trItem) : '—';
+  const trName = 'Relé Térmico';
+
   const anyOn    = groups.some(g => g.inverters.some(i => isOnlineByFreshness(i) && !isZeroSnapshot(i)));
   const wireMain = anyOn ? 'wire--active' : 'wire--idle';
   const wireMeter = meterItem ? getWireClass(meterItem, meterOnline) : wireMain;
@@ -3221,14 +3448,11 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
 
   const canCmd = _canSendCommand();
 
-  // Capabilities (null = unknown → show by default)
-  const hasRelay       = PLANT_CAPABILITIES.hasRelay !== false;
-  const hasTransformer = PLANT_CAPABILITIES.hasTransformer !== false;
-  // Show multimeter if catalog confirmed it exists (regardless of realtime),
-  // OR catalog not yet loaded and there's realtime data (backward compat)
-  const hasMultimeter  = PLANT_CAPABILITIES.hasMultimeter === true
-    || (PLANT_CAPABILITIES.hasMultimeter !== false && meterItem != null);
-  // Fallback to realtime payload device_id when catalog not yet loaded
+  const hasRelay        = PLANT_CAPABILITIES.hasRelay === true;
+  const hasTransformer  = PLANT_CAPABILITIES.hasTransformer === true;
+  const hasThermalRelay = PLANT_CAPABILITIES.hasThermalRelay === true;
+  const hasMultimeter   = PLANT_CAPABILITIES.hasMultimeter === true;
+  const hasTrafoBlock   = hasTransformer || hasThermalRelay;
   const relayDevId = PLANT_CAPABILITIES.relayDeviceId
     ?? (relayItem?.device_id != null ? String(relayItem.device_id) : null)
     ?? (relayItem?.relay_id  != null ? String(relayItem.relay_id)  : null);
@@ -3300,17 +3524,34 @@ function buildUnifilarOverviewHTML(groups, relayData, multimeterData) {
 
       <!-- Fio: DJMT → Trafo/DJBT (com X se DJMT aberto) -->
       ${djmtOff
-        ? `<div class="unif-wire-break" style="height:${hasTransformer?14:22}px">
-             <svg width="14" height="${hasTransformer?14:22}" style="overflow:visible;display:block;margin:0 auto">
-               <line x1="7" y1="0" x2="7" y2="${Math.floor((hasTransformer?14:22)/2)-5}" stroke="rgba(239,68,68,0.35)" stroke-width="2" stroke-linecap="round"/>
-               <text x="7" y="${Math.floor((hasTransformer?14:22)/2)+4}" text-anchor="middle" font-size="10" fill="rgba(239,68,68,0.75)" font-weight="700">✕</text>
-               <line x1="7" y1="${Math.floor((hasTransformer?14:22)/2)+7}" x2="7" y2="${hasTransformer?14:22}" stroke="rgba(239,68,68,0.35)" stroke-width="2" stroke-linecap="round"/>
+        ? `<div class="unif-wire-break" style="height:${hasTrafoBlock?14:22}px">
+             <svg width="14" height="${hasTrafoBlock?14:22}" style="overflow:visible;display:block;margin:0 auto">
+               <line x1="7" y1="0" x2="7" y2="${Math.floor((hasTrafoBlock?14:22)/2)-5}" stroke="rgba(239,68,68,0.35)" stroke-width="2" stroke-linecap="round"/>
+               <text x="7" y="${Math.floor((hasTrafoBlock?14:22)/2)+4}" text-anchor="middle" font-size="10" fill="rgba(239,68,68,0.75)" font-weight="700">✕</text>
+               <line x1="7" y1="${Math.floor((hasTrafoBlock?14:22)/2)+7}" x2="7" y2="${hasTrafoBlock?14:22}" stroke="rgba(239,68,68,0.35)" stroke-width="2" stroke-linecap="round"/>
              </svg>
            </div>`
-        : hasTransformer
+        : hasTrafoBlock
           ? `<svg class="unif-vw" width="2" height="14"><line x1="1" y1="0" x2="1" y2="14" class="${wireBelowDjmt}" stroke-width="2"/></svg>`
           : `<svg class="unif-vw" width="2" height="22"><line x1="1" y1="0" x2="1" y2="22" class="${wireBelowDjmt}" stroke-width="2"/></svg>`
       }
+
+      ${hasThermalRelay ? `
+      <!-- RELÉ TÉRMICO (transformador) -->
+      <div class="unif-node-row">
+        <div class="unif-node--trafo-v2" data-unif-device="thermalrelay">
+          ${unifSVGTransformer()}
+          <span class="unif-node-lbl">${cabinMapEscape(trName)}</span>
+          <span class="unif-meter-val">${trTempStr}</span>
+          ${trOnline === true  ? '<span class="unif-badge unif-badge--online">Online</span>'
+          : trOnline === false ? '<span class="unif-badge unif-badge--offline">Offline</span>'
+          : ''}
+        </div>
+      </div>
+
+      <!-- Fio: Relé Térmico → Trafo/DJBT -->
+      <svg class="unif-vw" width="2" height="14"><line x1="1" y1="0" x2="1" y2="14" class="${wireBelowDjmt}" stroke-width="2"/></svg>
+      ` : ''}
 
       ${hasTransformer ? `
       <!-- TRANSFORMADOR -->
@@ -3390,6 +3631,25 @@ function initInvViewToggle() {
   switchView(false);
 }
 
+let _unifPdfLoaded = false;
+async function _loadUnifilarPdfBtn() {
+  if (_unifPdfLoaded) return;
+  _unifPdfLoaded = true;
+  const pdfBtn = document.getElementById("unifilarPdfBtn");
+  if (!pdfBtn || !PLANT_ID) return;
+  try {
+    const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/unifilar-pdf`, {
+      headers: buildAuthHeaders()
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const body = data.body ? (typeof data.body === "string" ? JSON.parse(data.body) : data.body) : data;
+    if (!body.url) return;
+    pdfBtn.style.display = "";
+    pdfBtn.onclick = () => window.open(body.url, "_blank");
+  } catch (err) { console.warn("[PDF] error:", err); }
+}
+
 function initUnifilarControls() {
   const btn = document.getElementById("unifilarBtnOverview");
   if (!btn || btn.dataset.unifCtrl) return;
@@ -3400,6 +3660,8 @@ function initUnifilarControls() {
   document.getElementById("unifilarPrev")?.addEventListener("click",        () => navigateUnifCabin(-1));
   document.getElementById("unifilarNext")?.addEventListener("click",        () => navigateUnifCabin(1));
   document.getElementById("unifilarCollapseBtn")?.addEventListener("click", toggleUnifSidePanel);
+
+  _loadUnifilarPdfBtn();
 
   const searchEl = document.getElementById("unifilarSearch");
   if (searchEl) {
@@ -3511,7 +3773,7 @@ function buildUnifilarOverview() {
   const sig = _unifEvtAbort.signal;
 
   UNIF_GROUPS = buildUnifGroups(INVERTERS_REALTIME);
-  el.innerHTML = buildUnifilarOverviewHTML(UNIF_GROUPS, RELAY_REALTIME, MULTIMETER_REALTIME);
+  el.innerHTML = buildUnifilarOverviewHTML(UNIF_GROUPS, RELAY_REALTIME, MULTIMETER_REALTIME, THERMALRELAY_REALTIME);
 
   // ── Zoom + Pan (usa CSS zoom para resolução nítida) ──
   const panArea  = document.getElementById('unifPanArea');
@@ -3965,8 +4227,9 @@ function openUnifDeviceModalById(type, id) {
       dedupInvertersById(INVERTERS_REALTIME).find(x => String(getInverterRealId(x)) === String(id));
     if (inv) { openUnifDeviceModal(inv, "inverter"); return; }
   }
-  if (type === "relay")      { openUnifDeviceModal(Array.isArray(RELAY_REALTIME)      ? RELAY_REALTIME[0]      : RELAY_REALTIME,      "relay");      return; }
-  if (type === "multimeter") { openUnifDeviceModal(Array.isArray(MULTIMETER_REALTIME) ? MULTIMETER_REALTIME[0] : MULTIMETER_REALTIME, "multimeter"); return; }
+  if (type === "relay")        { openUnifDeviceModal(Array.isArray(RELAY_REALTIME)        ? RELAY_REALTIME[0]        : RELAY_REALTIME,        "relay");        return; }
+  if (type === "multimeter")   { openUnifDeviceModal(Array.isArray(MULTIMETER_REALTIME)  ? MULTIMETER_REALTIME[0]  : MULTIMETER_REALTIME,  "multimeter");   return; }
+  if (type === "thermalrelay") { openUnifDeviceModal(Array.isArray(THERMALRELAY_REALTIME) ? THERMALRELAY_REALTIME[0] : THERMALRELAY_REALTIME, "thermalrelay"); return; }
   openUnifDeviceModal(null, type);
 }
 
@@ -3979,14 +4242,15 @@ function openUnifDeviceModal(data, type) {
   modal.className = "unif-modal-backdrop";
 
   const typeLabels = { inverter:"Inversor", relay:"Relé / Proteção", multimeter:"Multimedidor",
-    transformer:"Transformador", sa:"Serviços Auxiliares", rede:"Rede", cc:"Caixa Combinadora",
-    qgbt:"QGBT MT", weather:"Estação Meteorológica" };
+    transformer:"Transformador", thermalrelay:"Relé Térmico", sa:"Serviços Auxiliares", rede:"Rede",
+    cc:"Caixa Combinadora", qgbt:"QGBT MT", weather:"Estação Meteorológica" };
   const typeLabel = typeLabels[type] || type;
 
   let title = "Dispositivo";
   if (type === "inverter" && data) title = cabinMapEscape(getInverterDisplayName(data, 0));
   else if (type === "relay")       title = "PMT";
   else if (type === "multimeter")  title = "CC 01 / Multimedidor";
+  else if (type === "thermalrelay") title = "Relé Térmico";
   else if (type === "transformer") title = "T01 — Transformador";
   else if (type === "sa")          title = "SA 01";
   else if (type === "rede")        title = "REDE";
@@ -4044,10 +4308,11 @@ function closeUnifDeviceModal(immediate = false) {
 }
 
 function buildUnifModalBody(data, type) {
-  if (type === "inverter"    && data) return buildUnifInverterBody(data);
-  if (type === "relay"       && data) return buildUnifRelayBody(data);
-  if (type === "multimeter"  && data) return buildUnifMeterBody(data);
-  if (type === "transformer")         return buildUnifTrafoBody();
+  if (type === "inverter"      && data) return buildUnifInverterBody(data);
+  if (type === "relay"         && data) return buildUnifRelayBody(data);
+  if (type === "multimeter"    && data) return buildUnifMeterBody(data);
+  if (type === "thermalrelay"  && data) return buildUnifThermalRelayBody(data);
+  if (type === "transformer")           return buildUnifTrafoBody();
   return `<div class="unif-modal-empty">Sem dados disponíveis para este dispositivo.</div>`;
 }
 
@@ -4232,6 +4497,74 @@ function buildUnifTrafoBody() {
     <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Capacidade</span><strong class="unif-modal-kpi-val">${rated > 0 ? rated.toFixed(0) + " kVA" : "—"}</strong></div>
     <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Status</span><strong class="unif-modal-kpi-val">Online</strong></div>
     <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Temperatura</span><strong class="unif-modal-kpi-val" id="unifModalTrafoTemp">—</strong></div>
+  </div>`;
+}
+
+function buildUnifThermalRelayBody(item) {
+  if (!item) return `<div class="unif-modal-empty">Sem dados do relé térmico</div>`;
+  const d = item.data || item;
+  const online = item.is_online === true || item.is_online === 'true';
+  const sc = online ? "online" : "offline";
+  const lastTs = item.last_update ?? item.last_reading_at ?? item.timestamp;
+  const fmt = (v, dec = 1) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(dec) : "—"; };
+  const fmtFlag = (v, trueLabel = "ATIVO", falseLabel = "OK") => {
+    const b = v === true || v === 1 || v === "true" || v === "1";
+    const f = v === false || v === 0 || v === "false" || v === "0";
+    if (b) return `<span class="unif-relay-flag unif-relay-flag--true">${trueLabel}</span>`;
+    if (f) return `<span class="unif-relay-flag unif-relay-flag--false">${falseLabel}</span>`;
+    return `<span class="unif-relay-flag unif-relay-flag--neutral">—</span>`;
+  };
+
+  return `
+  <div class="unif-modal-status-bar">
+    <span class="unif-modal-state unif-modal-state--${sc}">${online ? "Online" : "Offline"}</span>
+    <span class="unif-modal-last">Última leitura: ${fmtDatePtBR(lastTs)}</span>
+  </div>
+  <div class="unif-modal-section-hdr"><span>Temperaturas</span></div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">S1</span><strong class="unif-modal-kpi-val">${fmt(d.temp_atual_s1)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">S2</span><strong class="unif-modal-kpi-val">${fmt(d.temp_atual_s2)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">S3</span><strong class="unif-modal-kpi-val">${fmt(d.temp_atual_s3)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Ambiente</span><strong class="unif-modal-kpi-val">${fmt(d.temp_atual_amb)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Máx S1</span><strong class="unif-modal-kpi-val">${fmt(d.temp_max_s1)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Máx S2</span><strong class="unif-modal-kpi-val">${fmt(d.temp_max_s2)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Máx S3</span><strong class="unif-modal-kpi-val">${fmt(d.temp_max_s3)}°C</strong></div>
+  </div>
+  <div class="unif-modal-section-hdr" style="margin-top:8px"><span>Óleo</span></div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Topo</span><strong class="unif-modal-kpi-val">${fmt(d.temp_top_oil)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Base</span><strong class="unif-modal-kpi-val">${fmt(d.temp_bottom_oil)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Enrolamento</span><strong class="unif-modal-kpi-val">${fmt(d.temp_winding)}°C</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Nível</span><strong class="unif-modal-kpi-val">${fmt(d.oil_level_pct)}%</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Pressão</span><strong class="unif-modal-kpi-val">${fmt(d.oil_pressure)} bar</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Umidade</span><strong class="unif-modal-kpi-val">${fmt(d.moisture_in_oil)} ppm</strong></div>
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">DGA Gás</span><strong class="unif-modal-kpi-val">${fmt(d.dga_total_gas)} ppm</strong></div>
+  </div>
+  <div class="unif-modal-section-hdr" style="margin-top:8px"><span>Carga</span></div>
+  <div class="unif-modal-kpis">
+    <div class="unif-modal-kpi"><span class="unif-modal-kpi-lbl">Corrente</span><strong class="unif-modal-kpi-val">${fmt(d.load_current)} A</strong></div>
+  </div>
+  <div class="unif-modal-section-hdr" style="margin-top:8px"><span>Alarmes / Trips</span></div>
+  <div class="unif-relay-flags">
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Alarme Geral</span>${fmtFlag(d.alarm_general)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip Geral</span>${fmtFlag(d.trip_general)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Temp. Óleo</span>${fmtFlag(d.oil_temp_alarm)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip Óleo</span>${fmtFlag(d.oil_temp_trip)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Temp. Enrol.</span>${fmtFlag(d.winding_temp_alarm)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip Enrol.</span>${fmtFlag(d.winding_temp_trip)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Buchholz</span>${fmtFlag(d.buchholz_alarm)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip Buchholz</span>${fmtFlag(d.buchholz_trip)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Alív. Pressão</span>${fmtFlag(d.pressure_relief_trip)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Óleo Baixo</span>${fmtFlag(d.oil_level_low)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Ventiladores</span>${fmtFlag(d.fan_on, "Ligados", "Desligados")}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Falha Ventil.</span>${fmtFlag(d.fan_fault, "FALHA", "OK")}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Falha Sensor</span>${fmtFlag(d.sensor_fault, "FALHA", "OK")}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Alarme S1</span>${fmtFlag(d.temp_alarm_s1)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip S1</span>${fmtFlag(d.temp_trip_s1)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Alarme S2</span>${fmtFlag(d.temp_alarm_s2)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip S2</span>${fmtFlag(d.temp_trip_s2)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Alarme S3</span>${fmtFlag(d.temp_alarm_s3)}</div>
+    <div class="unif-relay-flag-row"><span class="unif-relay-flag-lbl">Trip S3</span>${fmtFlag(d.temp_trip_s3)}</div>
   </div>`;
 }
 
@@ -4545,34 +4878,22 @@ function ensureDeviceMiniHeaders() {
   const relayHeader = document.querySelector("#relaySection .device-mini-header");
   const multimeterHeader = document.querySelector("#multimeterSection .device-mini-header");
 
-  const applyHeader = (headerEl) => {
+  const applyHeader = (headerEl, sectionId) => {
     if (!headerEl) return;
-    let spans = headerEl.querySelectorAll("span");
-
-    if (spans.length < 7) {
-      headerEl.innerHTML = `
-        <span></span>
-        <span></span>
-        <span>ACTIVE POWER</span>
-        <span>APPARENT POWER</span>
-        <span>REACTIVE POWER</span>
-        <span>ÚLTIMA LEITURA</span>
-        <span>${_canSendCommand() ? "COMANDOS" : ""}</span>
-      `;
-      spans = headerEl.querySelectorAll("span");
-    } else {
-      spans[0].textContent = "";
-      spans[1].textContent = "";
-      spans[2].textContent = "ACTIVE POWER";
-      spans[3].textContent = "APPARENT POWER";
-      spans[4].textContent = "REACTIVE POWER";
-      spans[5].textContent = "ÚLTIMA LEITURA";
-      spans[6].textContent = _canSendCommand() ? "COMANDOS" : "";
-    }
+    if (sectionId) headerEl.id = sectionId + "MiniHeaderRow";
+    headerEl.innerHTML = `
+      <span></span>
+      <span></span>
+      <span data-col="active">ACTIVE POWER</span>
+      <span data-col="apparent">APPARENT POWER</span>
+      <span data-col="reactive">REACTIVE POWER</span>
+      <span data-col="timestamp">ÚLTIMA LEITURA</span>
+      <span data-col="commands">${_canSendCommand() ? "COMANDOS" : ""}</span>
+    `;
   };
 
-  applyHeader(relayHeader);
-  applyHeader(multimeterHeader);
+  applyHeader(relayHeader, "relay");
+  applyHeader(multimeterHeader, "multimeter");
 }
 
 function pickDeviceMetricValue(primary, secondary, keys) {
@@ -4958,9 +5279,35 @@ function renderMultimeterCard(item) {
   }
 
   activePowerEl.textContent = formatMetricValue(activePower, "kW", 1);
-  apparentPowerEl.textContent = formatMetricValue(apparentPower, "kVA", 1);
   reactivePowerEl.textContent = formatMetricValue(reactivePower, "kvar", 1);
   tsEl.textContent = fmtDatePtBR(lastUpdate);
+
+  const hasApparent = apparentPower != null;
+  apparentPowerEl.textContent = hasApparent ? formatMetricValue(apparentPower, "kVA", 1) : "";
+  apparentPowerEl.style.display = hasApparent ? "" : "none";
+
+  const hdr = document.getElementById("multimeterMiniHeaderRow");
+  const apparentHdr = hdr?.querySelector('[data-col="apparent"]');
+  if (apparentHdr) apparentHdr.style.display = hasApparent ? "" : "none";
+
+  const cols = hasApparent
+    ? "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px"
+    : "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px";
+  row.style.gridTemplateColumns = cols;
+  if (hdr) hdr.style.gridTemplateColumns = cols;
+
+  if (!hasApparent) {
+    reactivePowerEl.style.gridColumn = "4";
+    tsEl.style.gridColumn = "5";
+    const cmdWrap = document.getElementById("multimeterCommandBarWrap");
+    if (cmdWrap) cmdWrap.style.gridColumn = "6";
+  } else {
+    reactivePowerEl.style.gridColumn = "5";
+    tsEl.style.gridColumn = "6";
+    const cmdWrap = document.getElementById("multimeterCommandBarWrap");
+    if (cmdWrap) cmdWrap.style.gridColumn = "7";
+  }
+
   renderMultimeterDetailsPanel(item);
 }
 
@@ -5527,10 +5874,37 @@ function renderDailyChart() {
     dailyChartInstance = null;
   }
 
+  _updateDailyChartToggles();
+
+  const useMeter = DAILY_CHART_POWER_SOURCE === "meter" && DAILY.hasMeter;
+  const useGhi = DAILY_CHART_IRR_SOURCE === "ghi" && DAILY.hasGhi;
+
+  const powerData = useMeter ? DAILY.meterPower : DAILY.activePower;
+  const powerLabel = useMeter ? "Multimedidor" : "Potência Ativa";
+  const powerColor = useMeter ? "#4da3ff" : "#39e58c";
+  const powerColorRgba = useMeter
+    ? ["rgba(77,163,255,0.36)", "rgba(77,163,255,0.20)", "rgba(77,163,255,0.03)"]
+    : ["rgba(57,229,140,0.36)", "rgba(57,229,140,0.20)", "rgba(57,229,140,0.03)"];
+
+  const irrData = useGhi ? DAILY.irradianceGhi : DAILY.irradiance;
+  const irrLabel = useGhi ? "Irradiância GHI" : "Irradiância POA";
+
+  // Expectativa: curva PVSyst (quando a usina tem no banco) ou linha reta
+  // no capacity AC. Sem PVSyst, o capacity AC vira a expectativa padrão.
+  const hasPvsystExpected = Array.isArray(DAILY.expectedPower)
+    && DAILY.expectedPower.some(v => v != null && Number(v) > 0);
+  const capacityAc = asNumber(PLANT_STATE.capacity_ac, 0);
+  const useCapacityExpected = capacityAc > 0
+    && (DAILY_CHART_EXPECTED_SOURCE === "capacity" || !hasPvsystExpected);
+  const expectedData = useCapacityExpected
+    ? DAILY.labels.map(() => capacityAc)
+    : (Array.isArray(DAILY.expectedPower) ? DAILY.expectedPower : []);
+  const expectedLabel = useCapacityExpected ? "Capacity AC" : "Esperado";
+
   const greenGradient = ctx.createLinearGradient(0, 0, 0, 320);
-  greenGradient.addColorStop(0, "rgba(57,229,140,0.36)");
-  greenGradient.addColorStop(0.6, "rgba(57,229,140,0.20)");
-  greenGradient.addColorStop(1, "rgba(57,229,140,0.03)");
+  greenGradient.addColorStop(0, powerColorRgba[0]);
+  greenGradient.addColorStop(0.6, powerColorRgba[1]);
+  greenGradient.addColorStop(1, powerColorRgba[2]);
 
   const yellowGradient = ctx.createLinearGradient(0, 0, 0, 320);
   yellowGradient.addColorStop(0, "rgba(255,216,77,0.24)");
@@ -5542,11 +5916,11 @@ function renderDailyChart() {
       labels: DAILY.labels,
       datasets: [
         {
-          label: "Esperado",
-          data: Array.isArray(DAILY.expectedPower) ? DAILY.expectedPower : [],
+          label: expectedLabel,
+          data: expectedData,
           borderColor: "rgba(205, 213, 225, 0.70)",
           fill: false,
-          tension: 0.28,
+          tension: useCapacityExpected ? 0 : 0.28,
           pointRadius: 0,
           borderWidth: 1.5,
           borderDash: [6, 6],
@@ -5555,9 +5929,9 @@ function renderDailyChart() {
           order: 0
         },
         {
-          label: "Potência Ativa",
-          data: DAILY.activePower,
-          borderColor: "#39e58c",
+          label: powerLabel,
+          data: powerData,
+          borderColor: powerColor,
           backgroundColor: greenGradient,
           fill: true,
           tension: 0.4,
@@ -5568,8 +5942,8 @@ function renderDailyChart() {
           order: 1
         },
         {
-          label: "Irradiância POA",
-          data: DAILY.irradiance,
+          label: irrLabel,
+          data: irrData,
           borderColor: "#ffd84d",
           backgroundColor: yellowGradient,
           fill: true,
@@ -5601,41 +5975,23 @@ function renderDailyChart() {
             label: (item) => {
               const label = item?.dataset?.label || "";
               const value = Number(item?.raw ?? 0);
-
-              if (label === "Esperado") {
-                return `Esperado: ${formatKwPtBR(value)}`;
-              }
-              if (label === "Potência Ativa") {
-                return `Potência Ativa: ${formatKwPtBR(value)}`;
-              }
-              if (label === "Irradiância POA") {
-                return `Irradiância POA: ${formatWm2PtBR(value)}`;
-              }
-
+              if (label === "Esperado") return `Esperado: ${formatKwPtBR(value)}`;
+              if (label === "Capacity AC") return `Capacity AC: ${formatKwPtBR(value)}`;
+              if (label.includes("Potência") || label === "Multimedidor") return `${label}: ${formatKwPtBR(value)}`;
+              if (label.includes("Irradiância")) return `${label}: ${formatWm2PtBR(value)}`;
               return `${label}: ${formatNumberPtBR(value)}`;
             }
           }
         },
         zoom: {
-          pan: {
-            enabled: true,
-            mode: "x"
-          },
+          pan: { enabled: true, mode: "x" },
           zoom: {
-            wheel: {
-              enabled: true
-            },
-            pinch: {
-              enabled: true
-            },
-            drag: {
-              enabled: false
-            },
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            drag: { enabled: false },
             mode: "x"
           },
-          limits: {
-            x: { minRange: 6 }
-          }
+          limits: { x: { minRange: 6 } }
         }
       },
       scales: {
@@ -5647,18 +6003,78 @@ function renderDailyChart() {
           position: "left",
           min: 0,
           suggestedMax: powerAxisMax,
-          ticks: { color: "#39e58c", callback: v => `${v} kW` },
+          ticks: { color: powerColor, callback: v => `${v} kW` },
           grid: { color: "rgba(255,255,255,0.05)" }
         },
         yIrr: {
           position: "right",
           min: 0,
-          max: 1200,
+          max: powerAxisMax,
           ticks: { color: "#ffd84d", callback: v => `${v} W/m²` },
           grid: { drawOnChartArea: false }
         }
       }
     }
+  });
+}
+
+function _updateDailyChartToggles() {
+  const meterBtn = document.getElementById("dailyToggleMeter");
+  const invBtn = document.getElementById("dailyToggleInverter");
+  const poaBtn = document.getElementById("dailyTogglePoa");
+  const ghiBtn = document.getElementById("dailyToggleGhi");
+  const meterWrap = document.getElementById("dailyPowerToggleWrap");
+  const irrWrap = document.getElementById("dailyIrrToggleWrap");
+
+  if (meterWrap) meterWrap.style.display = DAILY?.hasMeter ? "" : "none";
+  if (irrWrap) irrWrap.style.display = DAILY?.hasGhi ? "" : "none";
+
+  if (invBtn) invBtn.classList.toggle("active", DAILY_CHART_POWER_SOURCE === "inverter");
+  if (meterBtn) meterBtn.classList.toggle("active", DAILY_CHART_POWER_SOURCE === "meter");
+  if (poaBtn) poaBtn.classList.toggle("active", DAILY_CHART_IRR_SOURCE === "poa");
+  if (ghiBtn) ghiBtn.classList.toggle("active", DAILY_CHART_IRR_SOURCE === "ghi");
+
+  // Toggle da expectativa (PVSyst x Capacity AC): so aparece quando as
+  // duas opcoes existem; sem PVSyst o capacity AC ja e o padrao
+  const expWrap = document.getElementById("dailyExpToggleWrap");
+  const expPvBtn = document.getElementById("dailyToggleExpPvsyst");
+  const expCapBtn = document.getElementById("dailyToggleExpCap");
+  const hasPvsystExpected = Array.isArray(DAILY?.expectedPower)
+    && DAILY.expectedPower.some(v => v != null && Number(v) > 0);
+  const capOk = asNumber(PLANT_STATE.capacity_ac, 0) > 0;
+  const effCapacity = capOk && (DAILY_CHART_EXPECTED_SOURCE === "capacity" || !hasPvsystExpected);
+
+  if (expWrap) expWrap.style.display = (hasPvsystExpected && capOk) ? "" : "none";
+  if (expPvBtn) expPvBtn.classList.toggle("active", hasPvsystExpected && !effCapacity);
+  if (expCapBtn) expCapBtn.classList.toggle("active", effCapacity);
+}
+
+function dailyChartSetPowerSource(source) {
+  DAILY_CHART_POWER_SOURCE = source;
+  _updateDailyChartToggles();
+  _showChartLoader("dailyChartLoader", () => renderDailyChart());
+}
+
+function dailyChartSetIrrSource(source) {
+  DAILY_CHART_IRR_SOURCE = source;
+  _updateDailyChartToggles();
+  _showChartLoader("dailyChartLoader", () => renderDailyChart());
+}
+
+function dailyChartSetExpectedSource(source) {
+  DAILY_CHART_EXPECTED_SOURCE = source;
+  _updateDailyChartToggles();
+  _showChartLoader("dailyChartLoader", () => renderDailyChart());
+}
+
+function _showChartLoader(loaderId, renderFn) {
+  const loader = document.getElementById(loaderId);
+  if (loader) loader.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      renderFn();
+      if (loader) loader.classList.add("hidden");
+    });
   });
 }
 
@@ -5730,6 +6146,8 @@ function normalizeMonthlyPayload(payload) {
     expectedMtd = expectedDaily.map(v => (accExpected += (Number(v) || 0)));
   }
 
+  const expectedMonthTotal = payload.expected_month_kwh != null ? Number(payload.expected_month_kwh) : null;
+
   return {
     ...payload,
     labels: finalLabels,
@@ -5739,6 +6157,7 @@ function normalizeMonthlyPayload(payload) {
     mtd_kwh_for_totals: mtdForTotals,
     expected_daily_kwh: expectedDaily,
     expected_mtd_kwh: expectedMtd,
+    expected_month_kwh: expectedMonthTotal,
     irradiation_daily_kwh_m2: irradiationDaily,
     energy_kwh: daily
   };
@@ -5809,7 +6228,10 @@ function renderMonthlyChart() {
     dailyToDate.reduce((a, b) => a + (Number(b) || 0), 0);
   const totalExpectedToDate = Number(expectedMtd[currentIndex]) ||
     expectedToDate.reduce((a, b) => a + (Number(b) || 0), 0);
-  const totalExpectedMonth = expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0);
+  const hasDailyExpected = expectedPadded.some(v => v > 0);
+  const totalExpectedMonth = hasDailyExpected
+    ? expectedPadded.reduce((a, b) => a + (Number(b) || 0), 0)
+    : (MONTHLY?.expected_month_kwh != null ? Number(MONTHLY.expected_month_kwh) : 0);
   const deviation = totalExpectedToDate > 0 ? ((totalReal - totalExpectedToDate) / totalExpectedToDate) * 100 : 0;
   const elapsedDays = currentIndex + 1;
 
@@ -5862,41 +6284,44 @@ function renderMonthlyChart() {
   const xTicksLimit     = isMobile ? 8 : 6;
   const tickFontSize    = isMobile ? 10 : 12;
 
+  const datasets = [];
+  if (hasDailyExpected) {
+    datasets.push({
+      label: "Esperado",
+      data: expectedPadded,
+      backgroundColor: "rgba(190,200,210,.28)",
+      borderColor: "rgba(190,200,210,.38)",
+      borderWidth: 1,
+      borderRadius: { topLeft: 5, topRight: 5 },
+      borderSkipped: "bottom",
+      barThickness: barThickExp,
+      maxBarThickness: maxBarThickExp,
+      categoryPercentage: catPerc,
+      barPercentage: 0.92,
+      order: 0,
+      hoverBackgroundColor: "rgba(190,200,210,.46)"
+    });
+  }
+  datasets.push({
+    label: "Real",
+    data: daily,
+    backgroundColor: realColors,
+    borderColor: realBorders,
+    borderWidth: 1,
+    borderRadius: { topLeft: 4, topRight: 4 },
+    borderSkipped: "bottom",
+    barThickness: hasDailyExpected ? barThickReal : barThickExp,
+    maxBarThickness: hasDailyExpected ? maxBarThickReal : maxBarThickExp,
+    categoryPercentage: catPerc,
+    barPercentage: hasDailyExpected ? 0.70 : 0.92,
+    order: 1
+  });
+
   monthlyChartInstance = new Chart(ctx, {
     type: "bar",
     data: {
       labels,
-      datasets: [
-        {
-          label: "Esperado",
-          data: expectedPadded,
-          backgroundColor: "rgba(190,200,210,.28)",
-          borderColor: "rgba(190,200,210,.38)",
-          borderWidth: 1,
-          borderRadius: { topLeft: 5, topRight: 5 },
-          borderSkipped: "bottom",
-          barThickness: barThickExp,
-          maxBarThickness: maxBarThickExp,
-          categoryPercentage: catPerc,
-          barPercentage: 0.92,
-          order: 0,
-          hoverBackgroundColor: "rgba(190,200,210,.46)"
-        },
-        {
-          label: "Real",
-          data: daily,
-          backgroundColor: realColors,
-          borderColor: realBorders,
-          borderWidth: 1,
-          borderRadius: { topLeft: 4, topRight: 4 },
-          borderSkipped: "bottom",
-          barThickness: barThickReal,
-          maxBarThickness: maxBarThickReal,
-          categoryPercentage: catPerc,
-          barPercentage: 0.70,
-          order: 1
-        }
-      ]
+      datasets
     },
     options: {
       responsive: true,
@@ -6103,13 +6528,14 @@ async function refreshRealtimeEverything() {
 
   let realtime = null;
   try {
-    const [realtimeRes, alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes] = await Promise.allSettled([
+    const [realtimeRes, alarmsRes, invertersRes, relayRes, multimeterRes, trackersRes, thermalRelayRes] = await Promise.allSettled([
       fetchPlantRealtime(PLANT_ID),
       fetchActiveAlarms(PLANT_ID),
       fetchInvertersRealtime(PLANT_ID),
       safeFetchRelayIfSupported(PLANT_ID),
       safeFetchMultimeterIfSupported(PLANT_ID),
-      fetchTrackersRealtime(PLANT_ID)
+      fetchTrackersRealtime(PLANT_ID),
+      fetchThermalRelayRealtime(PLANT_ID)
     ]);
 
     if (realtimeRes.status === "fulfilled") {
@@ -6127,13 +6553,17 @@ async function refreshRealtimeEverything() {
         const prPct = normalizePercentMaybe(
           realtime.performance_ratio ?? realtime.pr_daily_pct ?? realtime.pr_percent
         );
+        // % de capacidade sobre a capacity AC (o que a usina entrega);
+        // rated DC so como fallback se nao houver capacity_ac
+        const capAc = realtime.capacity_ac != null ? Number(realtime.capacity_ac) : PLANT_STATE.capacity_ac;
+        const capBase = (capAc != null && capAc > 0) ? capAc : rated;
         PLANT_STATE = {
           ...PLANT_STATE,
           rated_power_kwp: rated,
           active_power_kw: active,
-          capacity_percent: rated > 0 ? (active / rated) * 100 : PLANT_STATE.capacity_percent,
+          capacity_percent: capBase > 0 ? (active / capBase) * 100 : PLANT_STATE.capacity_percent,
           pr_percent: prPct != null ? prPct : PLANT_STATE.pr_percent,
-          capacity_ac: realtime.capacity_ac != null ? Number(realtime.capacity_ac) : PLANT_STATE.capacity_ac,
+          capacity_ac: capAc,
         };
       }
     } else {
@@ -6141,7 +6571,13 @@ async function refreshRealtimeEverything() {
     }
 
     if (alarmsRes.status === "fulfilled") {
+      const _prevAlarmCount = ACTIVE_ALARMS.length;
       ACTIVE_ALARMS = Array.isArray(alarmsRes.value) ? alarmsRes.value : [];
+      // Som quando surge alarme novo (não toca no primeiro carregamento)
+      if (_plantAlarmSoundPrimed && ACTIVE_ALARMS.length > _prevAlarmCount) {
+        try { window.NotifySound?.play("critical"); } catch (_) {}
+      }
+      _plantAlarmSoundPrimed = true;
       renderAlarms(ACTIVE_ALARMS);
       renderAlarmMenuButton();
     } else {
@@ -6181,8 +6617,9 @@ async function refreshRealtimeEverything() {
       RELAY_REALTIME = relayItem;
       window.RELAY_REALTIME = RELAY_REALTIME;
       PLANT_CATALOG.hasRelay = !!relayItem;
-      setRelaySectionVisible(RELAY_SUPPORTED !== false);
-      if (RELAY_SUPPORTED !== false) renderRelayCard(relayItem);
+      const showRelay = PLANT_CAPABILITIES.hasRelay === true;
+      setRelaySectionVisible(showRelay);
+      if (showRelay) renderRelayCard(relayItem);
       updateCabineRelayNode(relayItem);
     } else {
       console.error("[refreshRealtimeEverything][relay] erro", relayRes.reason);
@@ -6192,8 +6629,9 @@ async function refreshRealtimeEverything() {
       const multimeterItem = multimeterRes.value;
       MULTIMETER_REALTIME = multimeterItem;
       window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
-      setMultimeterSectionVisible(MULTIMETER_SUPPORTED !== false);
-      if (MULTIMETER_SUPPORTED !== false) renderMultimeterCard(multimeterItem);
+      const showMeter = PLANT_CAPABILITIES.hasMultimeter === true;
+      setMultimeterSectionVisible(showMeter);
+      if (showMeter) renderMultimeterCard(multimeterItem);
       updateCabineMeterNode(multimeterItem);
     } else {
       console.error("[refreshRealtimeEverything][multimeter] erro", multimeterRes.reason);
@@ -6204,26 +6642,30 @@ async function refreshRealtimeEverything() {
       TRACKERS_DATA = Array.isArray(trackersPayload?.items) ? trackersPayload.items : [];
       TRACKERS_PLANT_CENTER = trackersPayload?.plant_center ?? null;
       TRACKERS_PLANT_BOUNDS = trackersPayload?.plant_bounds ?? null;
-      const hasTrackers = Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.some(
-        (t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
-      );
-      if (hasTrackers) {
-        TRACKERS_LAST_HAS_DATA = true;
-      }
 
-      if (!TRACKERS_USER_OPENED) {
-        setTrackersSectionVisible(hasTrackers);
+      const catalogHasTracker = PLANT_CAPABILITIES.hasTracker === true;
+      if (!catalogHasTracker) {
+        setTrackersSectionVisible(false);
       } else {
-        setTrackersSectionVisible(TRACKERS_LAST_HAS_DATA);
-      }
+        const hasTrackerData = TRACKERS_DATA.some(
+          (t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
+        );
+        if (hasTrackerData) TRACKERS_LAST_HAS_DATA = true;
 
-      if (TRACKERS_LAST_HAS_DATA) {
-        const trackersSection = document.getElementById("trackersSection");
-        const trackersVisible =
-          trackersSection &&
-          !trackersSection.classList.contains("trackers-hidden") &&
-          !trackersSection.classList.contains("is-collapsed");
-        if (trackersVisible && hasTrackers) renderTrackersPanel();
+        if (!TRACKERS_USER_OPENED) {
+          setTrackersSectionVisible(hasTrackerData);
+        } else {
+          setTrackersSectionVisible(TRACKERS_LAST_HAS_DATA);
+        }
+
+        if (TRACKERS_LAST_HAS_DATA) {
+          const trackersSection = document.getElementById("trackersSection");
+          const trackersVisible =
+            trackersSection &&
+            !trackersSection.classList.contains("trackers-hidden") &&
+            !trackersSection.classList.contains("is-collapsed");
+          if (trackersVisible && hasTrackerData) renderTrackersPanel();
+        }
       }
     } else {
       TRACKERS_DATA = [];
@@ -6231,6 +6673,15 @@ async function refreshRealtimeEverything() {
       TRACKERS_PLANT_BOUNDS = null;
       renderTrackersPanel();
       console.error("[refreshRealtimeEverything][trackers] erro", trackersRes.reason);
+    }
+
+    if (thermalRelayRes.status === "fulfilled") {
+      THERMALRELAY_REALTIME = thermalRelayRes.value || [];
+      const showThermal = PLANT_CAPABILITIES.hasThermalRelay === true && THERMALRELAY_REALTIME.length > 0;
+      setThermalRelaySectionVisible(showThermal);
+      if (showThermal) renderThermalRelayPanel(THERMALRELAY_REALTIME);
+    } else {
+      console.error("[refreshRealtimeEverything][thermalrelay] erro", thermalRelayRes.reason);
     }
 
     renderHeaderSummary();
@@ -8149,6 +8600,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (e.key === "Escape") closeAllDeviceCommandMenus();
   });
 
+  _dismissAppLoader();
+
   if (!PLANT_ID) {
     console.warn("[plant] plant_id ausente na URL; mantendo tela sem dados de fallback.");
     renderHeaderSummary();
@@ -8157,7 +8610,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   try {
-    void fetchPlantCapabilities(PLANT_ID);
+    await fetchPlantCapabilities(PLANT_ID);
     const refreshPromise = refreshRealtimeEverything();
 
     const [dailyRaw, monthlyRaw] = await Promise.all([
@@ -8176,6 +8629,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     await refreshPromise;
+    if (DAILY) renderDailyChart();
     handleInitialPlantAction();
 
     setInterval(() => {
