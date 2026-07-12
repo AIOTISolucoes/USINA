@@ -5629,12 +5629,12 @@ select.pem-ctrl option {
 /* ── Balão de fala (acima do avatar) ── */
 .robot-bubble {
   position: relative;
-  max-width: 320px;
+  max-width: 390px;
   min-width: 100px;
   background: #1e2127;
   border: 1px solid rgba(156,163,175,0.45);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.55);
   opacity: 0;
   transform: translateY(6px) scale(0.95);
@@ -5669,7 +5669,7 @@ select.pem-ctrl option {
 
 .robot-bubble-text {
   font-family: 'Press Start 2P', monospace;
-  font-size: 0.62rem;
+  font-size: 0.72rem;
   line-height: 1.9;
   color: var(--text-primary, #d1fae5);
   word-break: break-word;
