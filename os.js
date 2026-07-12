@@ -3345,3 +3345,191 @@ function showToast(message, type = "success") {
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => toast.classList.add("hidden"), 3500)
 }
+
+// =============================================================================
+// AUTOMACAO DE OS — corretivas automaticas + preventivas recorrentes
+// (modal do botao robo na topbar; backend: GET/POST /os-automation;
+//  quem cria as OSs e o os_automator.py no cron da EC2)
+// =============================================================================
+
+const AUTO_OS = { config: null, plans: [], plantsLoaded: false }
+
+function autoOsShow(show) {
+  const ov = document.getElementById("autoOsOverlay")
+  if (ov) ov.style.display = show ? "flex" : "none"
+}
+
+function autoOsFeedback(msg, ok = true) {
+  const el = document.getElementById("autoOsFeedback")
+  if (!el) return
+  el.style.display = "block"
+  el.style.background = ok ? "rgba(57,229,140,.12)" : "rgba(248,113,113,.12)"
+  el.style.color = ok ? "#39e58c" : "#f87171"
+  el.textContent = msg
+  setTimeout(() => { el.style.display = "none" }, 4000)
+}
+
+async function autoOsLoadPlants() {
+  if (AUTO_OS.plantsLoaded) return
+  try {
+    const data = await apiJson("/os-plants")
+    const sel = document.getElementById("autoPlanPlant")
+    if (sel && Array.isArray(data?.items)) {
+      const opts = data.items.map(p => `<option value="${esc(String(p.id))}">${esc(p.name)}</option>`).join("")
+      sel.innerHTML = `<option value="">Todas as usinas</option>` + opts
+      AUTO_OS.plantsLoaded = true
+    }
+  } catch (e) { console.warn("[autoOs] os-plants:", e?.message || e) }
+}
+
+async function autoOsLoad() {
+  const data = await apiJson("/os-automation")
+  AUTO_OS.config = data?.config || {}
+  AUTO_OS.plans  = data?.plans || []
+
+  const c = AUTO_OS.config
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v }
+  set("autoCfgCorrective",   c.auto_corrective)
+  set("autoCfgTrigShutdown", c.trigger_plant_shutdown)
+  set("autoCfgTrigNoComm",   c.trigger_no_comm)
+  set("autoCfgTrigTemp",     c.trigger_temp_high)
+  set("autoCfgTrigRelay",    c.trigger_relay_flags)
+  set("autoCfgPreventive",   c.auto_preventive)
+  autoOsRenderPlans()
+}
+
+function autoOsRenderPlans() {
+  const box = document.getElementById("autoPlansList")
+  if (!box) return
+  if (!AUTO_OS.plans.length) {
+    box.innerHTML = `<div style="color:rgba(255,255,255,.35);font-size:12px;font-style:italic;">Nenhum plano preventivo cadastrado.</div>`
+    return
+  }
+  box.innerHTML = AUTO_OS.plans.map(p => `
+    <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:9px;padding:8px 12px;">
+      <div style="flex:1;min-width:0;">
+        <div style="color:#eafff3;font-size:12.5px;font-weight:600;">${esc(p.title)}</div>
+        <div style="color:rgba(255,255,255,.45);font-size:11px;">
+          ${esc(p.plant_name || "Todas as usinas")} · a cada ${esc(String(p.frequency_days))}d ·
+          próx.: ${esc(String(p.next_due_date).slice(0, 10))} · cria ${esc(String(p.advance_days))}d antes
+        </div>
+      </div>
+      <button data-auto-edit="${esc(String(p.id))}" title="Editar" style="background:none;border:none;color:#9adbb8;cursor:pointer;font-size:13px;"><i class="fa-solid fa-pen"></i></button>
+      <button data-auto-del="${esc(String(p.id))}" title="Excluir" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:13px;"><i class="fa-solid fa-trash"></i></button>
+    </div>
+  `).join("")
+
+  box.querySelectorAll("[data-auto-edit]").forEach(btn => btn.addEventListener("click", () => {
+    const plan = AUTO_OS.plans.find(p => String(p.id) === btn.dataset.autoEdit)
+    if (!plan) return
+    document.getElementById("autoPlanId").value      = plan.id
+    document.getElementById("autoPlanTitle").value   = plan.title || ""
+    document.getElementById("autoPlanPlant").value   = plan.power_plant_id != null ? String(plan.power_plant_id) : ""
+    document.getElementById("autoPlanDesc").value    = plan.description || ""
+    document.getElementById("autoPlanFreq").value    = plan.frequency_days
+    document.getElementById("autoPlanDue").value     = String(plan.next_due_date).slice(0, 10)
+    document.getElementById("autoPlanAdvance").value = plan.advance_days
+    document.getElementById("autoPlanFormTitle").textContent = `Editando plano #${plan.id}`
+    document.getElementById("autoPlanCancelEdit").style.display = ""
+  }))
+
+  box.querySelectorAll("[data-auto-del]").forEach(btn => btn.addEventListener("click", async () => {
+    if (!confirm("Excluir este plano preventivo? (as OSs já criadas não são apagadas)")) return
+    try {
+      await apiJson("/os-automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_plan", plan_id: Number(btn.dataset.autoDel) }),
+      })
+      await autoOsLoad()
+      autoOsFeedback("Plano excluído.")
+    } catch (e) { autoOsFeedback("Erro ao excluir: " + (e?.message || e), false) }
+  }))
+}
+
+function autoOsResetPlanForm() {
+  ;["autoPlanId", "autoPlanTitle", "autoPlanDesc"].forEach(id => { const el = document.getElementById(id); if (el) el.value = "" })
+  document.getElementById("autoPlanPlant").value   = ""
+  document.getElementById("autoPlanFreq").value    = "90"
+  document.getElementById("autoPlanAdvance").value = "7"
+  document.getElementById("autoPlanDue").value     = ""
+  document.getElementById("autoPlanFormTitle").textContent = "Novo plano"
+  document.getElementById("autoPlanCancelEdit").style.display = "none"
+}
+
+function bindAutomationModal() {
+  const openBtn = document.getElementById("kbAutomationBtn")
+  if (!openBtn) return
+
+  openBtn.addEventListener("click", async () => {
+    autoOsShow(true)
+    try {
+      await Promise.all([autoOsLoad(), autoOsLoadPlants()])
+    } catch (e) {
+      autoOsFeedback("Erro ao carregar automação: " + (e?.message || e), false)
+    }
+  })
+
+  document.getElementById("autoOsClose")?.addEventListener("click", () => autoOsShow(false))
+  document.getElementById("autoOsCancel")?.addEventListener("click", () => autoOsShow(false))
+  document.getElementById("autoOsOverlay")?.addEventListener("click", (e) => {
+    if (e.target === document.getElementById("autoOsOverlay")) autoOsShow(false)
+  })
+  document.getElementById("autoPlanCancelEdit")?.addEventListener("click", autoOsResetPlanForm)
+
+  document.getElementById("autoOsSaveConfig")?.addEventListener("click", async () => {
+    const val = id => !!document.getElementById(id)?.checked
+    try {
+      await apiJson("/os-automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_config",
+          user_id: getCurrentUser().id || null,
+          config: {
+            auto_corrective:        val("autoCfgCorrective"),
+            trigger_plant_shutdown: val("autoCfgTrigShutdown"),
+            trigger_no_comm:        val("autoCfgTrigNoComm"),
+            trigger_temp_high:      val("autoCfgTrigTemp"),
+            trigger_relay_flags:    val("autoCfgTrigRelay"),
+            auto_preventive:        val("autoCfgPreventive"),
+          },
+        }),
+      })
+      showToast("Automação salva com sucesso")
+      autoOsShow(false)
+    } catch (e) { autoOsFeedback("Erro ao salvar: " + (e?.message || e), false) }
+  })
+
+  document.getElementById("autoPlanSave")?.addEventListener("click", async () => {
+    const g = id => document.getElementById(id)?.value?.trim() || ""
+    const plan = {
+      id: g("autoPlanId") || null,
+      title: g("autoPlanTitle"),
+      power_plant_id: g("autoPlanPlant") ? Number(g("autoPlanPlant")) : null,
+      description: g("autoPlanDesc") || null,
+      frequency_days: Number(g("autoPlanFreq")),
+      advance_days: Number(g("autoPlanAdvance") || 7),
+      next_due_date: g("autoPlanDue"),
+    }
+    if (!plan.title)         return autoOsFeedback("Informe o título do plano.", false)
+    if (!plan.frequency_days || plan.frequency_days < 1) return autoOsFeedback("Frequência inválida (dias >= 1).", false)
+    if (!plan.next_due_date) return autoOsFeedback("Informe o próximo vencimento.", false)
+    try {
+      await apiJson("/os-automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_plan", user_id: getCurrentUser().id || null, plan }),
+      })
+      autoOsResetPlanForm()
+      await autoOsLoad()
+      autoOsFeedback("Plano salvo.")
+    } catch (e) { autoOsFeedback("Erro ao salvar plano: " + (e?.message || e), false) }
+  })
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bindAutomationModal)
+} else {
+  bindAutomationModal()
+}

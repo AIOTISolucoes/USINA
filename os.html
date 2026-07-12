@@ -112,6 +112,7 @@
           <input type="text" id="kbSearchInput" placeholder="Buscar OS, ativo..." />
         </div>
         <button class="icon-btn" id="kbFilterBtn" title="Filtros"><i class="fa-solid fa-sliders"></i></button>
+        <button class="icon-btn" id="kbAutomationBtn" title="Automação de OS (corretivas automáticas e preventivas recorrentes)"><i class="fa-solid fa-robot"></i></button>
         <button class="icon-btn" id="kbRefreshBtn" title="Atualizar"><i class="fa-solid fa-rotate-right"></i></button>
         <div class="user-pill">
           <div class="avatar" id="userAvatar">?</div>
@@ -680,6 +681,93 @@
     <button id="delModalConfirm" style="display:flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;border:none;background:#dc2626;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">
       <i class="fa-solid fa-trash"></i> Confirmar exclusão
     </button>
+  </div>
+</div>
+
+<!-- ══════════════ MODAL: AUTOMAÇÃO DE OS ══════════════ -->
+<div id="autoOsOverlay" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(2,6,10,.72);backdrop-filter:blur(4px);align-items:center;justify-content:center;">
+  <div style="width:680px;max-width:94vw;max-height:88vh;overflow-y:auto;background:linear-gradient(160deg,#0b1512 0%,#070d0a 100%);border:1px solid rgba(57,229,140,.28);border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.7);">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid rgba(57,229,140,.14);">
+      <i class="fa-solid fa-robot" style="color:#39e58c;"></i>
+      <strong style="color:#eafff3;font-size:15px;flex:1;">Automação de OS</strong>
+      <button id="autoOsClose" style="background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;">&times;</button>
+    </div>
+
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:18px;">
+      <!-- CORRETIVAS -->
+      <section style="border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="autoCfgCorrective" style="accent-color:#39e58c;width:17px;height:17px;">
+          <span style="color:#eafff3;font-weight:700;font-size:13.5px;">Criar OS corretiva automaticamente</span>
+        </label>
+        <p style="color:rgba(255,255,255,.45);font-size:11.5px;margin:6px 0 10px 27px;">
+          O sistema monitora as usinas e abre uma OS sozinho quando detectar (verificação a cada 15 min, sem duplicar OS aberta):
+        </p>
+        <div id="autoCfgTriggers" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-left:27px;">
+          <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="autoCfgTrigShutdown" style="accent-color:#39e58c;"> Usina sem geração (horário de sol)
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="autoCfgTrigNoComm" style="accent-color:#39e58c;"> Usina sem comunicação (&gt;1h)
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="autoCfgTrigTemp" style="accent-color:#39e58c;"> Inversor com temperatura alta (&gt;80°C)
+          </label>
+          <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="autoCfgTrigRelay" style="accent-color:#39e58c;"> Proteção do relé atuada (flags)
+          </label>
+        </div>
+      </section>
+
+      <!-- PREVENTIVAS -->
+      <section style="border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="autoCfgPreventive" style="accent-color:#39e58c;width:17px;height:17px;">
+          <span style="color:#eafff3;font-weight:700;font-size:13.5px;">Preventivas recorrentes</span>
+        </label>
+        <p style="color:rgba(255,255,255,.45);font-size:11.5px;margin:6px 0 10px 27px;">
+          Planos de manutenção que geram OS automaticamente na frequência definida (a OS é criada com a antecedência configurada).
+        </p>
+
+        <div id="autoPlansList" style="margin-left:0;display:flex;flex-direction:column;gap:6px;"></div>
+
+        <div style="border-top:1px dashed rgba(255,255,255,.1);margin-top:12px;padding-top:12px;">
+          <div style="color:#9adbb8;font-size:11px;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:8px;" id="autoPlanFormTitle">Novo plano</div>
+          <input type="hidden" id="autoPlanId">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
+            <input type="text" id="autoPlanTitle" placeholder="Título (ex.: Limpeza dos módulos)" style="background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:8px 10px;color:#eafff3;font-size:12.5px;">
+            <select id="autoPlanPlant" style="background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:8px 10px;color:#eafff3;font-size:12.5px;">
+              <option value="">Todas as usinas</option>
+            </select>
+          </div>
+          <textarea id="autoPlanDesc" placeholder="Descrição / procedimento (opcional)" rows="2" style="width:100%;margin-top:8px;background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:8px 10px;color:#eafff3;font-size:12.5px;resize:vertical;"></textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+            <label style="color:rgba(255,255,255,.55);font-size:11px;">A cada (dias)
+              <input type="number" id="autoPlanFreq" min="1" value="90" style="width:100%;background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:7px 10px;color:#eafff3;font-size:12.5px;">
+            </label>
+            <label style="color:rgba(255,255,255,.55);font-size:11px;">Próximo vencimento
+              <input type="date" id="autoPlanDue" style="width:100%;background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:7px 10px;color:#eafff3;font-size:12.5px;">
+            </label>
+            <label style="color:rgba(255,255,255,.55);font-size:11px;">Criar OS com (dias) antes
+              <input type="number" id="autoPlanAdvance" min="0" value="7" style="width:100%;background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:7px 10px;color:#eafff3;font-size:12.5px;">
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end;">
+            <button id="autoPlanCancelEdit" style="display:none;background:none;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px 14px;color:rgba(255,255,255,.6);font-size:12px;cursor:pointer;">Cancelar edição</button>
+            <button id="autoPlanSave" style="background:rgba(57,229,140,.14);border:1px solid rgba(57,229,140,.4);border-radius:8px;padding:7px 16px;color:#39e58c;font-size:12.5px;font-weight:700;cursor:pointer;"><i class="fa-solid fa-plus"></i> Salvar plano</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="autoOsFeedback" style="display:none;font-size:12px;padding:8px 12px;border-radius:8px;"></div>
+    </div>
+
+    <div style="display:flex;gap:10px;padding:14px 20px;border-top:1px solid rgba(57,229,140,.14);justify-content:flex-end;">
+      <button id="autoOsCancel" style="background:none;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:8px 18px;color:rgba(255,255,255,.6);font-size:13px;cursor:pointer;">Fechar</button>
+      <button id="autoOsSaveConfig" style="display:flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;border:none;background:#39e58c;color:#05130b;font-size:13px;font-weight:700;cursor:pointer;">
+        <i class="fa-solid fa-check"></i> Salvar automação
+      </button>
+    </div>
   </div>
 </div>
 </body>
