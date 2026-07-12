@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // OS.JS - AIOTI Kanban v3
 // =============================================================================
 
@@ -84,7 +84,7 @@ const KB = {
   osNoteDrafts: { comment: "", feedback: "", feedbackRating: 0 }
 }
 
-const OS_RATING_LABELS = { 1: "Muito Ruim", 2: "Ruim", 3: "Médio", 4: "Bom", 5: "Ótimo" }
+const OS_RATING_LABELS = { 1: "Muito Ruim", 2: "Ruim", 3: "MÃ©dio", 4: "Bom", 5: "Ã“timo" }
 
 document.addEventListener("DOMContentLoaded", () => {
   initUser()
@@ -162,7 +162,7 @@ async function loadWizardOptions() {
     const level2Names = level1.flatMap((i) => (i.children || []).map((c) => c.name))
     populate("f-class2", level2Names)
   } catch (_err) {
-    console.warn("[loadWizardOptions] falha ao carregar opções:", _err?.message || _err)
+    console.warn("[loadWizardOptions] falha ao carregar opÃ§Ãµes:", _err?.message || _err)
   }
 }
 
@@ -288,17 +288,17 @@ async function loadWorkOrderSummary() {
 
     const set = (id, val) => {
       const el = document.getElementById(id)
-      if (el) el.textContent = val ?? "—"
+      if (el) el.textContent = val ?? "â€”"
     }
 
-    set("osKpiTotal",      s.total        ?? "—")
-    set("osKpiPendentes",  s.pendente     ?? "—")
-    set("osKpiEmProcesso", s.em_processo  ?? "—")
-    set("osKpiAtrasadas",  p.atrasadas    ?? "—")
-    set("osKpiParadas",    p.paradas      ?? "—")
-    set("osKpiConcluidas", s.concluida    ?? "—")
-    set("osKpiMtbf",       r.mtbf_hours != null ? r.mtbf_hours.toFixed(1) + "h" : "—")
-    set("osKpiMttr",       r.mttr_hours != null ? r.mttr_hours.toFixed(1) + "h" : "—")
+    set("osKpiTotal",      s.total        ?? "â€”")
+    set("osKpiPendentes",  s.pendente     ?? "â€”")
+    set("osKpiEmProcesso", s.em_processo  ?? "â€”")
+    set("osKpiAtrasadas",  p.atrasadas    ?? "â€”")
+    set("osKpiParadas",    p.paradas      ?? "â€”")
+    set("osKpiConcluidas", s.concluida    ?? "â€”")
+    set("osKpiMtbf",       r.mtbf_hours != null ? r.mtbf_hours.toFixed(1) + "h" : "â€”")
+    set("osKpiMttr",       r.mttr_hours != null ? r.mttr_hours.toFixed(1) + "h" : "â€”")
     set("osKpiCustoTotal", formatCurrencyBRL(p.custo_total || 0))
 
     const breakdown = document.getElementById("osCategoryBreakdown")
@@ -307,7 +307,7 @@ async function loadWorkOrderSummary() {
         <div class="os-category-chip">
           <span class="os-cat-name">${esc(c.categoria)}</span>
           <span class="os-cat-total">${c.total}</span>
-          <span class="os-cat-detail">${c.em_processo} em processo · ${c.paradas} paradas</span>
+          <span class="os-cat-detail">${c.em_processo} em processo Â· ${c.paradas} paradas</span>
         </div>
       `).join("") : ""
     }
@@ -392,9 +392,9 @@ function buildCard(workOrder) {
   const priorityLabel = workOrder.criticality || workOrder.criticality_name || ""
   const priorityClass = {
     "baixa": "kb-priority--low",
-    "media": "kb-priority--mid", "médio": "kb-priority--mid", "medio": "kb-priority--mid",
+    "media": "kb-priority--mid", "mÃ©dio": "kb-priority--mid", "medio": "kb-priority--mid",
     "alta": "kb-priority--high",
-    "critica": "kb-priority--crit", "crítica": "kb-priority--crit",
+    "critica": "kb-priority--crit", "crÃ­tica": "kb-priority--crit",
     "muito alta": "kb-priority--crit", "muito_alta": "kb-priority--crit",
   }[(priorityLabel || "").toLowerCase()] || "kb-priority--mid"
   const categoryText = workOrder.classification_2_name || workOrder.classification_1_name || workOrder.task_type_name || ""
@@ -436,7 +436,7 @@ function buildCard(workOrder) {
         </div>
         <div class="kb-card-actions">
           ${canDelete ? `<button type="button" class="kb-card-action-btn kb-card-action-btn--delete" data-action="delete" title="Excluir OS"><i class="fa-solid fa-trash"></i></button>` : ""}
-          <button type="button" class="kb-card-action-btn" data-action="menu" title="Opções"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+          <button type="button" class="kb-card-action-btn" data-action="menu" title="OpÃ§Ãµes"><i class="fa-solid fa-ellipsis-vertical"></i></button>
         </div>
       </div>
     </div>
@@ -741,7 +741,7 @@ async function confirmDeleteWorkOrder() {
 
   if (!username || !password) {
     errorEl?.classList.remove("hidden")
-    if (errorText) errorText.textContent = "Preencha usuário e senha"
+    if (errorText) errorText.textContent = "Preencha usuÃ¡rio e senha"
     return
   }
 
@@ -757,7 +757,7 @@ async function confirmDeleteWorkOrder() {
     const authData = await authRes.json()
     if (!authData.ok && !authData.token && !authData.access_token) {
       errorEl?.classList.remove("hidden")
-      if (errorText) errorText.textContent = "Credenciais inválidas"
+      if (errorText) errorText.textContent = "Credenciais invÃ¡lidas"
       return
     }
 
@@ -771,14 +771,14 @@ async function confirmDeleteWorkOrder() {
 
     closeDeleteModal()
     closeDetail()
-    showToast("OS excluída com sucesso", "success")
+    showToast("OS excluÃ­da com sucesso", "success")
     await refreshColumns([fromStatus])
     loadWorkOrderSummary()
   } catch (err) {
     errorEl?.classList.remove("hidden")
     if (errorText) errorText.textContent = err.message || "Erro ao excluir"
   } finally {
-    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Confirmar exclusão' }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Confirmar exclusÃ£o' }
   }
 }
 
@@ -919,15 +919,15 @@ function renderOsDetail(detail) {
       <div class="osd-section-head">
         <div>
           <div class="osd-section-title">Feedback</div>
-          <div class="osd-section-meta" id="osdFeedbackMeta">Retorno da execução</div>
+          <div class="osd-section-meta" id="osdFeedbackMeta">Retorno da execuÃ§Ã£o</div>
         </div>
       </div>
       <div id="osdFeedbackList" class="osd-note-list"></div>
       <div class="osd-rating" id="osdFeedbackRating">
         ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="osd-star ${KB.osNoteDrafts.feedbackRating >= n ? "active" : ""}" data-rating="${n}" title="${OS_RATING_LABELS[n]}"><i class="fa-solid fa-star"></i></button>`).join("")}
-        <span class="osd-rating-label" id="osdFeedbackRatingLabel">${KB.osNoteDrafts.feedbackRating ? OS_RATING_LABELS[KB.osNoteDrafts.feedbackRating] : "Avalie a execução"}</span>
+        <span class="osd-rating-label" id="osdFeedbackRatingLabel">${KB.osNoteDrafts.feedbackRating ? OS_RATING_LABELS[KB.osNoteDrafts.feedbackRating] : "Avalie a execuÃ§Ã£o"}</span>
       </div>
-      <textarea id="osdFeedbackInput" class="osd-textarea osd-note-input" placeholder="Escreva o feedback da execução...">${esc(KB.osNoteDrafts.feedback || "")}</textarea>
+      <textarea id="osdFeedbackInput" class="osd-textarea osd-note-input" placeholder="Escreva o feedback da execuÃ§Ã£o...">${esc(KB.osNoteDrafts.feedback || "")}</textarea>
       <div class="osd-note-actions">
         <button type="button" id="osdFeedbackBtn" class="wz-btn-primary osd-note-btn"><i class="fa-solid fa-clipboard-check"></i> Registrar feedback</button>
       </div>
@@ -936,12 +936,12 @@ function renderOsDetail(detail) {
     <section class="osd-section-card">
       <div class="osd-section-head">
         <div>
-          <div class="osd-section-title">Comentários</div>
+          <div class="osd-section-title">ComentÃ¡rios</div>
           <div class="osd-section-meta" id="osdCommentsMeta"></div>
         </div>
       </div>
       <div id="osdCommentList" class="osd-note-list"></div>
-      <textarea id="osdCommentInput" class="osd-textarea osd-note-input" placeholder="Escreva um comentário...">${esc(KB.osNoteDrafts.comment || "")}</textarea>
+      <textarea id="osdCommentInput" class="osd-textarea osd-note-input" placeholder="Escreva um comentÃ¡rio...">${esc(KB.osNoteDrafts.comment || "")}</textarea>
       <div class="osd-note-actions">
         <button type="button" id="osdCommentBtn" class="wz-btn-primary osd-note-btn"><i class="fa-solid fa-comment"></i> Comentar</button>
       </div>
@@ -1008,7 +1008,7 @@ function renderOsDetailTaskCard(task) {
 }
 
 // =============================================================================
-// Notas da OS (feedback + comentarios) — "OS".os_work_order_note via /work-orders/{id}/notes
+// Notas da OS (feedback + comentarios) â€” "OS".os_work_order_note via /work-orders/{id}/notes
 // =============================================================================
 
 async function loadWorkOrderNotes(detail) {
@@ -1064,10 +1064,10 @@ function renderWorkOrderNotes() {
     : '<div class="osd-note-empty">Nenhum feedback registrado.</div>'
   commentList.innerHTML = comments.length
     ? comments.map(renderWorkOrderNoteItem).join("")
-    : '<div class="osd-note-empty">Nenhum comentário ainda.</div>'
+    : '<div class="osd-note-empty">Nenhum comentÃ¡rio ainda.</div>'
 
   const fbMeta = document.getElementById("osdFeedbackMeta")
-  if (fbMeta) fbMeta.textContent = feedbacks.length ? `Total: ${feedbacks.length}` : "Retorno da execução"
+  if (fbMeta) fbMeta.textContent = feedbacks.length ? `Total: ${feedbacks.length}` : "Retorno da execuÃ§Ã£o"
   const cmMeta = document.getElementById("osdCommentsMeta")
   if (cmMeta) cmMeta.textContent = comments.length ? `Total: ${comments.length}` : ""
 }
@@ -1076,9 +1076,9 @@ function noteAuthorLabel(note) {
   if (note.author_name) return note.author_name
   const user = getCurrentUser()
   if (note.created_by_user_id && user?.id && String(note.created_by_user_id) === String(user.id)) {
-    return user.username || "Você"
+    return user.username || "VocÃª"
   }
-  if (note.created_by_user_id) return `Usuário #${note.created_by_user_id}`
+  if (note.created_by_user_id) return `UsuÃ¡rio #${note.created_by_user_id}`
   return "Sem autor"
 }
 
@@ -1095,7 +1095,7 @@ function updateFeedbackRatingWidget() {
     btn.classList.toggle("active", Number(btn.dataset.rating) <= rating)
   })
   const label = document.getElementById("osdFeedbackRatingLabel")
-  if (label) label.textContent = rating ? OS_RATING_LABELS[rating] : "Avalie a execução"
+  if (label) label.textContent = rating ? OS_RATING_LABELS[rating] : "Avalie a execuÃ§Ã£o"
 }
 
 function renderNoteStars(rating) {
@@ -1137,11 +1137,11 @@ async function submitWorkOrderNote(noteType) {
   const rating = noteType === "feedback" ? (KB.osNoteDrafts.feedbackRating || 0) : 0
 
   if (noteType === "feedback" && !rating) {
-    showToast("Selecione uma avaliação (estrelas) para o feedback", "error")
+    showToast("Selecione uma avaliaÃ§Ã£o (estrelas) para o feedback", "error")
     return
   }
   if (noteType === "comment" && !content) {
-    showToast("Escreva o comentário antes de enviar", "error")
+    showToast("Escreva o comentÃ¡rio antes de enviar", "error")
     return
   }
 
@@ -1170,7 +1170,7 @@ async function submitWorkOrderNote(noteType) {
     } else {
       KB.osNoteDrafts.comment = ""
     }
-    showToast(noteType === "feedback" ? "Feedback registrado" : "Comentário adicionado", "success")
+    showToast(noteType === "feedback" ? "Feedback registrado" : "ComentÃ¡rio adicionado", "success")
 
     KB.osNotes = { workOrderId: null, loading: false, items: [], error: null }
     await loadWorkOrderNotes(KB.currentOsDetail)
@@ -1591,7 +1591,7 @@ function renderAttachmentItem(attachment) {
         <div class="task-attachment-actions">
           ${available
             ? `<a href="${escAttr(attachment.download_url)}" target="_blank" rel="noopener noreferrer" class="wz-btn-ghost" style="padding:4px 10px;font-size:11px;"><i class="fa-solid fa-download"></i> Download</a>`
-            : `<span style="font-size:11px;color:#ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Arquivo indisponível</span>`
+            : `<span style="font-size:11px;color:#ef4444;"><i class="fa-solid fa-triangle-exclamation"></i> Arquivo indisponÃ­vel</span>`
           }
         </div>
       </div>
@@ -1644,7 +1644,7 @@ function wireTaskModalInteractions() {
     button.addEventListener("click", () => {
       KB.currentTaskTab = button.dataset.tab
       if (button.dataset.tab === "attachments" && KB.currentTask) {
-        KB.currentTask.attachmentsLoaded = false  // forçar reload sempre
+        KB.currentTask.attachmentsLoaded = false  // forÃ§ar reload sempre
       }
       renderTaskModal()
     })
@@ -1901,7 +1901,7 @@ async function loadTaskAttachments(task) {
     console.log("[ATT] items normalizados:", items.length, items)
 
     task.attachments = normalizeAttachments(items)
-    console.log("[ATT] após normalize:", task.attachments)
+    console.log("[ATT] apÃ³s normalize:", task.attachments)
     task.attachmentsLoaded = true
     syncPrimaryTaskToDetail(KB.currentOsDetail)
   } catch (error) {
@@ -2292,7 +2292,7 @@ async function submitWizard() {
 
     const newWoId = created?.item?.id || created?.work_order?.id || created?.id
     if (!newWoId) {
-      console.error("[WZ] newWoId não encontrado na resposta:", created)
+      console.error("[WZ] newWoId nÃ£o encontrado na resposta:", created)
     } else if (KB.wizardPendingAttachments.length) {
       for (const att of KB.wizardPendingAttachments) {
         try {
@@ -3347,7 +3347,7 @@ function showToast(message, type = "success") {
 }
 
 // =============================================================================
-// AUTOMACAO DE OS — corretivas automaticas + preventivas recorrentes
+// AUTOMACAO DE OS â€” corretivas automaticas + preventivas recorrentes
 // (modal do botao robo na topbar; backend: GET/POST /os-automation;
 //  quem cria as OSs e o os_automator.py no cron da EC2)
 // =============================================================================
@@ -3392,7 +3392,6 @@ async function autoOsLoad() {
   set("autoCfgCorrective",   c.auto_corrective)
   set("autoCfgTrigShutdown", c.trigger_plant_shutdown)
   set("autoCfgTrigNoComm",   c.trigger_no_comm)
-  set("autoCfgTrigTemp",     c.trigger_temp_high)
   set("autoCfgTrigRelay",    c.trigger_relay_flags)
   set("autoCfgPreventive",   c.auto_preventive)
   autoOsRenderPlans()
@@ -3410,8 +3409,8 @@ function autoOsRenderPlans() {
       <div style="flex:1;min-width:0;">
         <div style="color:#eafff3;font-size:12.5px;font-weight:600;">${esc(p.title)}</div>
         <div style="color:rgba(255,255,255,.45);font-size:11px;">
-          ${esc(p.plant_name || "Todas as usinas")} · a cada ${esc(String(p.frequency_days))}d ·
-          próx.: ${esc(String(p.next_due_date).slice(0, 10))} · cria ${esc(String(p.advance_days))}d antes
+          ${esc(p.plant_name || "Todas as usinas")} Â· a cada ${esc(String(p.frequency_days))}d Â·
+          prÃ³x.: ${esc(String(p.next_due_date).slice(0, 10))} Â· cria ${esc(String(p.advance_days))}d antes
         </div>
       </div>
       <button data-auto-edit="${esc(String(p.id))}" title="Editar" style="background:none;border:none;color:#9adbb8;cursor:pointer;font-size:13px;"><i class="fa-solid fa-pen"></i></button>
@@ -3434,7 +3433,7 @@ function autoOsRenderPlans() {
   }))
 
   box.querySelectorAll("[data-auto-del]").forEach(btn => btn.addEventListener("click", async () => {
-    if (!confirm("Excluir este plano preventivo? (as OSs já criadas não são apagadas)")) return
+    if (!confirm("Excluir este plano preventivo? (as OSs jÃ¡ criadas nÃ£o sÃ£o apagadas)")) return
     try {
       await apiJson("/os-automation", {
         method: "POST",
@@ -3442,7 +3441,7 @@ function autoOsRenderPlans() {
         body: JSON.stringify({ action: "delete_plan", plan_id: Number(btn.dataset.autoDel) }),
       })
       await autoOsLoad()
-      autoOsFeedback("Plano excluído.")
+      autoOsFeedback("Plano excluÃ­do.")
     } catch (e) { autoOsFeedback("Erro ao excluir: " + (e?.message || e), false) }
   }))
 }
@@ -3466,7 +3465,7 @@ function bindAutomationModal() {
     try {
       await Promise.all([autoOsLoad(), autoOsLoadPlants()])
     } catch (e) {
-      autoOsFeedback("Erro ao carregar automação: " + (e?.message || e), false)
+      autoOsFeedback("Erro ao carregar automaÃ§Ã£o: " + (e?.message || e), false)
     }
   })
 
@@ -3490,13 +3489,12 @@ function bindAutomationModal() {
             auto_corrective:        val("autoCfgCorrective"),
             trigger_plant_shutdown: val("autoCfgTrigShutdown"),
             trigger_no_comm:        val("autoCfgTrigNoComm"),
-            trigger_temp_high:      val("autoCfgTrigTemp"),
             trigger_relay_flags:    val("autoCfgTrigRelay"),
             auto_preventive:        val("autoCfgPreventive"),
           },
         }),
       })
-      showToast("Automação salva com sucesso")
+      showToast("AutomaÃ§Ã£o salva com sucesso")
       autoOsShow(false)
     } catch (e) { autoOsFeedback("Erro ao salvar: " + (e?.message || e), false) }
   })
@@ -3512,9 +3510,9 @@ function bindAutomationModal() {
       advance_days: Number(g("autoPlanAdvance") || 7),
       next_due_date: g("autoPlanDue"),
     }
-    if (!plan.title)         return autoOsFeedback("Informe o título do plano.", false)
-    if (!plan.frequency_days || plan.frequency_days < 1) return autoOsFeedback("Frequência inválida (dias >= 1).", false)
-    if (!plan.next_due_date) return autoOsFeedback("Informe o próximo vencimento.", false)
+    if (!plan.title)         return autoOsFeedback("Informe o tÃ­tulo do plano.", false)
+    if (!plan.frequency_days || plan.frequency_days < 1) return autoOsFeedback("FrequÃªncia invÃ¡lida (dias >= 1).", false)
+    if (!plan.next_due_date) return autoOsFeedback("Informe o prÃ³ximo vencimento.", false)
     try {
       await apiJson("/os-automation", {
         method: "POST",
