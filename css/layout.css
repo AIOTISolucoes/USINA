@@ -5614,7 +5614,7 @@ select.pem-ctrl option {
 .plant-card__maint-btn {
   position: absolute;
   top: 10px;
-  right: 42px;
+  right: 74px; /* lado a lado com o badge de acontecimentos (right:42) e o lápis (right:10) */
   width: 26px;
   height: 26px;
   display: inline-flex;

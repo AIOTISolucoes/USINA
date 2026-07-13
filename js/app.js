@@ -5039,9 +5039,9 @@ function updatePortfolioCardData(plants) {
       else icon.className = "plant-card__icon";
     }
 
-    // Update comm badge
+    // Update comm badge (manutenção não usa badge no topo — só o status embaixo)
     const existingBadge = card.querySelector(".badge--offline, .badge--partial, .badge--maintenance");
-    if (commStatus.badge) {
+    if (commStatus.badge && !isMaintenance) {
       if (existingBadge) {
         existingBadge.className = commStatus.badgeClass;
         existingBadge.textContent = commStatus.badge;
@@ -5265,7 +5265,8 @@ function renderPortfolioCards(plants) {
     }
     const canvasId = "mini-chart-" + plantId;
 
-    const commBadgeHtml = commStatus.badge
+    // Em manutenção o card NÃO ganha badge no topo (o status embaixo já avisa)
+    const commBadgeHtml = commStatus.badge && !isMaintenance
       ? `<span class="${commStatus.badgeClass}">${commStatus.badge}</span>`
       : '';
     const activePowerDisplay = isCommOffline ? '—' : activePower.toFixed(1) + ' kW';

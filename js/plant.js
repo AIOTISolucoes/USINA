@@ -6524,52 +6524,51 @@ function renderPlantName(realtime) {
 // ======================================================
 let COLLECTOR_MAINTENANCE = false;
 
+const CMB_WRENCH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+
 function renderCollectorMaintenance(realtime) {
   if (realtime && typeof realtime.collector_maintenance !== "undefined") {
     COLLECTOR_MAINTENANCE = realtime.collector_maintenance === true;
   }
 
-  // Banner piscando no topo da página (visível para todos)
-  let banner = document.getElementById("collectorMaintenanceBanner");
-  if (COLLECTOR_MAINTENANCE) {
-    if (!banner) {
-      const headerCard = document.querySelector(".plant-header-card");
-      if (headerCard && headerCard.parentNode) {
-        banner = document.createElement("div");
-        banner.id = "collectorMaintenanceBanner";
-        banner.className = "collector-maintenance-banner";
-        banner.innerHTML =
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' +
-          '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
-          '<span class="cmb-sub"> — nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>';
-        headerCard.parentNode.insertBefore(banner, headerCard);
-      }
-    }
-  } else if (banner) {
-    banner.remove();
-  }
-
-  // Botão de toggle — somente superuser (senha admin AIOTI)
   const ctx = getUserContext();
-  if (ctx.is_superuser !== true && ctx.is_superuser !== "true") return;
+  const isAdmin = ctx.is_superuser === true || ctx.is_superuser === "true";
 
-  let btn = document.getElementById("collectorMaintenanceBtn");
-  if (!btn) {
-    const actions = document.querySelector(".plant-header-actions");
-    if (!actions) return;
-    btn = document.createElement("button");
-    btn.id = "collectorMaintenanceBtn";
-    btn.type = "button";
-    btn.addEventListener("click", toggleCollectorMaintenance);
-    actions.appendChild(btn);
+  // Estados da faixa: "on" (banner p/ todos, admin ganha botão Encerrar),
+  // "idle" (só admin: faixa discreta p/ ativar), "none" (nada)
+  const state = COLLECTOR_MAINTENANCE ? "on" : (isAdmin ? "idle" : "none");
+
+  let banner = document.getElementById("collectorMaintenanceBanner");
+  if (banner && banner.dataset.state === state) return;
+  if (banner) banner.remove();
+  if (state === "none") return;
+
+  const headerCard = document.querySelector(".plant-header-card");
+  if (!headerCard || !headerCard.parentNode) return;
+
+  banner = document.createElement("div");
+  banner.id = "collectorMaintenanceBanner";
+  banner.dataset.state = state;
+
+  if (state === "on") {
+    banner.className = "collector-maintenance-banner";
+    banner.innerHTML =
+      CMB_WRENCH_SVG +
+      '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
+      '<span class="cmb-sub"> — nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>' +
+      (isAdmin
+        ? '<button id="collectorMaintenanceBtn" class="cmb-action" type="button" title="Encerrar manutenção do coletor local">' + CMB_WRENCH_SVG + '<span>Encerrar</span></button>'
+        : '');
+  } else {
+    banner.className = "collector-maintenance-banner collector-maintenance-banner--idle";
+    banner.innerHTML =
+      '<button id="collectorMaintenanceBtn" class="cmb-action" type="button" title="Avisar na plataforma que o coletor local está sendo atualizado">' + CMB_WRENCH_SVG + '<span>Marcar coletor em atualização</span></button>';
   }
-  btn.className = "collector-maintenance-btn" + (COLLECTOR_MAINTENANCE ? " is-on" : "");
-  btn.title = COLLECTOR_MAINTENANCE
-    ? "Encerrar manutenção do coletor local"
-    : "Marcar coletor local em atualização";
-  btn.setAttribute("aria-label", btn.title);
-  btn.innerHTML =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+
+  headerCard.parentNode.insertBefore(banner, headerCard.nextSibling);
+  const btn = banner.querySelector("#collectorMaintenanceBtn");
+  if (btn) btn.addEventListener("click", toggleCollectorMaintenance);
 }
 
 async function toggleCollectorMaintenance() {
