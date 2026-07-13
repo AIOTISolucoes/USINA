@@ -6556,7 +6556,7 @@ function renderCollectorMaintenance(realtime) {
     banner.innerHTML =
       CMB_WRENCH_SVG +
       '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
-      '<span class="cmb-sub"> — nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>' +
+      '<span class="cmb-sub">nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>' +
       (isAdmin
         ? '<button id="collectorMaintenanceBtn" class="cmb-action" type="button" title="Encerrar manutenção do coletor local">' + CMB_WRENCH_SVG + '<span>Encerrar</span></button>'
         : '');
