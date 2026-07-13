@@ -5560,10 +5560,10 @@ select.pem-ctrl option {
   white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: rgba(96,165,250,0.14);
+  background: rgba(23,37,84,0.55);
   color: #93c5fd;
-  border: 1px solid rgba(96,165,250,0.35);
-  animation: maintenance-blink 1.4s ease-in-out infinite;
+  border: 1px solid rgba(37,99,235,0.55);
+  animation: maintenance-glow 2.4s ease-in-out infinite;
 }
 .badge--maintenance::before {
   content: '';
@@ -5575,12 +5575,17 @@ select.pem-ctrl option {
 }
 @keyframes maintenance-blink {
   0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
+  50%      { opacity: 0.6; }
+}
+@keyframes maintenance-glow {
+  0%, 100% { border-color: rgba(37,99,235,0.40); box-shadow: 0 0 6px rgba(37,99,235,0.14), 0 0 16px rgba(29,78,216,0.08); }
+  50%      { border-color: rgba(59,130,246,0.85); box-shadow: 0 0 12px rgba(37,99,235,0.42), 0 0 26px rgba(29,78,216,0.25); }
 }
 
 .plant-card--maintenance {
   background: linear-gradient(145deg, rgba(14,15,20,0.99) 0%, rgba(9,10,14,0.99) 100%) !important;
-  border: 1px dashed rgba(96,165,250,0.30) !important;
+  border: 1px solid rgba(37,99,235,0.50) !important;
+  animation: maintenance-glow 2.4s ease-in-out infinite;
 }
 .plant-card--maintenance::before {
   background: linear-gradient(90deg, transparent, rgba(96,165,250,0.35), transparent);
@@ -5596,9 +5601,9 @@ select.pem-ctrl option {
 .plant-card--maintenance .plant-card__chart-area    { opacity: 0.35; }
 
 .plant-card__status-dot.maintenance {
-  background: #60a5fa;
-  box-shadow: 0 0 6px rgba(96,165,250,0.8);
-  animation: maintenance-blink 1.4s ease-in-out infinite;
+  background: #2563eb;
+  box-shadow: 0 0 7px rgba(37,99,235,0.9), 0 0 14px rgba(37,99,235,0.4);
+  animation: maintenance-blink 2.4s ease-in-out infinite;
 }
 
 .portfolio-row--maintenance td                { color: rgba(160,175,200,0.55) !important; text-shadow: none !important; }
@@ -5640,7 +5645,7 @@ select.pem-ctrl option {
 .plant-card__maint-btn.is-on {
   opacity: 1;
   color: #93c5fd;
-  animation: maintenance-blink 1.4s ease-in-out infinite;
+  animation: maintenance-blink 2.4s ease-in-out infinite;
 }
 .plant-card__maint-btn.is-on svg {
   filter: drop-shadow(0 0 7px rgba(96,165,250,0.9));
