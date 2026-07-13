@@ -9892,3 +9892,18 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 }
 .cmb-action:disabled { opacity: 0.5; cursor: wait; }
 .collector-maintenance-banner--idle .cmb-action { margin-left: 0; }
+
+/* Mobile: faixa de manutenção compacta, botão em linha própria sem apertar */
+@media (max-width: 640px) {
+  .collector-maintenance-banner {
+    font-size: 0.72rem;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .collector-maintenance-banner .cmb-sub { display: block; width: 100%; }
+  .cmb-action {
+    margin-left: 0;
+    padding: 4px 12px;
+    font-size: 0.7rem;
+  }
+}
