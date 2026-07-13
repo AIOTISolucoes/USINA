@@ -3352,7 +3352,7 @@ function showToast(message, type = "success") {
 //  quem cria as OSs e o os_automator.py no cron da EC2)
 // =============================================================================
 
-const AUTO_OS = { config: null, plans: [], plantsLoaded: false }
+const AUTO_OS = { config: null, plans: [], plantsLoaded: false, customerId: null, customersBound: false }
 
 function autoOsShow(show) {
   const ov = document.getElementById("autoOsOverlay")
@@ -3383,9 +3383,30 @@ async function autoOsLoadPlants() {
 }
 
 async function autoOsLoad() {
-  const data = await apiJson("/os-automation")
+  const qs = AUTO_OS.customerId ? `?customer_id=${AUTO_OS.customerId}` : ""
+  const data = await apiJson("/os-automation" + qs)
   AUTO_OS.config = data?.config || {}
   AUTO_OS.plans  = data?.plans || []
+  AUTO_OS.customerId = AUTO_OS.config.customer_id || AUTO_OS.customerId
+
+  // superusuário: seletor de cliente (a config de automação é por cliente)
+  const customers = Array.isArray(data?.customers) ? data.customers : []
+  const row = document.getElementById("autoCustomerRow")
+  const sel = document.getElementById("autoCustomerSelect")
+  if (row && sel && customers.length) {
+    row.style.display = "flex"
+    sel.innerHTML = customers
+      .map(c => `<option value="${esc(String(c.id))}">${esc(c.name || ("Cliente " + c.id))}</option>`)
+      .join("")
+    sel.value = String(AUTO_OS.customerId || "")
+    if (!AUTO_OS.customersBound) {
+      AUTO_OS.customersBound = true
+      sel.addEventListener("change", async () => {
+        AUTO_OS.customerId = Number(sel.value)
+        try { await autoOsLoad() } catch (e) { autoOsFeedback("Erro ao trocar de cliente: " + (e?.message || e), false) }
+      })
+    }
+  }
 
   const c = AUTO_OS.config
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v }
@@ -3438,7 +3459,7 @@ function autoOsRenderPlans() {
       await apiJson("/os-automation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete_plan", plan_id: Number(btn.dataset.autoDel) }),
+        body: JSON.stringify({ action: "delete_plan", plan_id: Number(btn.dataset.autoDel), customer_id: AUTO_OS.customerId }),
       })
       await autoOsLoad()
       autoOsFeedback("Plano excluído.")
@@ -3484,6 +3505,7 @@ function bindAutomationModal() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save_config",
+          customer_id: AUTO_OS.customerId,
           user_id: getCurrentUser().id || null,
           config: {
             auto_corrective:        val("autoCfgCorrective"),
@@ -3517,7 +3539,7 @@ function bindAutomationModal() {
       await apiJson("/os-automation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_plan", user_id: getCurrentUser().id || null, plan }),
+        body: JSON.stringify({ action: "save_plan", customer_id: AUTO_OS.customerId, user_id: getCurrentUser().id || null, plan }),
       })
       autoOsResetPlanForm()
       await autoOsLoad()
