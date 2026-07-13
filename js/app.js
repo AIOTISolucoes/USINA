@@ -1912,6 +1912,11 @@ function sortPortfolioPlants(plants) {
 }
 
 function getPlantCardStatus(plant) {
+  // Modo manutenção do coletor local tem prioridade sobre qualquer status:
+  // a equipe está mexendo no CLP, então "offline" aqui NÃO é falha.
+  if (plant.collector_maintenance === true) {
+    return { colorClass: 'plant-card--maintenance', badge: 'Atualizando coletor local', badgeClass: 'badge--maintenance' };
+  }
   // "Sem comunicação" = somente quando NÃO recebemos dados recentes (comunicação real perdida)
   if (plant.comm_status === 'offline') {
     return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
@@ -1960,7 +1965,9 @@ function renderPortfolioTable(plants) {
     const plantState = getPortfolioPlantVisualState(plant);
     const commStatus = getPlantCardStatus(plant);
     const isCommOffline = commStatus.colorClass === 'plant-card--offline';
-    if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
+    if (isMaintenance) tr.classList.add("portfolio-row--maintenance");
+    else if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
 
     const alarmSeverity =
       normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId)) ||
@@ -4957,10 +4964,12 @@ function updatePortfolioCardData(plants) {
     if (statValues[5]) statValues[5].textContent = invAvail;
 
     // Update status dot + text
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
     const isOffline = plantState.isOffline || isCommOffline;
     let statusDotClass = "plant-card__status-dot";
     let statusText;
-    if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
+    if (isMaintenance) { statusDotClass += " maintenance"; statusText = "Atualizando coletor local"; }
+    else if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
     else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Desligada"; }
     else if (plantState.kind === "generating") { statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
     else { statusDotClass += " standby"; statusText = "Aguardando"; }
@@ -5000,7 +5009,7 @@ function updatePortfolioCardData(plants) {
     }
 
     // Update comm badge
-    const existingBadge = card.querySelector(".badge--offline, .badge--partial");
+    const existingBadge = card.querySelector(".badge--offline, .badge--partial, .badge--maintenance");
     if (commStatus.badge) {
       if (existingBadge) {
         existingBadge.className = commStatus.badgeClass;
@@ -5033,6 +5042,7 @@ function updatePortfolioCardAlarms() {
     // comm_status takes visual priority — skip alarm override for comm offline/partial
     const commSt = card.dataset.commStatus;
     if (commSt === 'offline' || commSt === 'partial') return;
+    if (card.classList.contains('plant-card--maintenance')) return;
     const isOff = card.classList.contains("plant-card--offline");
     card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}`;
     const icon = card.querySelector(".plant-card__icon");
@@ -5185,11 +5195,16 @@ function renderPortfolioCards(plants) {
     const relayAvail = plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "\u2014";
     const prAcc = plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "\u2014";
 
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
     const isOffline = plantState.isOffline || isCommOffline;
     const isGenerating = plantState.kind === "generating";
     let statusDotClass = "plant-card__status-dot";
     let statusText;
-    if (isCommOffline) {
+    if (isMaintenance) {
+      statusDotClass += " maintenance";
+      statusText = "Atualizando coletor local";
+    }
+    else if (isCommOffline) {
       statusDotClass += " offline";
       statusText = "Sem comunicação";
     }

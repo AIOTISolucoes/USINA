@@ -6520,6 +6520,86 @@ function renderPlantName(realtime) {
 }
 
 // ======================================================
+// MANUTENÇÃO DO COLETOR LOCAL (aviso + toggle admin)
+// ======================================================
+let COLLECTOR_MAINTENANCE = false;
+
+function renderCollectorMaintenance(realtime) {
+  if (realtime && typeof realtime.collector_maintenance !== "undefined") {
+    COLLECTOR_MAINTENANCE = realtime.collector_maintenance === true;
+  }
+
+  // Banner piscando no topo da página (visível para todos)
+  let banner = document.getElementById("collectorMaintenanceBanner");
+  if (COLLECTOR_MAINTENANCE) {
+    if (!banner) {
+      const headerCard = document.querySelector(".plant-header-card");
+      if (headerCard && headerCard.parentNode) {
+        banner = document.createElement("div");
+        banner.id = "collectorMaintenanceBanner";
+        banner.className = "collector-maintenance-banner";
+        banner.innerHTML =
+          '<i class="fa-solid fa-wrench"></i> ' +
+          '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
+          '<span class="cmb-sub"> — nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>';
+        headerCard.parentNode.insertBefore(banner, headerCard);
+      }
+    }
+  } else if (banner) {
+    banner.remove();
+  }
+
+  // Botão de toggle — somente superuser (senha admin AIOTI)
+  const ctx = getUserContext();
+  if (ctx.is_superuser !== true && ctx.is_superuser !== "true") return;
+
+  let btn = document.getElementById("collectorMaintenanceBtn");
+  if (!btn) {
+    const actions = document.querySelector(".plant-header-actions");
+    if (!actions) return;
+    btn = document.createElement("button");
+    btn.id = "collectorMaintenanceBtn";
+    btn.type = "button";
+    btn.addEventListener("click", toggleCollectorMaintenance);
+    actions.appendChild(btn);
+  }
+  btn.className = "collector-maintenance-btn" + (COLLECTOR_MAINTENANCE ? " is-on" : "");
+  btn.title = COLLECTOR_MAINTENANCE
+    ? "Encerrar o aviso de atualização do coletor local"
+    : "Avisar na plataforma que o coletor local está sendo atualizado";
+  btn.innerHTML = COLLECTOR_MAINTENANCE
+    ? '<i class="fa-solid fa-wrench"></i> Encerrar manutenção'
+    : '<i class="fa-solid fa-wrench"></i> Atualizando coletor';
+}
+
+async function toggleCollectorMaintenance() {
+  const turnOn = !COLLECTOR_MAINTENANCE;
+  const msg = turnOn
+    ? 'Marcar esta usina como "ATUALIZANDO COLETOR LOCAL"?\n\nO aviso ficará visível para todos os usuários até ser encerrado.'
+    : 'Encerrar o modo "ATUALIZANDO COLETOR LOCAL" desta usina?';
+  if (!window.confirm(msg)) return;
+
+  const btn = document.getElementById("collectorMaintenanceBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/maintenance`, {
+      method: "PATCH",
+      headers: buildWriteAuthHeaders(),
+      body: JSON.stringify({ maintenance: turnOn })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    COLLECTOR_MAINTENANCE = data?.collector_maintenance === true;
+    renderCollectorMaintenance(null);
+  } catch (e) {
+    console.error("[collector-maintenance] erro", e);
+    alert("Falha ao alterar o modo manutenção: " + (e?.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ======================================================
 // ✅ REFRESH (realtime + alarms + inverters rows + strings abertas + relay)
 // ======================================================
 async function refreshRealtimeEverything() {
@@ -6541,6 +6621,7 @@ async function refreshRealtimeEverything() {
     if (realtimeRes.status === "fulfilled") {
       realtime = realtimeRes.value;
       renderPlantName(realtime);
+      renderCollectorMaintenance(realtime);
       if (realtime) {
         const rated = asNumber(
           realtime.rated_power_ac_kw ?? realtime.rated_power_kw ?? realtime.rated_power_kwp,
