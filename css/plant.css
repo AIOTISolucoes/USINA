@@ -9833,7 +9833,12 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   text-align: center;
   animation: collector-blink 1.6s ease-in-out infinite;
 }
-.collector-maintenance-banner i { color: #93c5fd; }
+.collector-maintenance-banner svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: #93c5fd;
+}
 .collector-maintenance-banner strong {
   color: #dbeafe;
   letter-spacing: 0.06em;
@@ -9847,20 +9852,27 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 .collector-maintenance-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
   border: 1px solid rgba(96,165,250,0.35);
   background: rgba(96,165,250,0.08);
   color: #93c5fd;
-  font-size: 0.72rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.collector-maintenance-btn svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
 }
 .collector-maintenance-btn:hover {
   background: rgba(96,165,250,0.18);
   border-color: rgba(96,165,250,0.55);
+  transform: scale(1.08);
 }
 .collector-maintenance-btn.is-on {
   background: rgba(96,165,250,0.22);

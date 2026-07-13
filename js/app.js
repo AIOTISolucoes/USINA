@@ -1911,6 +1911,37 @@ function sortPortfolioPlants(plants) {
   return validPlants;
 }
 
+function _syncCardMaintBtn(btn, isOn) {
+  btn.dataset.maintOn = isOn ? "1" : "0";
+  btn.classList.toggle("is-on", isOn);
+  btn.title = isOn
+    ? "Encerrar manutenção do coletor local"
+    : "Marcar coletor local em atualização";
+}
+
+async function togglePlantCollectorMaintenance(plantId, plantName, isOn) {
+  const turnOn = !isOn;
+  const msg = turnOn
+    ? `Marcar a usina "${plantName}" como "ATUALIZANDO COLETOR LOCAL"?\n\nO aviso ficará visível para todos os usuários até ser encerrado.`
+    : `Encerrar o modo "ATUALIZANDO COLETOR LOCAL" da usina "${plantName}"?`;
+  if (!window.confirm(msg)) return;
+  try {
+    const res = await apiFetch(`/plants/${plantId}/maintenance`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maintenance: turnOn })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    const btn = document.querySelector(`.plant-card__maint-btn[data-maint-plant-id="${plantId}"]`);
+    if (btn) _syncCardMaintBtn(btn, data?.collector_maintenance === true);
+    if (typeof refreshDashboard === "function") refreshDashboard();
+  } catch (e) {
+    console.error("[collector-maintenance] erro", e);
+    alert("Falha ao alterar o modo manutenção: " + (e?.message || e));
+  }
+}
+
 function getPlantCardStatus(plant) {
   // Modo manutenção do coletor local tem prioridade sobre qualquer status:
   // a equipe está mexendo no CLP, então "offline" aqui NÃO é falha.
@@ -5026,6 +5057,10 @@ function updatePortfolioCardData(plants) {
     } else if (existingBadge) {
       existingBadge.remove();
     }
+
+    // Sincroniza o toggle de manutenção do coletor (estado pode mudar por outro admin)
+    const maintBtn = card.querySelector(".plant-card__maint-btn");
+    if (maintBtn) _syncCardMaintBtn(maintBtn, plant.collector_maintenance === true);
   });
 }
 
@@ -5306,6 +5341,15 @@ function renderPortfolioCards(plants) {
       >
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
       </button>
+      <button
+        class="plant-card__maint-btn"
+        title="Manutenção do coletor local"
+        data-maint-plant-id="${plantId}"
+        aria-label="Manutenção do coletor local"
+        style="display:none;"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      </button>
     `;
 
     const openPlant = () => {
@@ -5324,6 +5368,17 @@ function renderPortfolioCards(plants) {
       _editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         openPlantEditModal(plantId, plantName, ratedPower);
+      });
+    }
+
+    // Toggle de manutenção do coletor local — SOMENTE superuser (admin AIOTI)
+    const _maintBtn = card.querySelector(".plant-card__maint-btn");
+    if (_maintBtn && _u.is_superuser === true) {
+      _maintBtn.style.display = "";
+      _syncCardMaintBtn(_maintBtn, plant.collector_maintenance === true);
+      _maintBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        togglePlantCollectorMaintenance(plantId, plantName, _maintBtn.dataset.maintOn === "1");
       });
     }
 

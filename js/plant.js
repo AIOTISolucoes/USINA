@@ -6539,7 +6539,7 @@ function renderCollectorMaintenance(realtime) {
         banner.id = "collectorMaintenanceBanner";
         banner.className = "collector-maintenance-banner";
         banner.innerHTML =
-          '<i class="fa-solid fa-wrench"></i> ' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' +
           '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
           '<span class="cmb-sub"> — nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>';
         headerCard.parentNode.insertBefore(banner, headerCard);
@@ -6565,11 +6565,11 @@ function renderCollectorMaintenance(realtime) {
   }
   btn.className = "collector-maintenance-btn" + (COLLECTOR_MAINTENANCE ? " is-on" : "");
   btn.title = COLLECTOR_MAINTENANCE
-    ? "Encerrar o aviso de atualização do coletor local"
-    : "Avisar na plataforma que o coletor local está sendo atualizado";
-  btn.innerHTML = COLLECTOR_MAINTENANCE
-    ? '<i class="fa-solid fa-wrench"></i> Encerrar manutenção'
-    : '<i class="fa-solid fa-wrench"></i> Atualizando coletor';
+    ? "Encerrar manutenção do coletor local"
+    : "Marcar coletor local em atualização";
+  btn.setAttribute("aria-label", btn.title);
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
 }
 
 async function toggleCollectorMaintenance() {
