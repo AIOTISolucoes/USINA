@@ -2892,9 +2892,10 @@ tbody tr:hover td {
   width: 22px;
   height: 22px;
   color: var(--clp-color);
-  cursor: help;
+  cursor: pointer; /* clicável: abre o modal de diagnóstico Plataforma → CLP */
   filter: drop-shadow(0 0 4px rgba(0,0,0,0.35));
 }
+.clp-badge:hover { transform: scale(1.15); transition: transform 0.15s; }
 .clp-badge svg  { width: 100%; height: 100%; display: block; }
 .clp-svg-body   { fill: rgba(10,14,22,0.55); stroke: var(--clp-color); stroke-width: 1.4; }
 .clp-svg-screen { fill: none; stroke: var(--clp-color); stroke-width: 1; opacity: 0.85; }
@@ -2917,6 +2918,83 @@ tbody tr:hover td {
 @keyframes clpAlarmBlink {
   0%, 100% { filter: drop-shadow(0 0 6px rgba(255,92,92,0.85)); }
   50%      { filter: drop-shadow(0 0 1px rgba(255,92,92,0.25)); }
+}
+
+/* ---- Modal de diagnóstico do CLP (fluxo Plataforma → CLP) ---- */
+.clp-diag-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(3,8,6,0.72); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.clp-diag-overlay.hidden { display: none; }
+.clp-diag-modal {
+  width: min(460px, 100%); max-height: 86vh; overflow-y: auto;
+  background: linear-gradient(160deg, #0b1512, #081009);
+  border: 1px solid rgba(42,255,123,0.22); border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.6);
+  color: #e6f5ec; font-family: 'Roboto', sans-serif;
+}
+.clp-diag-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid rgba(42,255,123,0.14);
+  font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
+}
+.clp-diag-head i { color: #39e58c; margin-right: 6px; }
+.clp-diag-close { background: none; border: none; color: #8aaea0; font-size: 24px; cursor: pointer; line-height: 1; padding: 0 2px; }
+.clp-diag-close:hover { color: #fff; }
+.clp-diag-body { padding: 18px; }
+.clp-diag-loading, .clp-diag-error { text-align: center; padding: 26px 8px; color: #9fc4b2; font-size: 13px; }
+.clp-diag-error { color: #ffb4b4; }
+.clp-diag-flow { display: flex; flex-direction: column; gap: 4px; }
+.clp-diag-node {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid rgba(120,150,140,0.22); border-radius: 12px;
+  background: rgba(10,20,16,0.65);
+}
+.clp-diag-node-icon {
+  width: 38px; height: 38px; border-radius: 10px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: #39e58c;
+  background: rgba(42,255,123,0.08); border: 1px solid rgba(42,255,123,0.2);
+}
+.clp-diag-node-info { flex: 1; min-width: 0; }
+.clp-diag-node-title { font-size: 13px; font-weight: 700; }
+.clp-diag-node-sub { font-size: 11px; color: #8aaea0; }
+.clp-diag-node-meta { font-size: 11px; color: #9fc4b2; margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+.clp-diag-check {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+}
+.clp-diag-check.ok  { color: #39e58c; background: rgba(57,229,140,0.1);  border: 1px solid rgba(57,229,140,0.4); }
+.clp-diag-check.bad { color: #ff5c5c; background: rgba(255,92,92,0.1);   border: 1px solid rgba(255,92,92,0.45); animation: clpAlarmBlink 1.4s ease-in-out infinite; }
+.clp-diag-check.na  { color: #8b93a3; background: rgba(139,147,163,0.1); border: 1px solid rgba(139,147,163,0.35); }
+.clp-diag-arrow { text-align: center; font-size: 20px; color: #39e58c; padding: 2px 0; }
+.clp-diag-arrow.warn { color: #f5b93d; }
+.clp-diag-arrow.bad  { color: #ff5c5c; }
+.clp-diag-arrow.na   { color: #8b93a3; }
+.clp-diag-arrow i { animation: clpArrowFlow 1.6s ease-in-out infinite; }
+@keyframes clpArrowFlow {
+  0%, 100% { transform: translateY(-2px); opacity: 0.55; }
+  50%      { transform: translateY(3px);  opacity: 1; }
+}
+.clp-diag-verdict {
+  margin-top: 14px; padding: 11px 13px; border-radius: 10px;
+  font-size: 12px; line-height: 1.5; display: flex; gap: 9px; align-items: flex-start;
+}
+.clp-diag-verdict i { margin-top: 2px; }
+.clp-diag-verdict.ok   { background: rgba(57,229,140,0.08);  border: 1px solid rgba(57,229,140,0.3);  color: #bdf2d6; }
+.clp-diag-verdict.warn { background: rgba(245,185,61,0.08);  border: 1px solid rgba(245,185,61,0.35); color: #ffe2ae; }
+.clp-diag-verdict.bad  { background: rgba(255,92,92,0.08);   border: 1px solid rgba(255,92,92,0.35);  color: #ffc9c9; }
+.clp-diag-verdict.na   { background: rgba(139,147,163,0.08); border: 1px solid rgba(139,147,163,0.3); color: #c3cad6; }
+.clp-diag-json { margin-top: 14px; border: 1px solid rgba(96,165,250,0.25); border-radius: 10px; background: rgba(13,25,40,0.35); }
+.clp-diag-json summary { cursor: pointer; padding: 10px 13px; font-size: 12px; font-weight: 700; color: #93c5fd; }
+.clp-diag-json summary i { margin-right: 6px; }
+.clp-diag-json-item { padding: 0 13px 12px; }
+.clp-diag-json-head { font-size: 11px; color: #8aaea0; margin: 6px 0 4px; font-family: 'JetBrains Mono', monospace; }
+.clp-diag-json pre {
+  margin: 0; padding: 10px; max-height: 240px; overflow: auto;
+  background: rgba(2,6,12,0.7); border: 1px solid rgba(96,165,250,0.15); border-radius: 8px;
+  font-size: 10.5px; line-height: 1.45; color: #bcd8ff; font-family: 'JetBrains Mono', monospace;
 }
 
 /* Legenda das séries */
@@ -2955,7 +3033,7 @@ tbody tr:hover td {
 .plant-card__issue-badge {
   position: absolute;
   top: 10px;
-  right: 42px;
+  right: 74px; /* trocou de lugar com a ferramenta (right:42) em 14/07 */
   z-index: 9;
   min-width: 26px;
   height: 26px;
@@ -5652,7 +5730,7 @@ select.pem-ctrl option {
 .plant-card__maint-btn {
   position: absolute;
   top: 10px;
-  right: 74px; /* lado a lado com o badge de acontecimentos (right:42) e o lápis (right:10) */
+  right: 42px; /* fila da direita: lápis 10 · ferramenta 42 · acontecimentos 74 · CLP 106 */
   width: 26px;
   height: 26px;
   display: inline-flex;
@@ -5721,7 +5799,7 @@ select.pem-ctrl option {
     font-size: 8px;
     white-space: nowrap;
   }
-  .plant-card__maint-btn { right: 70px; }
+  .plant-card__issue-badge { right: 70px; }
   .clp-badge { right: 102px; }
 }
 

@@ -5268,6 +5268,121 @@ function clpBadgeHtml(plant) {
     </span>`;
 }
 
+// ── Modal de diagnóstico do CLP: fluxo Plataforma (dbt) → CLP,
+//    com verificado independente em cada nó. Admin vê o JSON MQTT cru. ──
+function _clpFmtAge(sec) {
+  if (sec == null) return "sem dado";
+  if (sec < 90) return "agora mesmo";
+  if (sec < 3600) return "há " + Math.round(sec / 60) + " min";
+  if (sec < 86400) return "há " + Math.round(sec / 3600) + " h";
+  return "há " + Math.floor(sec / 86400) + " dia(s)";
+}
+
+function _clpEsc(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function _clpCheckHtml(ok) {
+  if (ok === true)  return '<span class="clp-diag-check ok"><i class="fa-solid fa-check"></i> OK</span>';
+  if (ok === false) return '<span class="clp-diag-check bad"><i class="fa-solid fa-xmark"></i> Problema</span>';
+  return '<span class="clp-diag-check na">?</span>';
+}
+
+function openClpDiagModal(plantId, plantName) {
+  let ov = document.getElementById("clpDiagOverlay");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "clpDiagOverlay";
+    ov.className = "clp-diag-overlay hidden";
+    ov.addEventListener("click", (e) => { if (e.target === ov) ov.classList.add("hidden"); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") ov.classList.add("hidden");
+    });
+    document.body.appendChild(ov);
+  }
+  ov.classList.remove("hidden");
+  ov.innerHTML = `
+    <div class="clp-diag-modal" role="dialog" aria-label="Diagnóstico de conexão do CLP">
+      <div class="clp-diag-head">
+        <span><i class="fa-solid fa-tower-broadcast"></i> Conexão — ${_clpEsc(plantName || "Usina")}</span>
+        <button class="clp-diag-close" aria-label="Fechar"
+          onclick="document.getElementById('clpDiagOverlay').classList.add('hidden')">&times;</button>
+      </div>
+      <div class="clp-diag-body">
+        <div class="clp-diag-loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Verificando conexão...</div>
+      </div>
+    </div>`;
+
+  apiFetch(`/plants/${plantId}/clp/diagnostics`)
+    .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(data => _renderClpDiag(ov, data))
+    .catch(err => {
+      console.error("[CLP diag]", err);
+      const body = ov.querySelector(".clp-diag-body");
+      if (body) body.innerHTML = `
+        <div class="clp-diag-error">
+          <i class="fa-solid fa-triangle-exclamation"></i> Não foi possível carregar o diagnóstico.
+          <br><small>${_clpEsc(err?.message || err)}</small>
+        </div>`;
+    });
+}
+
+function _renderClpDiag(ov, data) {
+  const body = ov.querySelector(".clp-diag-body");
+  if (!body) return;
+  const clp = data.clp || {};
+  const dbt = data.dbt || {};
+
+  const VERDICT = {
+    ok:           { cls: "ok",   icon: "fa-circle-check",         text: "Tudo certo: o CLP está enviando dados e a plataforma está processando normalmente." },
+    clp_problem:  { cls: "bad",  icon: "fa-plug-circle-xmark",    text: "O CLP/coletor local parou de enviar dados (MQTT). A plataforma está operando normalmente — o problema é no equipamento ou na conexão em campo." },
+    dbt_problem:  { cls: "warn", icon: "fa-hourglass-half",       text: "O CLP está enviando dados normalmente, mas a plataforma está com atraso no processamento. Não é problema no equipamento." },
+    both_problem: { cls: "bad",  icon: "fa-triangle-exclamation", text: "Sem dados do CLP e plataforma com atraso — é preciso verificar os dois lados." },
+    none:         { cls: "na",   icon: "fa-circle-question",      text: "Esta usina não possui CLP/relé de proteção cadastrado." },
+  };
+  const v = VERDICT[data.verdict] || VERDICT.none;
+
+  const lagMin = (dbt.processing_lag_seconds != null && dbt.processing_lag_seconds > 60)
+    ? " · fila de " + Math.round(dbt.processing_lag_seconds / 60) + " min"
+    : "";
+
+  let html = `
+    <div class="clp-diag-flow">
+      <div class="clp-diag-node">
+        <div class="clp-diag-node-icon"><i class="fa-solid fa-cloud"></i></div>
+        <div class="clp-diag-node-info">
+          <div class="clp-diag-node-title">Plataforma AIOTI</div>
+          <div class="clp-diag-node-sub">processamento de dados (dbt)</div>
+          <div class="clp-diag-node-meta">último processamento ${_clpFmtAge(dbt.processed_age_seconds)}${lagMin}</div>
+        </div>
+        ${_clpCheckHtml(clp.relays_total ? dbt.ok : null)}
+      </div>
+      <div class="clp-diag-arrow ${v.cls}"><i class="fa-solid fa-arrow-down-long"></i></div>
+      <div class="clp-diag-node">
+        <div class="clp-diag-node-icon"><i class="fa-solid fa-microchip"></i></div>
+        <div class="clp-diag-node-info">
+          <div class="clp-diag-node-title">CLP · Coletor local</div>
+          <div class="clp-diag-node-sub">envio de dados via MQTT</div>
+          <div class="clp-diag-node-meta">último dado ${_clpFmtAge(clp.age_seconds)}${clp.relays_total ? " · " + (clp.relays_with_data || 0) + "/" + clp.relays_total + " relé(s)" : ""}</div>
+        </div>
+        ${_clpCheckHtml(clp.relays_total ? clp.ok : null)}
+      </div>
+    </div>
+    <div class="clp-diag-verdict ${v.cls}"><i class="fa-solid ${v.icon}"></i><span>${v.text}</span></div>`;
+
+  if (data.is_admin && Array.isArray(data.raw_mqtt) && data.raw_mqtt.length) {
+    html += `<details class="clp-diag-json"><summary><i class="fa-solid fa-code"></i> JSON MQTT (admin)</summary>` +
+      data.raw_mqtt.map(m => `
+        <div class="clp-diag-json-item">
+          <div class="clp-diag-json-head">${_clpEsc(m.device_name || ("Relé " + m.device_id))} · ${m.timestamp ? new Date(m.timestamp).toLocaleString("pt-BR") : "sem leitura em 48h"}</div>
+          <pre>${_clpEsc(m.payload ? JSON.stringify(m.payload, null, 2) : "— sem payload —")}</pre>
+        </div>`).join("") +
+      `</details>`;
+  }
+
+  body.innerHTML = html;
+}
+
 function renderPortfolioCards(plants) {
   const grid = document.getElementById("portfolioCardView");
   if (!grid) return;
@@ -5452,6 +5567,23 @@ function renderPortfolioCards(plants) {
       _maintBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         togglePlantCollectorMaintenance(plantId, plantName, _maintBtn.dataset.maintOn === "1");
+      });
+    }
+
+    // Badge do CLP → modal de diagnóstico Plataforma (dbt) → CLP
+    const _clpBadge = card.querySelector(".clp-badge");
+    if (_clpBadge) {
+      _clpBadge.setAttribute("role", "button");
+      _clpBadge.setAttribute("tabindex", "0");
+      _clpBadge.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openClpDiagModal(plantId, plantName);
+      });
+      _clpBadge.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault(); e.stopPropagation();
+          openClpDiagModal(plantId, plantName);
+        }
       });
     }
 
