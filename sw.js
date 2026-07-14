@@ -1,4 +1,4 @@
-const CACHE_NAME = "aioti-v3";
+const CACHE_NAME = "aioti-v4";
 // caminhos relativos ao sw.js: funcionam na raiz (produção) e em
 // subpath (pipeline de teste github.io/USINA/)
 const SHELL = [
