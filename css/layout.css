@@ -2898,6 +2898,8 @@ tbody tr:hover td {
 }
 .clp-badge:hover { transform: scale(1.15); transition: transform 0.15s; }
 .clp-badge svg  { width: 100%; height: 100%; display: block; }
+/* alvo de toque ~38px sem mudar o visual (badge tem 22px) */
+.clp-badge::after { content: ''; position: absolute; inset: -8px; }
 .clp-svg-body   { fill: rgba(10,14,22,0.55); stroke: var(--clp-color); stroke-width: 1.4; }
 .clp-svg-screen { fill: none; stroke: var(--clp-color); stroke-width: 1; opacity: 0.85; }
 .clp-svg-pin    { fill: var(--clp-color); opacity: 0.75; }
@@ -2924,25 +2926,54 @@ tbody tr:hover td {
 /* ---- Modal de diagnóstico do CLP (fluxo Plataforma → CLP) ---- */
 .clp-diag-overlay {
   position: fixed; inset: 0; z-index: 4000;
-  background: rgba(3,8,6,0.72); backdrop-filter: blur(3px);
+  background: rgba(3,8,6,0.78);
   display: flex; align-items: center; justify-content: center; padding: 16px;
+  animation: clpDiagFade 0.15s ease-out;
 }
 .clp-diag-overlay.hidden { display: none; }
 .clp-diag-modal {
-  width: min(460px, 100%); max-height: 86vh; overflow-y: auto;
+  width: min(460px, 100%);
+  max-height: 86vh; max-height: 86dvh; /* dvh: iOS PWA não esconde o rodapé */
+  overflow-y: auto;
   background: linear-gradient(160deg, #0b1512, #081009);
   border: 1px solid rgba(42,255,123,0.22); border-radius: 14px;
   box-shadow: 0 18px 60px rgba(0,0,0,0.6);
   color: #e6f5ec; font-family: 'Roboto', sans-serif;
+  animation: clpDiagRise 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(57,229,140,0.25) transparent;
+}
+.clp-diag-modal::-webkit-scrollbar { width: 5px; }
+.clp-diag-modal::-webkit-scrollbar-track { background: transparent; margin: 10px 0; }
+.clp-diag-modal::-webkit-scrollbar-thumb { background: rgba(57,229,140,0.25); border-radius: 8px; }
+.clp-diag-modal::-webkit-scrollbar-thumb:hover { background: rgba(57,229,140,0.45); }
+@keyframes clpDiagFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes clpDiagRise {
+  from { transform: translateY(10px) scale(0.985); opacity: 0; }
+  to   { transform: translateY(0) scale(1); opacity: 1; }
 }
 .clp-diag-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 18px; border-bottom: 1px solid rgba(42,255,123,0.14);
-  font-weight: 700; font-size: 14px; letter-spacing: 0.03em;
+  position: sticky; top: 0; z-index: 1;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 13px 12px 13px 18px;
+  background: linear-gradient(160deg, #0b1512, #0a130e);
+  border-bottom: 1px solid rgba(42,255,123,0.14);
+  font-family: 'Exo 2', sans-serif;
+  font-weight: 700; font-size: 12px;
+  letter-spacing: 0.08em; text-transform: uppercase;
 }
-.clp-diag-head i { color: #39e58c; margin-right: 6px; }
-.clp-diag-close { background: none; border: none; color: #8aaea0; font-size: 24px; cursor: pointer; line-height: 1; padding: 0 2px; }
-.clp-diag-close:hover { color: #fff; }
+.clp-diag-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clp-diag-head i { color: #39e58c; margin-right: 7px; }
+.clp-diag-close {
+  background: none; border: none; color: #8aaea0;
+  font-size: 22px; cursor: pointer; line-height: 1;
+  width: 40px; height: 40px; margin: -8px 0; /* alvo de toque sem inflar o header */
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; flex: 0 0 auto;
+  transition: color 0.15s, background 0.15s;
+}
+.clp-diag-close:hover { color: #fff; background: rgba(57,229,140,0.06); }
+.clp-diag-close:focus-visible { outline: 1px solid rgba(57,229,140,0.6); outline-offset: 1px; color: #fff; }
 .clp-diag-body { padding: 18px; }
 .clp-diag-loading, .clp-diag-error { text-align: center; padding: 26px 8px; color: #9fc4b2; font-size: 13px; }
 .clp-diag-error { color: #ffb4b4; }
@@ -2964,7 +2995,9 @@ tbody tr:hover td {
 .clp-diag-node-meta { font-size: 11px; color: #9fc4b2; margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
 .clp-diag-check {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 4px 9px; border-radius: 999px; white-space: nowrap; flex: 0 0 auto;
 }
 .clp-diag-check.ok  { color: #39e58c; background: rgba(57,229,140,0.1);  border: 1px solid rgba(57,229,140,0.4); }
 .clp-diag-check.bad { color: #ff5c5c; background: rgba(255,92,92,0.1);   border: 1px solid rgba(255,92,92,0.45); animation: clpAlarmBlink 1.4s ease-in-out infinite; }
@@ -2988,14 +3021,60 @@ tbody tr:hover td {
 .clp-diag-verdict.bad  { background: rgba(255,92,92,0.08);   border: 1px solid rgba(255,92,92,0.35);  color: #ffc9c9; }
 .clp-diag-verdict.na   { background: rgba(139,147,163,0.08); border: 1px solid rgba(139,147,163,0.3); color: #c3cad6; }
 .clp-diag-json { margin-top: 14px; border: 1px solid rgba(96,165,250,0.25); border-radius: 10px; background: rgba(13,25,40,0.35); }
-.clp-diag-json summary { cursor: pointer; padding: 10px 13px; font-size: 12px; font-weight: 700; color: #93c5fd; }
-.clp-diag-json summary i { margin-right: 6px; }
+.clp-diag-json summary {
+  cursor: pointer; padding: 11px 13px;
+  font-size: 12px; font-weight: 700; color: #93c5fd;
+  list-style: none; display: flex; align-items: center; gap: 7px;
+  border-radius: 10px; user-select: none;
+}
+.clp-diag-json summary::-webkit-details-marker { display: none; }
+.clp-diag-json summary::after {
+  content: '\f078'; /* chevron-down (Font Awesome) */
+  font-family: 'Font Awesome 6 Free'; font-weight: 900;
+  font-size: 9px; margin-left: auto; color: rgba(147,197,253,0.55);
+  transition: transform 0.18s ease-out;
+}
+.clp-diag-json[open] summary::after { transform: rotate(180deg); }
+.clp-diag-json summary:hover { background: rgba(96,165,250,0.06); }
+.clp-diag-json summary:focus-visible { outline: 1px solid rgba(96,165,250,0.55); outline-offset: -1px; }
 .clp-diag-json-item { padding: 0 13px 12px; }
 .clp-diag-json-head { font-size: 11px; color: #8aaea0; margin: 6px 0 4px; font-family: 'JetBrains Mono', monospace; }
 .clp-diag-json pre {
   margin: 0; padding: 10px; max-height: 240px; overflow: auto;
   background: rgba(2,6,12,0.7); border: 1px solid rgba(96,165,250,0.15); border-radius: 8px;
   font-size: 10.5px; line-height: 1.45; color: #bcd8ff; font-family: 'JetBrains Mono', monospace;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(96,165,250,0.30) transparent;
+}
+.clp-diag-json pre::-webkit-scrollbar { width: 5px; height: 5px; }
+.clp-diag-json pre::-webkit-scrollbar-track { background: transparent; margin: 6px 0; }
+.clp-diag-json pre::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.30); border-radius: 8px; }
+.clp-diag-json pre::-webkit-scrollbar-thumb:hover { background: rgba(96,165,250,0.50); }
+
+/* Mobile / PWA: modal vira bottom-sheet (mais cara de app) */
+@media (max-width: 640px) {
+  .clp-diag-overlay { padding: 0; align-items: flex-end; }
+  .clp-diag-modal {
+    width: 100%;
+    max-height: 88vh; max-height: 88dvh;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px); /* iPhone standalone */
+    animation: clpDiagSheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .clp-diag-body { padding: 16px 14px; }
+}
+@keyframes clpDiagSheetUp {
+  from { transform: translateY(24px); opacity: 0.4; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* Acessibilidade: sem coreografia p/ quem prefere menos movimento */
+@media (prefers-reduced-motion: reduce) {
+  .clp-diag-overlay, .clp-diag-modal { animation: none; }
+  .clp-diag-arrow i { animation: none; }
+  .clp-diag-check.bad { animation: none; }
+  .clp-diag-json summary::after { transition: none; }
 }
 
 /* Legenda das séries */
