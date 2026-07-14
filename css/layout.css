@@ -2881,13 +2881,14 @@ tbody tr:hover td {
   height: 90px !important;
 }
 
-/* ---- Badge do CLP no mini chart (cinza/verde/amarelo/vermelho) ---- */
+/* ---- Badge do CLP no topo do card, à esquerda da ferramenta de manutenção
+   (fila da direita: lápis right:10 · acontecimentos right:42 · ferramenta right:74) ---- */
 .clp-badge {
   --clp-color: #8b93a3;
   position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 3;
+  top: 12px;
+  right: 106px;
+  z-index: 10;
   width: 22px;
   height: 22px;
   color: var(--clp-color);
@@ -5721,6 +5722,7 @@ select.pem-ctrl option {
     white-space: nowrap;
   }
   .plant-card__maint-btn { right: 70px; }
+  .clp-badge { right: 102px; }
 }
 
 /* ═══════════════════════════════════════════════════════
