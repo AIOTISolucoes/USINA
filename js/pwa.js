@@ -5,15 +5,15 @@
   // ── Injeta CSS do banner (funciona em qualquer página) ──
   const style = document.createElement("style");
   style.textContent =
-    "#pwa-install-banner{position:fixed;bottom:0;left:0;right:0;z-index:9999;" +
+    "#pwa-install-banner,#pwa-push-banner{position:fixed;bottom:0;left:0;right:0;z-index:9999;" +
     "display:flex;align-items:center;justify-content:center;gap:12px;padding:14px 20px;" +
     "background:linear-gradient(135deg,#0a1410,#081210);border-top:1px solid rgba(42,255,123,.25);" +
     "box-shadow:0 -4px 24px rgba(0,0,0,.5);font-size:14px;color:#e6f5ec;font-family:'Roboto',sans-serif;" +
     "animation:pwa-slide-up .35s ease-out}" +
-    "#pwa-install-banner span{flex:1}" +
-    "#pwa-install-btn{padding:8px 20px;border:none;border-radius:8px;background:#2aff7b;" +
+    "#pwa-install-banner span,#pwa-push-banner span{flex:1}" +
+    "#pwa-install-btn,#pwa-push-btn{padding:8px 20px;border:none;border-radius:8px;background:#2aff7b;" +
     "color:#050a07;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}" +
-    "#pwa-dismiss-btn{background:none;border:none;color:#8aaea0;font-size:22px;" +
+    "#pwa-dismiss-btn,#pwa-push-dismiss{background:none;border:none;color:#8aaea0;font-size:22px;" +
     "cursor:pointer;padding:0 4px;line-height:1}" +
     "@keyframes pwa-slide-up{from{transform:translateY(100%)}to{transform:translateY(0)}}";
   document.head.appendChild(style);
@@ -25,16 +25,25 @@
   // caminho relativo: funciona na raiz (produção) e em subpath (pipeline de teste github.io/USINA/)
   navigator.serviceWorker.register("sw.js").then((reg) => {
     console.log("[PWA] SW registrado", reg.scope);
+    // iOS Safari fora do app instalado NÃO tem window.Notification —
+    // sem este guard a linha abaixo estoura e mata o fluxo em silêncio.
+    if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
       subscribePush(reg);
     } else if (Notification.permission === "default") {
-      // iOS exige que requestPermission() venha de um gesto do usuário.
-      // Pedimos no primeiro toque/clique (vale p/ Android e desktop também).
-      const onFirstGesture = () => {
-        document.removeEventListener("pointerdown", onFirstGesture);
-        askNotificationPermission(reg);
-      };
-      document.addEventListener("pointerdown", onFirstGesture, { once: true });
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      if (isIOS) {
+        // Apple só aceita requestPermission() disparado por um TAP explícito
+        // em elemento interativo (botão) — gesto solto no documento não vale.
+        showPushBanner(reg);
+      } else {
+        // Android/desktop: primeiro toque/clique já vale como gesto.
+        const onFirstGesture = () => {
+          document.removeEventListener("pointerdown", onFirstGesture);
+          askNotificationPermission(reg);
+        };
+        document.addEventListener("pointerdown", onFirstGesture, { once: true });
+      }
     }
   });
 
@@ -88,6 +97,39 @@
       });
     };
     document.getElementById("pwa-dismiss-btn").onclick = () => banner.remove();
+  }
+
+  // ── iOS: banner com botão p/ ativar push (permissão exige tap em botão) ──
+  function showPushBanner(reg) {
+    if (window.location.pathname.includes("index.html")) return; // não na tela de login
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (!user.username) return; // só logado
+    if (localStorage.getItem("pwa_push_hint_dismissed")) return;
+
+    const mount = () => {
+      if (document.getElementById("pwa-push-banner")) return;
+      const banner = document.createElement("div");
+      banner.id = "pwa-push-banner";
+      banner.innerHTML =
+        '<span>🔔 Receber alertas das usinas neste aparelho?</span>' +
+        '<button id="pwa-push-btn">Ativar</button>' +
+        '<button id="pwa-push-dismiss" aria-label="Fechar">&times;</button>';
+      document.body.appendChild(banner);
+      document.getElementById("pwa-push-btn").onclick = () => {
+        // requestPermission() PRECISA ser chamado direto no handler do clique,
+        // sem await/fetch antes — senão o Safari descarta o gesto.
+        Notification.requestPermission().then((perm) => {
+          if (perm === "granted") subscribePush(reg);
+        });
+        banner.remove();
+      };
+      document.getElementById("pwa-push-dismiss").onclick = () => {
+        localStorage.setItem("pwa_push_hint_dismissed", "1");
+        banner.remove();
+      };
+    };
+    if (document.body) mount();
+    else window.addEventListener("load", mount);
   }
 
   // ── Push Notification ──
