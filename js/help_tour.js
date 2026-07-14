@@ -102,6 +102,12 @@
         font-weight:600;cursor:pointer;transition:background .2s,box-shadow .2s;white-space:nowrap;}
       .htour-help-btn:hover{background:rgba(57,229,140,.16);box-shadow:0 0 12px rgba(57,229,140,.25);}
       .htour-help-btn--fixed{position:fixed;bottom:18px;left:18px;z-index:2500;}
+      @media (max-width: 640px){
+        .htour-help-btn{font-size:0;gap:0;padding:7px 9px;border-radius:50%;}
+        .htour-help-btn i{font-size:14px;}
+        .htour-help-btn--fixed{font-size:0;padding:9px 11px;}
+        .htour-help-btn--fixed i{font-size:15px;}
+      }
       .htour-catch{position:fixed;inset:0;z-index:9990;cursor:pointer;background:transparent;}
       .htour-spot{position:fixed;z-index:9991;pointer-events:none;border-radius:12px;
         border:1.5px solid rgba(57,229,140,.9);

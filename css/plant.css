@@ -9813,3 +9813,97 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
 .chart-loader.hidden {
   display: none;
 }
+
+/* ═══════════════════════════════════════════════════════
+   MANUTENÇÃO DO COLETOR LOCAL — banner + botão admin
+   ═══════════════════════════════════════════════════════ */
+.collector-maintenance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(37,99,235,0.50);
+  background: linear-gradient(90deg, rgba(23,37,84,0.45), rgba(30,58,138,0.22), rgba(23,37,84,0.45));
+  color: #bfdbfe;
+  font-size: 0.85rem;
+  text-align: center;
+  animation: collector-glow 2.4s ease-in-out infinite;
+}
+.collector-maintenance-banner svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: #93c5fd;
+}
+.collector-maintenance-banner strong {
+  color: #dbeafe;
+  letter-spacing: 0.06em;
+}
+.collector-maintenance-banner .cmb-sub { opacity: 0.85; }
+@keyframes collector-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+@keyframes collector-glow {
+  0%, 100% { border-color: rgba(37,99,235,0.40); box-shadow: 0 0 8px rgba(37,99,235,0.14), 0 0 18px rgba(29,78,216,0.08); }
+  50%      { border-color: rgba(59,130,246,0.85); box-shadow: 0 0 14px rgba(37,99,235,0.40), 0 0 30px rgba(29,78,216,0.22); }
+}
+
+/* Variante "idle": faixa discreta que só o admin vê, para ATIVAR a manutenção */
+.collector-maintenance-banner--idle {
+  animation: none;
+  border-color: rgba(37,99,235,0.20);
+  background: rgba(23,37,84,0.14);
+  box-shadow: none;
+  padding: 6px 12px;
+}
+
+/* Botão dentro da faixa (Encerrar / Marcar coletor em atualização) */
+.cmb-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px;
+  margin-left: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59,130,246,0.50);
+  background: rgba(37,99,235,0.18);
+  color: #dbeafe;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.cmb-action svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+.cmb-action:hover {
+  background: rgba(37,99,235,0.34);
+  border-color: #60a5fa;
+  transform: scale(1.04);
+}
+.cmb-action:disabled { opacity: 0.5; cursor: wait; }
+.collector-maintenance-banner--idle .cmb-action { margin-left: 0; }
+
+/* Mobile: faixa de manutenção compacta, botão em linha própria sem apertar */
+@media (max-width: 640px) {
+  .collector-maintenance-banner {
+    font-size: 0.72rem;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .collector-maintenance-banner .cmb-sub { display: block; width: 100%; }
+  .cmb-action {
+    margin-left: 0;
+    padding: 4px 12px;
+    font-size: 0.7rem;
+  }
+}

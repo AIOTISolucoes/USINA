@@ -5585,6 +5585,144 @@ select.pem-ctrl option {
   background: #fbbf24;
 }
 
+/* ── Manutenção do coletor local (equipe mexendo no CLP) ── */
+.badge--maintenance {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(23,37,84,0.55);
+  color: #93c5fd;
+  border: 1px solid rgba(37,99,235,0.55);
+  animation: maintenance-glow 2.4s ease-in-out infinite;
+}
+.badge--maintenance::before {
+  content: '';
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2393c5fd' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+@keyframes maintenance-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+@keyframes maintenance-glow {
+  0%, 100% { border-color: rgba(37,99,235,0.40); box-shadow: 0 0 6px rgba(37,99,235,0.14), 0 0 16px rgba(29,78,216,0.08); }
+  50%      { border-color: rgba(59,130,246,0.85); box-shadow: 0 0 12px rgba(37,99,235,0.42), 0 0 26px rgba(29,78,216,0.25); }
+}
+
+.plant-card--maintenance {
+  background: linear-gradient(145deg, rgba(14,15,20,0.99) 0%, rgba(9,10,14,0.99) 100%) !important;
+  border: 1px solid rgba(37,99,235,0.50) !important;
+  animation: maintenance-glow 2.4s ease-in-out infinite;
+}
+.plant-card--maintenance::before {
+  background: linear-gradient(90deg, transparent, rgba(96,165,250,0.35), transparent);
+  opacity: 0.5;
+}
+.plant-card--maintenance .plant-card__name          { color: rgba(180,195,220,0.80); }
+.plant-card--maintenance .plant-card__icon          { background: rgba(96,165,250,0.10); border-color: rgba(96,165,250,0.25); color: rgba(147,197,253,0.75); box-shadow: none; }
+.plant-card--maintenance .plant-card__stat          { background: rgba(96,165,250,0.03); border-color: rgba(96,165,250,0.08); }
+.plant-card--maintenance .plant-card__stat-label    { opacity: 0.45; }
+.plant-card--maintenance .plant-card__stat-value,
+.plant-card--maintenance .plant-card__stat-value.active { color: rgba(160,175,200,0.60); }
+.plant-card--maintenance .plant-card__status-text   { color: #93c5fd; }
+.plant-card--maintenance .plant-card__chart-area    { opacity: 0.35; }
+
+.plant-card__status-dot.maintenance {
+  background: #2563eb;
+  box-shadow: 0 0 7px rgba(37,99,235,0.9), 0 0 14px rgba(37,99,235,0.4);
+  animation: maintenance-blink 2.4s ease-in-out infinite;
+}
+
+.portfolio-row--maintenance td                { color: rgba(160,175,200,0.55) !important; text-shadow: none !important; }
+.portfolio-row--maintenance .plant-name-text  { color: rgba(180,195,220,0.75) !important; }
+.portfolio-row--maintenance .plant-icon--ok   { background: rgba(96,165,250,0.08) !important; border-color: rgba(96,165,250,0.22) !important; color: rgba(147,197,253,0.6) !important; box-shadow: none !important; }
+
+/* Toggle de manutenção no card (só admin vê; espelha o .plant-card__edit-btn) */
+.plant-card__maint-btn {
+  position: absolute;
+  top: 10px;
+  right: 74px; /* lado a lado com o badge de acontecimentos (right:42) e o lápis (right:10) */
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.55;
+  transition: opacity 0.2s, transform 0.15s, color 0.2s;
+  z-index: 10;
+}
+.plant-card__maint-btn:hover,
+.plant-card__maint-btn:focus-visible {
+  opacity: 1;
+  color: #93c5fd;
+  transform: scale(1.15);
+  outline: none;
+}
+.plant-card__maint-btn svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(96,165,250,0.5));
+}
+.plant-card__maint-btn.is-on {
+  opacity: 1;
+  color: #93c5fd;
+  animation: maintenance-blink 2.4s ease-in-out infinite;
+}
+.plant-card__maint-btn.is-on svg {
+  filter: drop-shadow(0 0 7px rgba(96,165,250,0.9));
+}
+
+/* ── Mobile: topbar sem atropelo (título x botões da direita) ── */
+@media (max-width: 640px) {
+  .plant-name {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  .topbar-right {
+    gap: 5px;
+    flex-wrap: nowrap;
+  }
+  .topbar-right .notif-bell-btn {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+  }
+  .topbar-right .user-pill {
+    padding: 3px 7px;
+    font-size: 9px;
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar-left .status-pill {
+    padding: 3px 7px;
+    font-size: 8px;
+    white-space: nowrap;
+  }
+  .plant-card__maint-btn { right: 70px; }
+}
+
 /* ═══════════════════════════════════════════════════════
    ROBÔ ASSISTENTE — CANTO INFERIOR DIREITO
    ═══════════════════════════════════════════════════════ */

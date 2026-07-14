@@ -6520,6 +6520,85 @@ function renderPlantName(realtime) {
 }
 
 // ======================================================
+// MANUTENÇÃO DO COLETOR LOCAL (aviso + toggle admin)
+// ======================================================
+let COLLECTOR_MAINTENANCE = false;
+
+const CMB_WRENCH_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+
+function renderCollectorMaintenance(realtime) {
+  if (realtime && typeof realtime.collector_maintenance !== "undefined") {
+    COLLECTOR_MAINTENANCE = realtime.collector_maintenance === true;
+  }
+
+  const ctx = getUserContext();
+  const isAdmin = ctx.is_superuser === true || ctx.is_superuser === "true";
+
+  // Estados da faixa: "on" (banner p/ todos, admin ganha botão Encerrar),
+  // "idle" (só admin: faixa discreta p/ ativar), "none" (nada)
+  const state = COLLECTOR_MAINTENANCE ? "on" : (isAdmin ? "idle" : "none");
+
+  let banner = document.getElementById("collectorMaintenanceBanner");
+  if (banner && banner.dataset.state === state) return;
+  if (banner) banner.remove();
+  if (state === "none") return;
+
+  const headerCard = document.querySelector(".plant-header-card");
+  if (!headerCard || !headerCard.parentNode) return;
+
+  banner = document.createElement("div");
+  banner.id = "collectorMaintenanceBanner";
+  banner.dataset.state = state;
+
+  if (state === "on") {
+    banner.className = "collector-maintenance-banner";
+    banner.innerHTML =
+      CMB_WRENCH_SVG +
+      '<strong>COLETOR LOCAL SENDO ATUALIZADO</strong>' +
+      '<span class="cmb-sub">nossa equipe está trabalhando na usina; podem existir inconsistências temporárias nos dados</span>' +
+      (isAdmin
+        ? '<button id="collectorMaintenanceBtn" class="cmb-action" type="button" title="Encerrar manutenção do coletor local">' + CMB_WRENCH_SVG + '<span>Encerrar</span></button>'
+        : '');
+  } else {
+    banner.className = "collector-maintenance-banner collector-maintenance-banner--idle";
+    banner.innerHTML =
+      '<button id="collectorMaintenanceBtn" class="cmb-action" type="button" title="Avisar na plataforma que o coletor local está sendo atualizado">' + CMB_WRENCH_SVG + '<span>Marcar coletor em atualização</span></button>';
+  }
+
+  headerCard.parentNode.insertBefore(banner, headerCard.nextSibling);
+  const btn = banner.querySelector("#collectorMaintenanceBtn");
+  if (btn) btn.addEventListener("click", toggleCollectorMaintenance);
+}
+
+async function toggleCollectorMaintenance() {
+  const turnOn = !COLLECTOR_MAINTENANCE;
+  const msg = turnOn
+    ? 'Marcar esta usina como "ATUALIZANDO COLETOR LOCAL"?\n\nO aviso ficará visível para todos os usuários até ser encerrado.'
+    : 'Encerrar o modo "ATUALIZANDO COLETOR LOCAL" desta usina?';
+  if (!window.confirm(msg)) return;
+
+  const btn = document.getElementById("collectorMaintenanceBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/maintenance`, {
+      method: "PATCH",
+      headers: buildWriteAuthHeaders(),
+      body: JSON.stringify({ maintenance: turnOn })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    COLLECTOR_MAINTENANCE = data?.collector_maintenance === true;
+    renderCollectorMaintenance(null);
+  } catch (e) {
+    console.error("[collector-maintenance] erro", e);
+    alert("Falha ao alterar o modo manutenção: " + (e?.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ======================================================
 // ✅ REFRESH (realtime + alarms + inverters rows + strings abertas + relay)
 // ======================================================
 async function refreshRealtimeEverything() {
@@ -6541,6 +6620,7 @@ async function refreshRealtimeEverything() {
     if (realtimeRes.status === "fulfilled") {
       realtime = realtimeRes.value;
       renderPlantName(realtime);
+      renderCollectorMaintenance(realtime);
       if (realtime) {
         const rated = asNumber(
           realtime.rated_power_ac_kw ?? realtime.rated_power_kw ?? realtime.rated_power_kwp,

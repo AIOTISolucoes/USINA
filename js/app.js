@@ -1911,7 +1911,43 @@ function sortPortfolioPlants(plants) {
   return validPlants;
 }
 
+function _syncCardMaintBtn(btn, isOn) {
+  btn.dataset.maintOn = isOn ? "1" : "0";
+  btn.classList.toggle("is-on", isOn);
+  btn.title = isOn
+    ? "Encerrar manutenção do coletor local"
+    : "Marcar coletor local em atualização";
+}
+
+async function togglePlantCollectorMaintenance(plantId, plantName, isOn) {
+  const turnOn = !isOn;
+  const msg = turnOn
+    ? `Marcar a usina "${plantName}" como "ATUALIZANDO COLETOR LOCAL"?\n\nO aviso ficará visível para todos os usuários até ser encerrado.`
+    : `Encerrar o modo "ATUALIZANDO COLETOR LOCAL" da usina "${plantName}"?`;
+  if (!window.confirm(msg)) return;
+  try {
+    const res = await apiFetch(`/plants/${plantId}/maintenance`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maintenance: turnOn })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    const btn = document.querySelector(`.plant-card__maint-btn[data-maint-plant-id="${plantId}"]`);
+    if (btn) _syncCardMaintBtn(btn, data?.collector_maintenance === true);
+    if (typeof refreshDashboard === "function") refreshDashboard();
+  } catch (e) {
+    console.error("[collector-maintenance] erro", e);
+    alert("Falha ao alterar o modo manutenção: " + (e?.message || e));
+  }
+}
+
 function getPlantCardStatus(plant) {
+  // Modo manutenção do coletor local tem prioridade sobre qualquer status:
+  // a equipe está mexendo no CLP, então "offline" aqui NÃO é falha.
+  if (plant.collector_maintenance === true) {
+    return { colorClass: 'plant-card--maintenance', badge: 'Atualizando coletor local', badgeClass: 'badge--maintenance' };
+  }
   // "Sem comunicação" = somente quando NÃO recebemos dados recentes (comunicação real perdida)
   if (plant.comm_status === 'offline') {
     return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
@@ -1960,7 +1996,9 @@ function renderPortfolioTable(plants) {
     const plantState = getPortfolioPlantVisualState(plant);
     const commStatus = getPlantCardStatus(plant);
     const isCommOffline = commStatus.colorClass === 'plant-card--offline';
-    if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
+    if (isMaintenance) tr.classList.add("portfolio-row--maintenance");
+    else if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
 
     const alarmSeverity =
       normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(plantId)) ||
@@ -4973,10 +5011,12 @@ function updatePortfolioCardData(plants) {
     if (statValues[5]) statValues[5].textContent = invAvail;
 
     // Update status dot + text
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
     const isOffline = plantState.isOffline || isCommOffline;
     let statusDotClass = "plant-card__status-dot";
     let statusText;
-    if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
+    if (isMaintenance) { statusDotClass += " maintenance"; statusText = "Atualizando coletor local"; }
+    else if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
     else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Desligada"; }
     else if (plantState.kind === "generating") { statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
     else { statusDotClass += " standby"; statusText = "Aguardando"; }
@@ -5015,9 +5055,9 @@ function updatePortfolioCardData(plants) {
       else icon.className = "plant-card__icon";
     }
 
-    // Update comm badge
-    const existingBadge = card.querySelector(".badge--offline, .badge--partial");
-    if (commStatus.badge) {
+    // Update comm badge (manutenção não usa badge no topo — só o status embaixo)
+    const existingBadge = card.querySelector(".badge--offline, .badge--partial, .badge--maintenance");
+    if (commStatus.badge && !isMaintenance) {
       if (existingBadge) {
         existingBadge.className = commStatus.badgeClass;
         existingBadge.textContent = commStatus.badge;
@@ -5033,6 +5073,10 @@ function updatePortfolioCardData(plants) {
     } else if (existingBadge) {
       existingBadge.remove();
     }
+
+    // Sincroniza o toggle de manutenção do coletor (estado pode mudar por outro admin)
+    const maintBtn = card.querySelector(".plant-card__maint-btn");
+    if (maintBtn) _syncCardMaintBtn(maintBtn, plant.collector_maintenance === true);
   });
 }
 
@@ -5049,6 +5093,7 @@ function updatePortfolioCardAlarms() {
     // comm_status takes visual priority — skip alarm override for comm offline/partial
     const commSt = card.dataset.commStatus;
     if (commSt === 'offline' || commSt === 'partial') return;
+    if (card.classList.contains('plant-card--maintenance')) return;
     const isOff = card.classList.contains("plant-card--offline");
     card.className = `plant-card${isOff ? " plant-card--offline" : ""}${sev ? ` alarm-${sev}` : ""}`;
     const icon = card.querySelector(".plant-card__icon");
@@ -5256,11 +5301,16 @@ function renderPortfolioCards(plants) {
     const relayAvail = plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "\u2014";
     const prAcc = plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "\u2014";
 
+    const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
     const isOffline = plantState.isOffline || isCommOffline;
     const isGenerating = plantState.kind === "generating";
     let statusDotClass = "plant-card__status-dot";
     let statusText;
-    if (isCommOffline) {
+    if (isMaintenance) {
+      statusDotClass += " maintenance";
+      statusText = "Atualizando coletor local";
+    }
+    else if (isCommOffline) {
       statusDotClass += " offline";
       statusText = "Sem comunicação";
     }
@@ -5286,7 +5336,8 @@ function renderPortfolioCards(plants) {
     }
     const canvasId = "mini-chart-" + plantId;
 
-    const commBadgeHtml = commStatus.badge
+    // Em manutenção o card NÃO ganha badge no topo (o status embaixo já avisa)
+    const commBadgeHtml = commStatus.badge && !isMaintenance
       ? `<span class="${commStatus.badgeClass}">${commStatus.badge}</span>`
       : '';
     const activePowerDisplay = isCommOffline ? '—' : activePower.toFixed(1) + ' kW';
@@ -5363,6 +5414,15 @@ function renderPortfolioCards(plants) {
       >
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
       </button>
+      <button
+        class="plant-card__maint-btn"
+        title="Manutenção do coletor local"
+        data-maint-plant-id="${plantId}"
+        aria-label="Manutenção do coletor local"
+        style="display:none;"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      </button>
     `;
 
     const openPlant = () => {
@@ -5381,6 +5441,17 @@ function renderPortfolioCards(plants) {
       _editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         openPlantEditModal(plantId, plantName, ratedPower);
+      });
+    }
+
+    // Toggle de manutenção do coletor local — SOMENTE superuser (admin AIOTI)
+    const _maintBtn = card.querySelector(".plant-card__maint-btn");
+    if (_maintBtn && _u.is_superuser === true) {
+      _maintBtn.style.display = "";
+      _syncCardMaintBtn(_maintBtn, plant.collector_maintenance === true);
+      _maintBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        togglePlantCollectorMaintenance(plantId, plantName, _maintBtn.dataset.maintOn === "1");
       });
     }
 
