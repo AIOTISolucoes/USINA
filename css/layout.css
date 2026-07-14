@@ -2725,7 +2725,7 @@ tbody tr:hover td {
 .plant-card--offline .plant-card__stat-value.active { color: rgba(140,140,150,0.5); }
 .plant-card--offline .plant-card__status        { border-top-color: rgba(100,100,110,0.10); }
 .plant-card--offline .plant-card__status-text   { color: rgba(140,140,150,0.55); }
-.plant-card--offline .plant-card__chart-area    { opacity: 0.25; pointer-events: none; }
+.plant-card--offline .plant-card__chart-wrap canvas { opacity: 0.25; pointer-events: none; }
 .plant-card--offline .pcc-leg                   { opacity: 0.3; }
 .plant-card--offline .plant-card__chart-legend  { opacity: 0; }
 
@@ -2879,6 +2879,43 @@ tbody tr:hover td {
 .plant-card__chart-wrap canvas {
   width: 100% !important;
   height: 90px !important;
+}
+
+/* ---- Badge do CLP no mini chart (cinza/verde/amarelo/vermelho) ---- */
+.clp-badge {
+  --clp-color: #8b93a3;
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  width: 22px;
+  height: 22px;
+  color: var(--clp-color);
+  cursor: help;
+  filter: drop-shadow(0 0 4px rgba(0,0,0,0.35));
+}
+.clp-badge svg  { width: 100%; height: 100%; display: block; }
+.clp-svg-body   { fill: rgba(10,14,22,0.55); stroke: var(--clp-color); stroke-width: 1.4; }
+.clp-svg-screen { fill: none; stroke: var(--clp-color); stroke-width: 1; opacity: 0.85; }
+.clp-svg-pin    { fill: var(--clp-color); opacity: 0.75; }
+.clp-svg-led    { fill: var(--clp-color); opacity: 0.35; }
+.clp-svg-led--main { opacity: 1; }
+
+.clp-badge.clp--ok      { --clp-color: #39e58c; }
+.clp-badge.clp--quality { --clp-color: #f5b93d; }
+.clp-badge.clp--alarm   { --clp-color: #ff5c5c; }
+.clp-badge.clp--offline { --clp-color: #8b93a3; opacity: 0.85; }
+
+.clp-badge.clp--ok .clp-svg-led--main { animation: clpLedPulse 2.4s ease-in-out infinite; }
+.clp-badge.clp--alarm { animation: clpAlarmBlink 1.1s ease-in-out infinite; }
+
+@keyframes clpLedPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+@keyframes clpAlarmBlink {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(255,92,92,0.85)); }
+  50%      { filter: drop-shadow(0 0 1px rgba(255,92,92,0.25)); }
 }
 
 /* Legenda das séries */

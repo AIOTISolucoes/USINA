@@ -4576,7 +4576,14 @@ function syncTopSummaryLayout() {
   });
 }
 
+function isPlatformAdmin() {
+  const _u = JSON.parse(localStorage.getItem("user") || "{}");
+  return _u.is_superuser === true;
+}
+
 function showView(viewName) {
+  // Explorador de Dados (JSON bruto do MQTT) é restrito ao admin da plataforma
+  if (viewName === "explorer" && !isPlatformAdmin()) viewName = "overview";
   localStorage.setItem("currentView", viewName);
   Object.values(views).forEach(v => { if (v) v.classList.add("hidden"); });
   if (views[viewName]) {
@@ -4637,6 +4644,15 @@ document.getElementById("btnEvents")?.addEventListener("click", () => showView("
 document.getElementById("btnDataStudio")?.addEventListener("click", () => showView("datastudio"));
 document.getElementById("btnExplorer")?.addEventListener("click", () => showView("explorer"));
 document.getElementById("btnTickets")?.addEventListener("click", () => showView("tickets"));
+
+// Explorador (JSON do MQTT) só aparece para o admin da plataforma
+if (!isPlatformAdmin()) {
+  const _btnExp = document.getElementById("btnExplorer");
+  if (_btnExp) _btnExp.style.display = "none";
+  if (localStorage.getItem("currentView") === "explorer") {
+    localStorage.setItem("currentView", "overview");
+  }
+}
 // Botão OS desabilitado temporariamente — não disponível para clientes ainda
 // document.getElementById("btnOS")?.addEventListener("click", () => {
 //   window.location.href = "os.html";
@@ -5152,6 +5168,61 @@ function updatePlantCardIssueBadges() {
   });
 }
 
+// ---- Badge do CLP (relé via MQTT) no mini chart do card ----
+// cinza = sem dados; verde = ok; amarelo = qualidade 28; vermelho = flag de alarme.
+function clpBadgeHtml(plant) {
+  const clp = plant && typeof plant.clp === "object" && plant.clp ? plant.clp : null;
+  const status = (clp && clp.status) || plant?.clp_status || null;
+  if (!status) return ""; // backend antigo sem o campo → não mostra nada
+
+  const codes = clp && Array.isArray(clp.alarm_codes) ? clp.alarm_codes : [];
+  const ids = codes.map(c => String(c).replace(/^flag_/i, "").replace(/_/g, " "));
+  let cls, label;
+  switch (status) {
+    case "ok":
+      cls = "clp--ok";
+      label = "CLP · Comunicação OK — recebendo dados via MQTT";
+      break;
+    case "quality":
+      cls = "clp--quality";
+      label = "CLP · Recebendo dados com qualidade 28 (falha de comunicação com equipamento)";
+      break;
+    case "alarm":
+      cls = "clp--alarm";
+      label = "CLP · Alarme ativo" + (ids.length ? ": " + ids.join(", ") : "");
+      break;
+    case "none":
+      cls = "clp--offline";
+      label = "CLP · Nenhum relé/CLP cadastrado nesta usina";
+      break;
+    default:
+      cls = "clp--offline";
+      label = "CLP · Sem receber dados do CLP (MQTT offline)";
+      if (clp && clp.last_data) {
+        const d = new Date(clp.last_data);
+        if (!isNaN(d)) {
+          label += " — última leitura " + d.toLocaleString("pt-BR", {
+            day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+          });
+        }
+      }
+  }
+
+  return `
+    <span class="clp-badge ${cls}" title="${label}">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="2.5" width="17" height="19" rx="2.5" class="clp-svg-body"/>
+        <circle cx="8"  cy="7" r="1.3" class="clp-svg-led clp-svg-led--main"/>
+        <circle cx="12" cy="7" r="1.3" class="clp-svg-led"/>
+        <circle cx="16" cy="7" r="1.3" class="clp-svg-led"/>
+        <rect x="6.5" y="10.2" width="11" height="4.2" rx="1" class="clp-svg-screen"/>
+        <rect x="6.6"  y="17" width="2.6" height="2.8" rx="0.6" class="clp-svg-pin"/>
+        <rect x="10.7" y="17" width="2.6" height="2.8" rx="0.6" class="clp-svg-pin"/>
+        <rect x="14.8" y="17" width="2.6" height="2.8" rx="0.6" class="clp-svg-pin"/>
+      </svg>
+    </span>`;
+}
+
 function renderPortfolioCards(plants) {
   const grid = document.getElementById("portfolioCardView");
   if (!grid) return;
@@ -5270,6 +5341,7 @@ function renderPortfolioCards(plants) {
       </div>
       <div class="plant-card__chart-area">
         <div class="plant-card__chart-wrap">
+          ${clpBadgeHtml(plant)}
           <canvas id="${canvasId}"></canvas>
         </div>
         <div class="plant-card__chart-legend">
