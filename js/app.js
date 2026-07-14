@@ -5337,6 +5337,7 @@ function _renderClpDiag(ov, data) {
     ok:           { cls: "ok",   icon: "fa-circle-check",         text: "Tudo certo: o CLP está enviando dados e a plataforma está processando normalmente." },
     clp_problem:  { cls: "bad",  icon: "fa-plug-circle-xmark",    text: "O CLP/coletor local parou de enviar dados (MQTT). A plataforma está operando normalmente — o problema é no equipamento ou na conexão em campo." },
     dbt_problem:  { cls: "warn", icon: "fa-hourglass-half",       text: "O CLP está enviando dados normalmente, mas a plataforma está com atraso no processamento. Não é problema no equipamento." },
+    plant_off:    { cls: "na",   icon: "fa-power-off",            text: "Os inversores já estavam desligados (sem geração) quando o envio de dados parou — a usina aparenta estar desligada, não é falha de comunicação." },
     both_problem: { cls: "bad",  icon: "fa-triangle-exclamation", text: "Sem dados do CLP e plataforma com atraso — é preciso verificar os dois lados." },
     none:         { cls: "na",   icon: "fa-circle-question",      text: "Esta usina não possui CLP/relé de proteção cadastrado." },
   };
@@ -5353,7 +5354,7 @@ function _renderClpDiag(ov, data) {
         <div class="clp-diag-node-info">
           <div class="clp-diag-node-title">Plataforma AIOTI</div>
           <div class="clp-diag-node-sub">processamento de dados (dbt)</div>
-          <div class="clp-diag-node-meta">último processamento ${_clpFmtAge(dbt.processed_age_seconds)}${lagMin}</div>
+          <div class="clp-diag-node-meta">último ciclo ${_clpFmtAge(dbt.heartbeat_age_seconds)} · dado desta usina ${_clpFmtAge(dbt.processed_age_seconds)}${lagMin}</div>
         </div>
         ${_clpCheckHtml(dbt.ok)}
       </div>
@@ -5363,9 +5364,11 @@ function _renderClpDiag(ov, data) {
         <div class="clp-diag-node-info">
           <div class="clp-diag-node-title">CLP · Coletor local</div>
           <div class="clp-diag-node-sub">envio de dados via MQTT</div>
-          <div class="clp-diag-node-meta">último dado ${_clpFmtAge(clp.age_seconds)}${clp.relays_total ? " · " + (clp.relays_with_data || 0) + "/" + clp.relays_total + " relé(s)" : ""}</div>
+          <div class="clp-diag-node-meta">último dado ${_clpFmtAge(clp.age_seconds)}${clp.relays_total ? " · " + (clp.relays_with_data || 0) + "/" + clp.relays_total + " relé(s)" : ""}${data.verdict === "plant_off" ? " · inversores desligados" : ""}</div>
         </div>
-        ${_clpCheckHtml(clp.ok)}
+        ${data.verdict === "plant_off"
+          ? '<span class="clp-diag-check na"><i class="fa-solid fa-power-off"></i> Desligado</span>'
+          : _clpCheckHtml(clp.ok)}
       </div>
     </div>
     <div class="clp-diag-verdict ${v.cls}"><i class="fa-solid ${v.icon}"></i><span>${v.text}</span></div>`;
