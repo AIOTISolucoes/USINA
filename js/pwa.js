@@ -17,12 +17,16 @@
     "cursor:pointer;padding:0 4px;line-height:1}" +
     "@keyframes pwa-slide-up{from{transform:translateY(100%)}to{transform:translateY(0)}}" +
     // botão fixo de instalar (chip na topbar do PC; no mobile vira .sidebar-btn e herda o estilo da barra)
-    ".pwa-install-chip{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;margin-right:10px;" +
-    "border:1px solid rgba(42,255,123,.35);border-radius:10px;background:rgba(42,255,123,.08);color:#2aff7b;" +
-    "font-size:12px;font-weight:700;font-family:'Roboto',sans-serif;cursor:pointer;white-space:nowrap;" +
+    // visual espelha o .status-pill do layout.css (EM OPERAÇÃO): letras cinza, ícone verde
+    ".pwa-install-chip{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;margin-right:10px;" +
+    "border:1px solid rgba(57,229,140,.22);border-radius:99px;background:rgba(57,229,140,.06);" +
+    "color:var(--text-muted,#4dab7a);font-size:10px;font-weight:400;letter-spacing:.06em;" +
+    "text-transform:uppercase;font-family:'JetBrains Mono',monospace;cursor:pointer;white-space:nowrap;" +
     "transition:background .2s ease}" +
-    ".pwa-install-chip:hover{background:rgba(42,255,123,.18)}" +
-    ".pwa-install-chip i{font-size:13px}" +
+    ".pwa-install-chip:hover{background:rgba(57,229,140,.14)}" +
+    ".pwa-install-chip i{font-size:12px;color:#2aff7b}" +
+    "@media (max-width:900px){.pwa-install-chip{font-size:9px;padding:4px 8px;gap:5px}" +
+    ".pwa-install-chip i{font-size:11px}}" +
     "#pwa-install-fixed.sidebar-btn{color:#2aff7b}" +
     "#pwa-install-help{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;" +
     "justify-content:center;background:rgba(0,0,0,.65);padding:20px}" +

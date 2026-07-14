@@ -4867,6 +4867,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 let _portfolioCurrentView = localStorage.getItem("portfolioView") || "card";
 let _portfolioMiniCharts = new Map();
+// capacity_ac por usina (vem do GET /plants) — fallback da linha de expectativa
+// no mini chart quando a usina não tem PVSyst (mesma regra do gráfico diário)
+const _miniChartCapAc = new Map();
 let _portfolioRenderGen = 0;
 const _miniChartDataCache = new Map(); // plantId → { ts, body }
 const _MINI_CHART_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -5453,6 +5456,7 @@ function renderPortfolioCards(plants) {
       cardClass = `plant-card${offlineClass}${alarmSuffix}${standbySuffix}`;
     }
     const canvasId = "mini-chart-" + plantId;
+    _miniChartCapAc.set(String(plantId), Number(plant.capacity_ac ?? 0) || 0);
 
     // Em manutenção o card NÃO ganha badge no topo (o status embaixo já avisa)
     const commBadgeHtml = commStatus.badge && !isMaintenance
@@ -5738,8 +5742,24 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
   const pNums  = toNums(powerRaw);
   const iNums  = toNums(irrRaw);
   const prNums = toNums(prRaw);
-  const maxP   = powerRaw.length ? seriesMax(pNums)  : 0;
   const maxI   = irrRaw.length   ? seriesMax(iNums)  : 0;
+
+  // Expectativa (mesma regra do gráfico diário da usina): curva PVSyst quando
+  // a usina tem simulação no banco; senão linha reta no capacity AC.
+  const expRaw = body?.expectedPower || [];
+  const hasPvsystExpected = Array.isArray(expRaw) && expRaw.some(v => v != null && Number(v) > 0);
+  const capAc = _miniChartCapAc.get(String(plantId)) || 0;
+  let expNums = null, expLabel = null;
+  if (hasPvsystExpected) {
+    expNums = toNums(expRaw);
+    expLabel = "Esperado";
+  } else if (capAc > 0 && labels.length) {
+    expNums = labels.map(() => capAc);
+    expLabel = "Capacity AC";
+  }
+
+  const maxE   = expNums ? seriesMax(expNums) : 0;
+  const maxP   = powerRaw.length ? Math.max(seriesMax(pNums), maxE) : maxE;
 
   const datasets = [];
 
@@ -5770,6 +5790,21 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
       borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4,
       pointHoverBackgroundColor: "#ffc832",
       tension: 0.4, fill: false,
+    });
+  }
+
+  if (expNums) {
+    datasets.push({
+      label: expLabel, _raw: expNums, _unit: "kW",
+      data: expNums, yAxisID: "y",
+      borderColor: "rgba(205,213,225,0.55)",
+      backgroundColor: "transparent",
+      borderWidth: 1, borderDash: [4, 3],
+      pointRadius: 0, pointHoverRadius: 3,
+      pointHoverBackgroundColor: "#cdd5e1",
+      tension: hasPvsystExpected ? 0.4 : 0,
+      fill: false, spanGaps: true,
+      order: 3, // atrás das séries de potência/irradiância
     });
   }
 

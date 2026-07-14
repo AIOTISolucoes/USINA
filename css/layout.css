@@ -2976,6 +2976,14 @@ tbody tr:hover td {
 .clp-diag-close:focus-visible { outline: 1px solid rgba(57,229,140,0.6); outline-offset: 1px; color: #fff; }
 .clp-diag-body { padding: 18px; }
 .clp-diag-loading, .clp-diag-error { text-align: center; padding: 26px 8px; color: #9fc4b2; font-size: 13px; }
+/* Loading centralizado e com altura estável: sem isso o modal abre como uma
+   caixinha mínima (parece torto/descentralizado) e "pula" quando o conteúdo chega */
+.clp-diag-loading {
+  min-height: 200px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+}
+.clp-diag-loading i { font-size: 20px; color: #39e58c; }
 .clp-diag-error { color: #ffb4b4; }
 .clp-diag-flow { display: flex; flex-direction: column; gap: 4px; }
 .clp-diag-node {

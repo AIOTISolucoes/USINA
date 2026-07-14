@@ -97,11 +97,19 @@
   function injectStyles() {
     if (document.getElementById("htourStyles")) return;
     const css = `
-      .htour-help-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:16px;
-        background:rgba(57,229,140,.08);border:1px solid rgba(57,229,140,.35);color:#39e58c;font-size:12px;
-        font-weight:600;cursor:pointer;transition:background .2s,box-shadow .2s;white-space:nowrap;}
-      .htour-help-btn:hover{background:rgba(57,229,140,.16);box-shadow:0 0 12px rgba(57,229,140,.25);}
+      /* visual espelha o .status-pill do layout.css (EM OPERAÇÃO): letras cinza, ícone verde */
+      .htour-help-btn{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;
+        background:rgba(57,229,140,.06);border:1px solid rgba(57,229,140,.22);
+        color:var(--text-muted,#4dab7a);font-size:10px;font-weight:400;letter-spacing:.06em;
+        text-transform:uppercase;font-family:'JetBrains Mono',monospace;
+        cursor:pointer;transition:background .2s,box-shadow .2s;white-space:nowrap;}
+      .htour-help-btn i{color:#39e58c;font-size:12px;}
+      .htour-help-btn:hover{background:rgba(57,229,140,.14);box-shadow:0 0 12px rgba(57,229,140,.18);}
       .htour-help-btn--fixed{position:fixed;bottom:18px;left:18px;z-index:2500;}
+      @media (max-width: 900px){
+        .htour-help-btn{font-size:9px;padding:4px 8px;gap:5px;}
+        .htour-help-btn i{font-size:11px;}
+      }
       @media (max-width: 640px){
         .htour-help-btn{font-size:0;gap:0;padding:7px 9px;border-radius:50%;}
         .htour-help-btn i{font-size:14px;}
