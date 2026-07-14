@@ -119,7 +119,11 @@
         // requestPermission() PRECISA ser chamado direto no handler do clique,
         // sem await/fetch antes — senão o Safari descarta o gesto.
         Notification.requestPermission().then((perm) => {
-          if (perm === "granted") subscribePush(reg);
+          if (perm !== "granted") return;
+          // iOS: garante SW ATIVO antes de assinar (pode ainda estar instalando)
+          navigator.serviceWorker.ready
+            .then((r) => subscribePush(r))
+            .catch(() => subscribePush(reg));
         });
         banner.remove();
       };
@@ -136,7 +140,10 @@
   function askNotificationPermission(reg) {
     if (window.location.pathname.includes("index.html")) return;
     Notification.requestPermission().then((perm) => {
-      if (perm === "granted") subscribePush(reg);
+      if (perm !== "granted") return;
+      navigator.serviceWorker.ready
+        .then((r) => subscribePush(r))
+        .catch(() => subscribePush(reg));
     });
   }
 

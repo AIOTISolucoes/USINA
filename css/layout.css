@@ -2744,7 +2744,7 @@ tbody tr:hover td {
   gap: 10px;
   text-align: left;
   min-height: 36px;
-  padding-right: 30px;
+  padding-right: 96px; /* espaço p/ CLP (74) + ferramenta (42) + lápis (10) */
 }
 
 .plant-card__icon {
@@ -2887,7 +2887,7 @@ tbody tr:hover td {
 .clp-badge {
   --clp-color: #8b93a3;
   position: absolute;
-  top: 12px;
+  top: 23px; /* 22px de altura → centro no eixo 34px, igual botões e título */
   right: 74px;
   z-index: 10;
   width: 22px;
@@ -3164,10 +3164,12 @@ tbody tr:hover td {
   to   { opacity: 1; transform: none; }
 }
 
-/* === PLANT EDIT BUTTON === */
+/* === PLANT EDIT BUTTON ===
+   Eixo vertical dos ícones do card = centro do header (card padding 16
+   + min-height 36 → centro em 34px): botões 26px → top 21; CLP 22px → top 23. */
 .plant-card__edit-btn {
   position: absolute;
-  top: 10px;
+  top: 21px;
   right: 10px;
   width: 26px;
   height: 26px;
@@ -5731,8 +5733,8 @@ select.pem-ctrl option {
 /* Toggle de manutenção no card (só admin vê; espelha o .plant-card__edit-btn) */
 .plant-card__maint-btn {
   position: absolute;
-  top: 10px;
-  right: 42px; /* fila da direita: lápis 10 · ferramenta 42 · acontecimentos 74 · CLP 106 */
+  top: 21px; /* mesmo eixo do lápis/CLP/título (centro 34px) */
+  right: 42px; /* fila da direita: lápis 10 · ferramenta 42 · CLP 74 */
   width: 26px;
   height: 26px;
   display: inline-flex;
