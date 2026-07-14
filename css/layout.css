@@ -3697,7 +3697,6 @@ body.plant-edit-modal-open {
 .plant-card.standby-card::before {
   background: linear-gradient(90deg, transparent, rgba(255,200,60,0.40), transparent);
 }
-}
 
 /* ============================================================
    DATA STUDIO v2 — Layout redesign
