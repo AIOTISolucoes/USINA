@@ -2882,12 +2882,13 @@ tbody tr:hover td {
 }
 
 /* ---- Badge do CLP no topo do card, à esquerda da ferramenta de manutenção
-   (fila da direita: lápis right:10 · acontecimentos right:42 · ferramenta right:74) ---- */
+   (fila da direita: lápis right:10 · ferramenta right:42 · CLP right:74;
+   o badge de acontecimentos agora é inline ao lado do nome) ---- */
 .clp-badge {
   --clp-color: #8b93a3;
   position: absolute;
   top: 12px;
-  right: 106px;
+  right: 74px;
   z-index: 10;
   width: 22px;
   height: 22px;
@@ -3029,11 +3030,12 @@ tbody tr:hover td {
 .pcc-leg--irr::before   { background: rgba(255,200,50,0.85); }
 .pcc-leg--pr::before    { background: rgba(80,200,255,0.75); }
 
-/* === BADGE DE ACONTECIMENTOS DA USINA (issues do robô no card) === */
+/* === BADGE DE ACONTECIMENTOS DA USINA (issues do robô no card) ===
+   Fica INLINE ao lado do nome da usina, dentro do .plant-card__top */
 .plant-card__issue-badge {
-  position: absolute;
-  top: 10px;
-  right: 74px; /* trocou de lugar com a ferramenta (right:42) em 14/07 */
+  position: static;
+  margin-left: 6px;
+  flex: 0 0 auto;
   z-index: 9;
   min-width: 26px;
   height: 26px;
@@ -5799,8 +5801,7 @@ select.pem-ctrl option {
     font-size: 8px;
     white-space: nowrap;
   }
-  .plant-card__issue-badge { right: 70px; }
-  .clp-badge { right: 102px; }
+  .clp-badge { right: 70px; }
 }
 
 /* ═══════════════════════════════════════════════════════

@@ -5203,7 +5203,11 @@ function updatePlantCardIssueBadges() {
           }
         }, 160);
       });
-      card.appendChild(badge);
+      // Fica ao lado do nome da usina (dentro do header do card)
+      const topRow = card.querySelector(".plant-card__top");
+      const nameEl = card.querySelector(".plant-card__name");
+      if (topRow && nameEl) topRow.insertBefore(badge, nameEl.nextSibling);
+      else card.appendChild(badge);
     }
     badge._issues = plantIssues;
     badge._plantName = card.dataset.plantName || "";
@@ -5236,13 +5240,9 @@ function clpBadgeHtml(plant) {
       cls = "clp--alarm";
       label = "CLP · Alarme ativo" + (ids.length ? ": " + ids.join(", ") : "");
       break;
-    case "none":
+    default: // "offline" (e qualquer status desconhecido)
       cls = "clp--offline";
-      label = "CLP · Nenhum relé/CLP cadastrado nesta usina";
-      break;
-    default:
-      cls = "clp--offline";
-      label = "CLP · Sem receber dados do CLP (MQTT offline)";
+      label = "CLP · Sem receber dados via MQTT (coletor offline)";
       if (clp && clp.last_data) {
         const d = new Date(clp.last_data);
         if (!isNaN(d)) {
@@ -5355,7 +5355,7 @@ function _renderClpDiag(ov, data) {
           <div class="clp-diag-node-sub">processamento de dados (dbt)</div>
           <div class="clp-diag-node-meta">último processamento ${_clpFmtAge(dbt.processed_age_seconds)}${lagMin}</div>
         </div>
-        ${_clpCheckHtml(clp.relays_total ? dbt.ok : null)}
+        ${_clpCheckHtml(dbt.ok)}
       </div>
       <div class="clp-diag-arrow ${v.cls}"><i class="fa-solid fa-arrow-down-long"></i></div>
       <div class="clp-diag-node">
@@ -5365,7 +5365,7 @@ function _renderClpDiag(ov, data) {
           <div class="clp-diag-node-sub">envio de dados via MQTT</div>
           <div class="clp-diag-node-meta">último dado ${_clpFmtAge(clp.age_seconds)}${clp.relays_total ? " · " + (clp.relays_with_data || 0) + "/" + clp.relays_total + " relé(s)" : ""}</div>
         </div>
-        ${_clpCheckHtml(clp.relays_total ? clp.ok : null)}
+        ${_clpCheckHtml(clp.ok)}
       </div>
     </div>
     <div class="clp-diag-verdict ${v.cls}"><i class="fa-solid ${v.icon}"></i><span>${v.text}</span></div>`;
