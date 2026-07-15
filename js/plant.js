@@ -8484,7 +8484,7 @@ async function _pdfCaptureFullPlant(bodyEl, panelEl, filename, orientation) {
     const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight(), m = 10, uW = pW - 2 * m;
     const imgH = (canvas.height / canvas.width) * uW;
     let yOff = 0;
-    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, "PNG", m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text("Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
+    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, "PNG", m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text(window.__BRANDING_PDF_FOOTER || "Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
     pdf.save(filename);
   } catch (e) { console.error("[PDF]", e); alert("Erro ao gerar PDF: " + e.message); }
   finally { bodyEl.style.overflow = sO; bodyEl.style.maxHeight = sMH; bodyEl.style.height = sH; if (panelEl) { panelEl.style.height = sPH; panelEl.style.overflow = ""; } overlay.remove(); }
