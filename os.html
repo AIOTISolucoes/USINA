@@ -584,13 +584,10 @@
     </div>
   </div>
   <div class="resp-controls">
-    <div class="wz-input-icon" style="max-width:170px;">
-      <input type="date" id="respDatePicker" class="wz-input" style="font-size:12px;" />
-      <i class="fa-regular fa-calendar" style="font-size:12px;"></i>
-    </div>
     <div style="margin-left:auto;display:flex;gap:8px;">
-      <button class="icon-btn" title="Filtros"><i class="fa-solid fa-sliders"></i></button>
-      <button class="icon-btn" title="Configurações"><i class="fa-solid fa-gear"></i></button>
+      <button class="wz-btn-primary" id="respAddBtn" style="font-size:12px;padding:7px 14px;">
+        <i class="fa-solid fa-user-plus"></i> Cadastrar responsável
+      </button>
     </div>
   </div>
   <div class="resp-table-wrap">
@@ -599,17 +596,14 @@
         <tr>
           <th>Código</th>
           <th>Responsável</th>
+          <th>Função</th>
           <th>E-mail</th>
-          <th>Segunda-feira</th>
-          <th>Terça-feira</th>
-          <th>Quarta-feira</th>
-          <th>Quinta-feira</th>
-          <th>Sexta-feira</th>
-          <th>Sábado</th>
+          <th>Telefone</th>
+          <th style="width:78px;">Ações</th>
         </tr>
       </thead>
       <tbody id="respTableBody">
-        <tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);"><span class="kb-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>Carregando responsáveis...</td></tr>
+        <tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);"><span class="kb-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>Carregando responsáveis...</td></tr>
       </tbody>
     </table>
   </div>
@@ -655,6 +649,41 @@
 <div class="os-toast hidden" id="osToast" role="status" aria-live="polite">
   <span class="os-toast-icon" id="osToastIcon"><i class="fa-solid fa-circle-check"></i></span>
   <span class="os-toast-text" id="osToastText"></span>
+</div>
+
+<!-- MODAL CADASTRO/EDIÇÃO DE RESPONSÁVEL -->
+<div class="del-modal-overlay hidden" id="wkModalOverlay"></div>
+<div class="del-modal wk-modal hidden" id="wkModal">
+  <div class="del-modal-header wk-modal-header">
+    <i class="fa-solid fa-user-plus" style="color:var(--accent,#39e58c);font-size:18px;"></i>
+    <span id="wkModalTitle">Cadastrar responsável</span>
+  </div>
+  <div class="del-modal-body">
+    <input type="hidden" id="wkModalId" value="" />
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">Nome *</label>
+      <input id="wkModalName" class="osd-input" type="text" placeholder="Ex.: Josandro Ponte" maxlength="120" />
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">Função / encargo</label>
+      <input id="wkModalType" class="osd-input" type="text" placeholder="Ex.: Eletricista, Técnico de manutenção, Limpeza..." maxlength="120" />
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">E-mail</label>
+      <input id="wkModalEmail" class="osd-input" type="email" placeholder="opcional" maxlength="160" />
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <label style="font-size:11px;color:var(--text-muted);">Telefone</label>
+      <input id="wkModalPhone" class="osd-input" type="tel" placeholder="opcional" maxlength="40" />
+    </div>
+    <div class="hidden" id="wkModalError" style="font-size:12px;color:#f87171;display:flex;align-items:center;gap:6px;">
+      <i class="fa-solid fa-circle-xmark"></i><span id="wkModalErrorText"></span>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;padding:14px 20px;border-top:1px solid rgba(57,229,140,.15);justify-content:flex-end;">
+    <button class="wz-btn-ghost" id="wkModalCancel">Cancelar</button>
+    <button class="wz-btn-primary" id="wkModalSave"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
+  </div>
 </div>
 
 <div class="del-modal-overlay hidden" id="delModalOverlay"></div>

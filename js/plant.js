@@ -4623,8 +4623,12 @@ function renderWeather(data) {
   // Painel expandido
   const wxWind = document.getElementById("wxWindSpeed");
   if (wxWind) {
-    const v = d.wind_speed_ms ?? d.vel_vento ?? null;
-    wxWind.textContent = v != null ? `${Number(v).toFixed(1)} m/s` : "—";
+    const v = d.wind_speed_ms ?? d.wind_speed ?? d.vel_vento ?? null;
+    // sanidade: CLP com registrador errado manda milhões (ex.: Pacajus1) —
+    // acima de 60 m/s (furacão) trata como dado inválido
+    const n = v != null ? Number(v) : null;
+    wxWind.textContent = n != null && isFinite(n) && n >= 0 && n <= 60
+      ? `${n.toFixed(1)} m/s` : "—";
   }
 
   const wxDir = document.getElementById("wxWindDir");
@@ -4641,8 +4645,8 @@ function renderWeather(data) {
 
   const wxRain = document.getElementById("wxRain");
   if (wxRain) {
-    const hour = d.rainfall_hour_mm ?? d.acumulador_pluv_hour ?? null;
-    const month = d.rainfall_month_mm ?? d.acumulador_pluv_month ?? null;
+    const hour = d.rainfall_hour_mm ?? d.hourly_accumulated_rain_mm ?? d.acumulador_pluv_hour ?? null;
+    const month = d.rainfall_month_mm ?? d.monthly_accumulated_rain_mm ?? d.acumulador_pluv_month ?? null;
     const hStr = hour != null ? `${Number(hour).toFixed(1)}` : "—";
     const mStr = month != null ? `${Number(month).toFixed(1)}` : "—";
     wxRain.textContent = `${hStr} / ${mStr} mm`;
@@ -4656,7 +4660,7 @@ function renderWeather(data) {
 
   const wxSensor = document.getElementById("wxRainSensor");
   if (wxSensor) {
-    const v = d.rain_sensor ?? d.sensor_chuva ?? null;
+    const v = d.rain_sensor ?? d.rain_signal ?? d.sensor_chuva ?? null;
     wxSensor.textContent = v != null ? (Number(v) === 1 ? "Chuva" : "Seco") : "—";
   }
 }
@@ -5881,10 +5885,11 @@ function renderDailyChart() {
 
   const powerData = useMeter ? DAILY.meterPower : DAILY.activePower;
   const powerLabel = useMeter ? "Multimedidor" : "Potência Ativa";
-  const powerColor = useMeter ? "#4da3ff" : "#39e58c";
-  const powerColorRgba = useMeter
+  const _br = window.__brandRemap || ((c) => c);
+  const powerColor = _br(useMeter ? "#4da3ff" : "#39e58c");
+  const powerColorRgba = (useMeter
     ? ["rgba(77,163,255,0.36)", "rgba(77,163,255,0.20)", "rgba(77,163,255,0.03)"]
-    : ["rgba(57,229,140,0.36)", "rgba(57,229,140,0.20)", "rgba(57,229,140,0.03)"];
+    : ["rgba(57,229,140,0.36)", "rgba(57,229,140,0.20)", "rgba(57,229,140,0.03)"]).map(_br);
 
   const irrData = useGhi ? DAILY.irradianceGhi : DAILY.irradiance;
   const irrLabel = useGhi ? "Irradiância GHI" : "Irradiância POA";

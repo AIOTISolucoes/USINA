@@ -2965,6 +2965,10 @@ body.plant-enter #relaySection{
   font-weight:700;
   color:var(--warm-yellow);
   text-shadow:0 0 10px rgba(255,152,0,0.15);
+  /* ancora o valor no rodapé do card: rótulo de 2 linhas (ex. "Pluvio.
+     Hora / Mês") não desalinha mais os valores da mesma linha */
+  margin-top:auto;
+  line-height:1.15;
 }
 
 @media (max-width: 640px){

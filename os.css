@@ -622,6 +622,16 @@
 }
 .del-modal-body{padding:20px;display:flex;flex-direction:column;gap:14px;}
 
+/* ── Modal de cadastro de responsável (variante verde do del-modal) ── */
+.wk-modal{border:1px solid rgba(57,229,140,.28);}
+.wk-modal-header{border-bottom:1px solid rgba(57,229,140,.15);}
+.resp-action-btn{
+  background:none;border:1px solid rgba(255,255,255,.12);border-radius:6px;
+  color:var(--text-muted);cursor:pointer;padding:4px 7px;font-size:11px;
+}
+.resp-action-btn:hover{color:var(--accent,#39e58c);border-color:rgba(57,229,140,.4);}
+.resp-action-btn.danger:hover{color:#f87171;border-color:rgba(248,113,113,.4);}
+
 /* ── COLUMN HEADER FIX (overflow:hidden from old rule blocks sticky → header displaced) ── */
 .kb-col{overflow:clip;}
 .kb-col-header{position:relative;top:auto;z-index:auto;}

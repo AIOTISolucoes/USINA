@@ -2547,7 +2547,84 @@ function bindRespDrawer() {
     filterRespTable("")
   })
 
-  document.getElementById("respDatePicker")?.addEventListener("change", loadRespUsers)
+  // Cadastro/edição de responsáveis
+  document.getElementById("respAddBtn")?.addEventListener("click", () => openWorkerModal(null))
+  document.getElementById("wkModalCancel")?.addEventListener("click", closeWorkerModal)
+  document.getElementById("wkModalOverlay")?.addEventListener("click", closeWorkerModal)
+  document.getElementById("wkModalSave")?.addEventListener("click", saveWorker)
+}
+
+// ── Modal de cadastro/edição de responsável ──────────────────
+function openWorkerModal(worker) {
+  const isEdit = !!(worker && worker.id)
+  document.getElementById("wkModalTitle").textContent = isEdit ? "Editar responsável" : "Cadastrar responsável"
+  document.getElementById("wkModalId").value = isEdit ? String(worker.id) : ""
+  document.getElementById("wkModalName").value = worker?.name || ""
+  document.getElementById("wkModalType").value = worker?.worker_type || ""
+  document.getElementById("wkModalEmail").value = worker?.email || ""
+  document.getElementById("wkModalPhone").value = worker?.phone || ""
+  document.getElementById("wkModalError")?.classList.add("hidden")
+  document.getElementById("wkModalOverlay")?.classList.remove("hidden")
+  document.getElementById("wkModal")?.classList.remove("hidden")
+  setTimeout(() => document.getElementById("wkModalName")?.focus(), 100)
+}
+
+function closeWorkerModal() {
+  document.getElementById("wkModalOverlay")?.classList.add("hidden")
+  document.getElementById("wkModal")?.classList.add("hidden")
+}
+
+function _wkShowError(msg) {
+  const el = document.getElementById("wkModalError")
+  const txt = document.getElementById("wkModalErrorText")
+  if (txt) txt.textContent = msg
+  el?.classList.remove("hidden")
+}
+
+async function saveWorker() {
+  const id = document.getElementById("wkModalId")?.value
+  const name = (document.getElementById("wkModalName")?.value || "").trim()
+  if (!name) { _wkShowError("Informe o nome do responsável"); return }
+
+  const payload = {
+    name,
+    worker_type: (document.getElementById("wkModalType")?.value || "").trim(),
+    email: (document.getElementById("wkModalEmail")?.value || "").trim(),
+    phone: (document.getElementById("wkModalPhone")?.value || "").trim()
+  }
+
+  const btn = document.getElementById("wkModalSave")
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando...' }
+  try {
+    if (id) {
+      await apiJson(`/workers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    } else {
+      await apiJson(`/workers`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    }
+    closeWorkerModal()
+    showToast(id ? "Responsável atualizado" : "Responsável cadastrado", "success")
+    KB.respUsers = []
+    await loadRespUsers()
+  } catch (error) {
+    console.warn("[RESP] save", error)
+    _wkShowError(error?.message || "Erro ao salvar responsável")
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar' }
+  }
+}
+
+async function deactivateWorker(worker) {
+  const name = worker?.name || `#${worker?.id}`
+  if (!confirm(`Remover "${name}" da lista de responsáveis?\n(OSs antigas atribuídas a ele não são alteradas.)`)) return
+  try {
+    await apiJson(`/workers/${worker.id}`, { method: "DELETE" })
+    showToast("Responsável removido", "success")
+    KB.respUsers = []
+    await loadRespUsers()
+  } catch (error) {
+    console.warn("[RESP] delete", error)
+    showToast("Erro ao remover responsável", "error")
+  }
 }
 
 function openRespDrawer() {
@@ -2571,7 +2648,7 @@ async function loadRespUsers() {
   const tbody = document.getElementById("respTableBody")
   if (tbody) {
     tbody.innerHTML =
-      '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);"><span class="kb-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>Carregando...</td></tr>'
+      '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);"><span class="kb-spinner" style="display:inline-block;vertical-align:middle;margin-right:8px;"></span>Carregando...</td></tr>'
   }
 
   try {
@@ -2593,7 +2670,7 @@ function renderRespTable(users, totalCount = users.length) {
 
   if (!users.length) {
     tbody.innerHTML =
-      '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted);">Nenhum respons\u00e1vel encontrado</td></tr>'
+      '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted);">Nenhum respons\u00e1vel cadastrado \u2014 use o bot\u00e3o "Cadastrar respons\u00e1vel" acima</td></tr>'
     if (meta) meta.textContent = `Mostrando 0 de ${totalCount}`
     return
   }
@@ -2602,19 +2679,17 @@ function renderRespTable(users, totalCount = users.length) {
     .map((user) => {
       const userId = user.id || user.user_id || ""
       const isSelected = String(KB.selectedResponsavel?.id || "") === String(userId)
-      const dayCells = WEEK_DAY_COLUMNS.map((dayColumn) => {
-        const value = resolveUserWeekHoursValue(user, dayColumn)
-        const hasHours = hasHoursBadgeValue(value)
-        const className = hasHours ? "resp-hours-cell has-hours" : "resp-hours-cell"
-        return `<td><span class="${className}">${esc(hasHours ? value : "SEM HORAS")}</span></td>`
-      }).join("")
-
       return `
         <tr class="${isSelected ? "selected" : ""}" data-user-id="${esc(userId)}" data-user-name="${escAttr(user.name || user.username || "")}" data-user-email="${escAttr(user.email || "")}" data-user-code="${escAttr(user.code || userId || "")}">
           <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);">${esc(user.code || user.id || "---")}</td>
           <td>${esc(user.name || user.username || "---")}</td>
+          <td style="font-size:11px;color:var(--text-muted);">${esc(user.worker_type || "---")}</td>
           <td style="font-size:11px;color:var(--text-muted);">${esc(user.email || "---")}</td>
-          ${dayCells}
+          <td style="font-size:11px;color:var(--text-muted);">${esc(user.phone || "---")}</td>
+          <td style="white-space:nowrap;">
+            <button class="resp-action-btn" data-action="edit" title="Editar"><i class="fa-solid fa-pen"></i></button>
+            <button class="resp-action-btn danger" data-action="remove" title="Remover"><i class="fa-solid fa-trash"></i></button>
+          </td>
         </tr>
       `
     })
@@ -2623,6 +2698,17 @@ function renderRespTable(users, totalCount = users.length) {
   if (meta) meta.textContent = `Mostrando ${users.length} de ${totalCount}`
 
   tbody.querySelectorAll("tr[data-user-id]").forEach((row) => {
+    const worker = users.find((u) => String(u.id || u.user_id || "") === String(row.dataset.userId)) || null
+
+    row.querySelector('[data-action="edit"]')?.addEventListener("click", (e) => {
+      e.stopPropagation()
+      openWorkerModal(worker)
+    })
+    row.querySelector('[data-action="remove"]')?.addEventListener("click", (e) => {
+      e.stopPropagation()
+      deactivateWorker(worker)
+    })
+
     row.addEventListener("click", () => {
       tbody.querySelectorAll("tr").forEach((item) => item.classList.remove("selected"))
       row.classList.add("selected")
@@ -2641,7 +2727,7 @@ function filterRespTable(query) {
   const filtered = !normalizedQuery
     ? KB.respUsers
     : KB.respUsers.filter((user) => {
-        const search = `${user.name || user.username || ""} ${user.email || ""} ${user.code || ""}`.toLowerCase()
+        const search = `${user.name || user.username || ""} ${user.worker_type || ""} ${user.email || ""} ${user.phone || ""} ${user.code || ""}`.toLowerCase()
         return search.includes(normalizedQuery)
       })
 

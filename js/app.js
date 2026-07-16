@@ -31,11 +31,11 @@ function _dismissAppLoader() {
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const INVERTER_NO_COMM_AFTER_MS = 15 * 60 * 1000; // legado (chips usam status do mart)
 const DASHBOARD_REFRESH_INTERVAL_MS = 30000;
-const DS_SERIES_PALETTE = [
+const DS_SERIES_PALETTE = (window.__BRAND_PALETTE && window.__BRAND_PALETTE.length ? window.__BRAND_PALETTE : [
   "#4da3ff", "#39e58c", "#ffd84d", "#ff8a65",
   "#b39ddb", "#80cbc4", "#f06292", "#aed581",
   "#ffb74d", "#4dd0e1", "#ce93d8", "#a5d6a7"
-];
+]).map((c) => (window.__brandRemap ? window.__brandRemap(c) : c));
 const EVENTS_REFRESH_INTERVAL_MS = 10000;
 
 function apiFetch(path, options = {}) {
@@ -5220,40 +5220,34 @@ function updatePlantCardIssueBadges() {
   });
 }
 
-// ---- Badge do CLP (relé via MQTT) no mini chart do card ----
-// cinza = sem dados; verde = ok; amarelo = qualidade 28; vermelho = flag de alarme.
+// ---- Badge do CLP (coletor MQTT) no topo do card ----
+// Regra simples (pedido supervisor 16/07): verde = conectado (recebendo dados);
+// vermelho = Desconectado (sem dado MQTT há mais de 10 min). Sem métrica de
+// alarme/qualidade — alarme de relé não pinta mais o CLP.
 function clpBadgeHtml(plant) {
   const clp = plant && typeof plant.clp === "object" && plant.clp ? plant.clp : null;
   const status = (clp && clp.status) || plant?.clp_status || null;
   if (!status) return ""; // backend antigo sem o campo → não mostra nada
 
-  const codes = clp && Array.isArray(clp.alarm_codes) ? clp.alarm_codes : [];
-  const ids = codes.map(c => String(c).replace(/^flag_/i, "").replace(/_/g, " "));
+  let lastTxt = "";
+  if (clp && clp.last_data) {
+    const d = new Date(clp.last_data);
+    if (!isNaN(d)) {
+      lastTxt = " — última leitura " + d.toLocaleString("pt-BR", {
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+      });
+    }
+  }
+
   let cls, label;
-  switch (status) {
-    case "ok":
-      cls = "clp--ok";
-      label = "CLP · Comunicação OK — recebendo dados via MQTT";
-      break;
-    case "quality":
-      cls = "clp--quality";
-      label = "CLP · Recebendo dados com qualidade 28 (falha de comunicação com equipamento)";
-      break;
-    case "alarm":
-      cls = "clp--alarm";
-      label = "CLP · Alarme ativo" + (ids.length ? ": " + ids.join(", ") : "");
-      break;
-    default: // "offline" (e qualquer status desconhecido)
-      cls = "clp--offline";
-      label = "CLP · Sem receber dados via MQTT (coletor offline)";
-      if (clp && clp.last_data) {
-        const d = new Date(clp.last_data);
-        if (!isNaN(d)) {
-          label += " — última leitura " + d.toLocaleString("pt-BR", {
-            day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
-          });
-        }
-      }
+  if (status === "offline" || status === "none") {
+    cls = "clp--offline";
+    label = "CLP · Desconectado — sem receber dados via MQTT há mais de 10 min" + lastTxt;
+  } else {
+    // "ok" — e "alarm"/"quality" de um backend antigo também contam como
+    // conectado: o dado está chegando.
+    cls = "clp--ok";
+    label = "CLP · Conectado — recebendo dados via MQTT" + lastTxt;
   }
 
   return `
@@ -5377,12 +5371,19 @@ function _renderClpDiag(ov, data) {
     <div class="clp-diag-verdict ${v.cls}"><i class="fa-solid ${v.icon}"></i><span>${v.text}</span></div>`;
 
   if (data.is_admin && Array.isArray(data.raw_mqtt) && data.raw_mqtt.length) {
+    // Um bloco por TIPO de dispositivo da usina (inversor, relé, multimedidor,
+    // tracker, estação...) com o último payload de cada — tipo sem dado em 48h
+    // aparece marcado, o que denuncia coleta que não está entrando no banco.
     html += `<details class="clp-diag-json"><summary><i class="fa-solid fa-code"></i> JSON MQTT (admin)</summary>` +
-      data.raw_mqtt.map(m => `
+      data.raw_mqtt.map(m => {
+        const who = [m.type_label, m.device_name].filter(Boolean).join(" · ")
+          || m.device_name || ("Relé " + m.device_id);
+        return `
         <div class="clp-diag-json-item">
-          <div class="clp-diag-json-head">${_clpEsc(m.device_name || ("Relé " + m.device_id))} · ${m.timestamp ? new Date(m.timestamp).toLocaleString("pt-BR") : "sem leitura em 48h"}</div>
+          <div class="clp-diag-json-head">${_clpEsc(who)} · ${m.timestamp ? new Date(m.timestamp).toLocaleString("pt-BR") : "⚠ sem leitura recente (2h)"}</div>
           <pre>${_clpEsc(m.payload ? JSON.stringify(m.payload, null, 2) : "— sem payload —")}</pre>
-        </div>`).join("") +
+        </div>`;
+      }).join("") +
       `</details>`;
   }
 
@@ -5882,7 +5883,9 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
         y: {
           type: "linear", position: "left",
           display: powerRaw.length > 0,
-          min: 0, max: maxP * 1.12,
+          // max > 0 sempre: com a série toda zerada (usina parada), max 0
+          // degenera a escala e a linha vai pro TOPO (ticket #11)
+          min: 0, max: maxP > 0 ? maxP * 1.12 : 1,
           grid: { display: false },
           ticks: { ...tickStyle("rgba(57,229,140,0.55)"), callback: v => fmtTick(v, "kW") },
           border: { display: false },
@@ -5890,7 +5893,7 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
         y1: {
           type: "linear", position: "right",
           display: irrRaw.length > 0,
-          min: 0, max: maxI * 1.12,
+          min: 0, max: maxI > 0 ? maxI * 1.12 : 1,
           grid: { drawOnChartArea: false, drawTicks: false },
           ticks: { ...tickStyle("rgba(255,200,50,0.55)"), callback: v => fmtTick(v, "W/m\u00B2") },
           border: { display: false },
