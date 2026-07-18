@@ -9325,6 +9325,11 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   padding: 24px 14px; text-align: center;
   font-size: 12px; color: #ef4444;
 }
+.ronda-string-empty {
+  padding: 8px 0 4px; font-size: 11px; line-height: 1.55;
+  color: rgba(255,255,255,0.45);
+}
+.ronda-string-empty i { margin-right: 6px; color: rgba(255,255,255,0.35); }
 .ronda-section {
   border-bottom: 1px solid rgba(255,255,255,0.06);
   padding: 10px 14px;

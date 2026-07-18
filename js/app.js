@@ -31,11 +31,20 @@ function _dismissAppLoader() {
 const API_BASE = "https://jgeg9i0js1.execute-api.us-east-1.amazonaws.com";
 const INVERTER_NO_COMM_AFTER_MS = 15 * 60 * 1000; // legado (chips usam status do mart)
 const DASHBOARD_REFRESH_INTERVAL_MS = 30000;
-const DS_SERIES_PALETTE = (window.__BRAND_PALETTE && window.__BRAND_PALETTE.length ? window.__BRAND_PALETTE : [
+const DS_DEFAULT_PALETTE = [
   "#4da3ff", "#39e58c", "#ffd84d", "#ff8a65",
   "#b39ddb", "#80cbc4", "#f06292", "#aed581",
   "#ffb74d", "#4dd0e1", "#ce93d8", "#a5d6a7"
-]).map((c) => (window.__brandRemap ? window.__brandRemap(c) : c));
+];
+const DS_SERIES_PALETTE = [];
+// paleta VIVA: branding.js chama isto na troca/restauração de tema — a
+// versão congelada no parse ficava com as cores do tema antigo pra sempre
+window.__refreshDsPalette = () => {
+  const base = (window.__BRAND_PALETTE && window.__BRAND_PALETTE.length ? window.__BRAND_PALETTE : DS_DEFAULT_PALETTE)
+    .map((c) => (window.__brandRemap ? window.__brandRemap(c) : c));
+  DS_SERIES_PALETTE.splice(0, DS_SERIES_PALETTE.length, ...base);
+};
+window.__refreshDsPalette();
 const EVENTS_REFRESH_INTERVAL_MS = 10000;
 
 function apiFetch(path, options = {}) {
@@ -5893,7 +5902,9 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
         y1: {
           type: "linear", position: "right",
           display: irrRaw.length > 0,
-          min: 0, max: maxI > 0 ? maxI * 1.12 : 1,
+          // piso de 100 W/m² no teto: sensor travado em ~0.5 (Pedra Branca)
+          // auto-ajustava a escala e a linha "colava" no topo (ticket #11)
+          min: 0, max: Math.max(maxI * 1.12, 100),
           grid: { drawOnChartArea: false, drawTicks: false },
           ticks: { ...tickStyle("rgba(255,200,50,0.55)"), callback: v => fmtTick(v, "W/m\u00B2") },
           border: { display: false },
@@ -8845,7 +8856,7 @@ async function tkLoadList() {
       const prioClass = `tk-priority-${t.priority || "medium"}`;
       const prioLabel = {low: "Baixa", medium: "Média", high: "Alta"}[t.priority] || "Média";
       const statusLabel = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[t.status] || t.status;
-      const d = t.created_at ? new Date(t.created_at).toLocaleDateString("pt-BR") : "";
+      const d = t.created_at ? _tkDate(t.created_at).toLocaleDateString("pt-BR") : "";
       return `<div class="tk-card" data-id="${t.id}">
         <div class="tk-card-status ${t.status}"></div>
         <div class="tk-card-body">
@@ -8900,7 +8911,7 @@ async function tkOpenDetail(id) {
 
     const statusLabel = {open: "Aberto", in_progress: "Em Andamento", resolved: "Resolvido"}[t.status] || t.status;
     const prioLabel = {low: "Baixa", medium: "Média", high: "Alta"}[t.priority] || "Média";
-    const d = t.created_at ? new Date(t.created_at).toLocaleString("pt-BR") : "";
+    const d = t.created_at ? _tkDate(t.created_at).toLocaleString("pt-BR") : "";
 
     let statusHtml;
     if (user.is_superuser) {
@@ -8951,7 +8962,7 @@ async function tkOpenDetail(id) {
     }
 
     timeline.innerHTML = comments.map(c => {
-      const cd = c.created_at ? new Date(c.created_at).toLocaleString("pt-BR") : "";
+      const cd = c.created_at ? _tkDate(c.created_at).toLocaleString("pt-BR") : "";
       const role = c.is_admin ? "admin" : "user";
       const authorLabel = c.is_admin ? `<i class="fa-solid fa-headset"></i> ${_tkEsc(c.author)} (Suporte)` : `<i class="fa-regular fa-user"></i> ${_tkEsc(c.author)}`;
       return `<div class="tk-timeline-item ${role}">
@@ -9115,6 +9126,16 @@ function _tkEsc(s) {
   return d.innerHTML;
 }
 
+// timestamps de ticket/aviso vêm do banco em UTC SEM timezone
+// ("2026-07-16T20:35:34") — o new Date() trata como hora local e
+// mostra 3h adiantado. Sem indicador de fuso, assume UTC.
+function _tkDate(s) {
+  if (!s) return null;
+  const hasTz = /(Z|[+-]\d{2}:?\d{2})$/.test(String(s));
+  const d = new Date(hasTz ? s : String(s) + "Z");
+  return isNaN(d) ? new Date(s) : d;
+}
+
 // =============================================================================
 // SISTEMA DE ATUALIZAÇÕES (SININHO + MODAL)
 // =============================================================================
@@ -9208,7 +9229,7 @@ function _notifRenderPanel(updates, lastSeen) {
 
   list.innerHTML = updates.map(u => {
     const isUnread = u.id > lastSeen;
-    const d = u.created_at ? new Date(u.created_at).toLocaleDateString("pt-BR") : "";
+    const d = u.created_at ? _tkDate(u.created_at).toLocaleDateString("pt-BR") : "";
     return `<div class="notif-item${isUnread ? " unread" : ""}">
       <div class="notif-item-title">${_notifEsc(u.title)}</div>
       <div class="notif-item-desc">${_notifEsc(u.description || "")}</div>
@@ -9223,7 +9244,7 @@ function _notifShowModal(unseen) {
   if (!overlay || !body) return;
 
   body.innerHTML = unseen.map(u => {
-    const d = u.created_at ? new Date(u.created_at).toLocaleDateString("pt-BR") : "";
+    const d = u.created_at ? _tkDate(u.created_at).toLocaleDateString("pt-BR") : "";
     return `<div class="notif-modal-entry">
       <div class="notif-modal-entry-title">${_notifEsc(u.title)}</div>
       <div class="notif-modal-entry-desc">${_notifEsc(u.description || "")}</div>

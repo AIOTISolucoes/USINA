@@ -33,6 +33,7 @@
     if (u.customer_id) h["X-Customer-Id"] = u.customer_id;
     if (u.is_superuser === true) h["X-Is-Superuser"] = "true";
     if (u.username) h["X-Username"] = u.username;
+    if (u.id) h["X-User-Id"] = u.id;
     return h;
   }
   const keyCompany = () => CACHE_COMPANY + ":" + (getUser().customer_id || "anon");
@@ -212,6 +213,11 @@
   function buildRemapCss() {
     const out = [];
     for (const sheet of document.styleSheets) {
+      // NUNCA incluir os styles injetados pelo próprio branding: o
+      // #brandingRemap dentro da varredura dobrava o CSS a cada aplicação
+      const id = sheet.ownerNode && sheet.ownerNode.id || "";
+      if (id.startsWith("branding")) continue;
+      if (sheet.ownerNode && sheet.ownerNode.closest && sheet.ownerNode.closest(".brd-dock")) continue;
       let rules = null;
       try { rules = sheet.cssRules; } catch { continue; } // cross-origin (CDN): pula
       if (rules) collectRules(rules, out);
@@ -264,6 +270,7 @@
     })();
     if (!TGT) {
       el.textContent = "";
+      try { localStorage.removeItem(CACHE_REMAP); } catch { }
       // devolve estilos inline e atributos SVG originais (volta ao padrão)
       document.querySelectorAll("[data-brd-style0]").forEach((n) => {
         n.setAttribute("style", n.dataset.brdStyle0);
@@ -319,15 +326,31 @@
      PLUGIN Chart.js — remapeia cores de todos os gráficos
   ========================================================= */
   const COLOR_FULL_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\([\d.,\s]+\))$/;
+  // Mapa reverso GLOBAL: toda cor que o remap produziu lembra a original.
+  // Necessário porque o Chart.js v4 troca a identidade dos objetos de options
+  // no update() — o registro por referência ($brd) fica órfão e a cor
+  // remapeada (matiz fora da faixa 70-170) nunca mais seria recuperada
+  // (bug: ticks roxos após "Restaurar padrão").
+  const REV = new Map();
+  function revRemember(nv, orig) {
+    if (nv === orig) return;
+    if (REV.size > 4000) REV.clear(); // nunca deixa crescer sem limite
+    REV.set(nv, REV.get(orig) || orig);
+  }
   // rec: registro [obj, chave, valorOriginal] p/ restaurar na troca de tema
+  function remapColorValue(v) {
+    const v0 = REV.get(v) || v;     // recupera a original se v já é cor remapeada
+    const nv = remapText(v0);       // TGT null => nv = v0 (volta ao padrão)
+    return [v0, nv];
+  }
   function deepRemap(obj, depth, rec) {
     if (!obj || depth > 8) return;
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
         const v = obj[i];
         if (typeof v === "string" && COLOR_FULL_RE.test(v)) {
-          const nv = remapText(v);
-          if (nv !== v) { if (rec) rec.push([obj, i, v]); obj[i] = nv; }
+          const [v0, nv] = remapColorValue(v);
+          if (nv !== v) { if (rec) rec.push([obj, i, v0]); obj[i] = nv; revRemember(nv, v0); }
         } else if (v && typeof v === "object") deepRemap(v, depth + 1, rec);
       }
       return;
@@ -336,8 +359,8 @@
     for (const k of Object.keys(obj)) {
       const v = obj[k];
       if (typeof v === "string" && COLOR_FULL_RE.test(v)) {
-        const nv = remapText(v);
-        if (nv !== v) { if (rec) rec.push([obj, k, v]); obj[k] = nv; }
+        const [v0, nv] = remapColorValue(v);
+        if (nv !== v) { if (rec) rec.push([obj, k, v0]); obj[k] = nv; revRemember(nv, v0); }
       } else if (v && typeof v === "object" && k !== "data") deepRemap(v, depth + 1, rec);
     }
   }
@@ -345,11 +368,10 @@
   const _charts = new Set();
   function remapChart(chart) {
     chart.$brd = chart.$brd || [];
-    if (!TGT) return;
-    try {
-      deepRemap(chart.config.data, 0, chart.$brd);
-      deepRemap(chart.config.options, 0, chart.$brd);
-    } catch { }
+    // sem tema (TGT null) o deepRemap ainda roda: via REV ele CURA valores
+    // remapeados que ficaram órfãos do $brd (devolve a cor original)
+    try { deepRemap(chart.config.data, 0, chart.$brd); } catch { }
+    try { deepRemap(chart.config.options, 0, chart.$brd); } catch { }
   }
   // troca de tema AO VIVO: devolve as cores originais e remapeia de novo
   function recolorCharts() {
@@ -391,9 +413,14 @@
     _currentLogo = logoData || null;
     const swap = () => {
       document.querySelectorAll(LOGO_SELECTOR).forEach((img) => {
-        if (!img.dataset.brandingOriginal) img.dataset.brandingOriginal = img.getAttribute("src");
+        // nunca registra data: como "original" — um nó criado já com a logo
+        // custom contaminaria o restore (logo custom presa após restaurar)
+        if (!img.dataset.brandingOriginal) {
+          const s = img.getAttribute("src");
+          if (s && !s.startsWith("data:")) img.dataset.brandingOriginal = s;
+        }
         const want = _currentLogo || img.dataset.brandingOriginal;
-        if (img.getAttribute("src") !== want) img.src = want;
+        if (want && img.getAttribute("src") !== want) img.src = want;
       });
     };
     const start = () => {
@@ -478,23 +505,29 @@
 
   let _effective = null;
   function applyBranding(b) {
+    // cada etapa protegida: uma falha não pode impedir as seguintes
+    // (senão o restore fica pela metade — CSS antigo preso, charts sujos)
+    const safe = (fn) => { try { fn(); } catch (e) { console.warn("[branding] etapa falhou:", e); } };
     _effective = b || null;
-    computeTargets(b && b.colors);
-    window.__BRAND_PALETTE = buildSeriesPalette(b && b.colors);
-    applyLayout(b && b.colors && b.colors.layout);
-    applyGradient(b && b.colors);
-    recolorCharts();
+    safe(() => computeTargets(b && b.colors));
+    safe(() => { window.__BRAND_PALETTE = buildSeriesPalette(b && b.colors); });
+    safe(() => { if (window.__refreshDsPalette) window.__refreshDsPalette(); });
+    safe(() => applyLayout(b && b.colors && b.colors.layout));
+    safe(() => applyGradient(b && b.colors));
+    safe(recolorCharts);
     // tokens que o remap não alcança (triplet cru + meta)
-    const p = b && b.colors && parseHex(b.colors.primary);
-    if (p) {
-      document.documentElement.style.setProperty("--neon-rgb", `${p[0]}, ${p[1]}, ${p[2]}`);
-      document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", b.colors.primary));
-    } else {
-      document.documentElement.style.removeProperty("--neon-rgb");
-    }
-    applyLogo(b && b.logo_data);
-    applyName(b && b.app_name);
-    applyRobotSkin(b && b.robot_skin);
+    safe(() => {
+      const p = b && b.colors && parseHex(b.colors.primary);
+      if (p) {
+        document.documentElement.style.setProperty("--neon-rgb", `${p[0]}, ${p[1]}, ${p[2]}`);
+        document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", b.colors.primary));
+      } else {
+        document.documentElement.style.removeProperty("--neon-rgb");
+      }
+    });
+    safe(() => applyLogo(b && b.logo_data));
+    safe(() => applyName(b && b.app_name));
+    safe(() => applyRobotSkin(b && b.robot_skin));
     window.__BRANDING = b || null;
     window.__BRANDING_PDF_FOOTER =
       (b && b.texts && b.texts.pdf_footer) ||
@@ -524,13 +557,31 @@
       document.addEventListener("DOMContentLoaded", () => applyBranding(saved));
       if (document.readyState !== "loading") applyBranding(saved);
     }
-    // rede: atualiza o espelho da empresa
+    // rede: atualiza os espelhos (empresa + tema pessoal do usuário no banco)
     fetch(API_BASE + "/branding", { headers: authHeaders(), cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data) return;
         if (data.branding) localStorage.setItem(keyCompany(), JSON.stringify(data.branding));
         else localStorage.removeItem(keyCompany());
+        // "user_branding" só existe na Lambda nova; Lambda antiga = não mexe
+        // no tema pessoal local (comportamento antigo preservado)
+        if ("user_branding" in data) {
+          if (data.user_branding) {
+            localStorage.setItem(keyUser(), JSON.stringify(data.user_branding));
+          } else {
+            // servidor sem tema pessoal: se este aparelho tem um tema legado
+            // (era só-local), sobe pro banco UMA vez — vira "por usuário"
+            const legacy = readJson(keyUser());
+            if (legacy) {
+              fetch(API_BASE + "/branding", {
+                method: "POST",
+                headers: authHeaders({ "Content-Type": "application/json" }),
+                body: JSON.stringify(Object.assign({ scope: "user" }, legacy)),
+              }).catch(() => { });
+            }
+          }
+        }
         const eff = effectiveSaved();
         const cur = JSON.stringify(_effective);
         if (JSON.stringify(eff) !== cur) applyBranding(eff);
@@ -757,11 +808,11 @@
           ${admin ? `
           <div class="brd-scope" id="brdScope">
             <button data-s="company" class="${scope === "company" ? "brd-on" : ""}">Toda a empresa</button>
-            <button data-s="user" class="${scope === "user" ? "brd-on" : ""}">Só para mim (este aparelho)</button>
+            <button data-s="user" class="${scope === "user" ? "brd-on" : ""}">Só para mim (meu usuário)</button>
           </div>
           ${u.is_superuser ? `<div class="brd-field" id="brdCustWrap"><label>Cliente (ID) — superusuário</label>
             <input type="number" id="brdCustomer" value="${u.customer_id || 1}" min="1"></div>` : ""}
-          ` : `<p class="brd-hint" style="margin:2px 0 0;">Personalização pessoal — vale para você, neste aparelho.
+          ` : `<p class="brd-hint" style="margin:2px 0 0;">Personalização pessoal — fica no seu usuário e vale em qualquer aparelho.
                O padrão da empresa continua para os demais.</p>`}
         </div>
         <div class="brd-sec">
@@ -969,11 +1020,25 @@
       $("brdSave").disabled = true;
       $("brdStatus").textContent = "salvando…";
       if (scope === "user") {
+        // cache local primeiro (boot sem flash e funciona mesmo offline)…
         localStorage.setItem(keyUser(), JSON.stringify(body));
         applyBranding(body);
-        $("brdStatus").textContent = "salvo ✓ — pessoal, neste aparelho";
-        $("brdSave").disabled = false;
         dirty = false;
+        // …e persiste no banco: o tema segue o usuário em qualquer aparelho
+        fetch(API_BASE + "/branding", {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(Object.assign({ scope: "user" }, body)),
+        })
+          .then((r) => {
+            $("brdStatus").textContent = r.ok
+              ? "salvo ✓ — no seu usuário, vale em qualquer aparelho"
+              : "salvo neste aparelho ✓ — não sincronizou com o servidor";
+          })
+          .catch(() => {
+            $("brdStatus").textContent = "salvo neste aparelho ✓ — sem conexão com o servidor";
+          })
+          .finally(() => { $("brdSave").disabled = false; });
         return;
       }
       if (u.is_superuser && $("brdCustomer")) body.customer_id = parseInt($("brdCustomer").value, 10);
@@ -986,7 +1051,17 @@
         .then(({ ok, j }) => {
           if (!ok) throw new Error((j && j.error) || "erro ao salvar");
           const mine = !body.customer_id || body.customer_id === u.customer_id;
-          if (mine) { localStorage.setItem(keyCompany(), JSON.stringify(body)); localStorage.removeItem(keyUser()); }
+          if (mine) {
+            localStorage.setItem(keyCompany(), JSON.stringify(body));
+            localStorage.removeItem(keyUser());
+            // tema da empresa passa a valer pro admin: apaga o pessoal dele
+            // também no banco (senão o pessoal antigo volta em outro aparelho)
+            fetch(API_BASE + "/branding", {
+              method: "POST",
+              headers: authHeaders({ "Content-Type": "application/json" }),
+              body: JSON.stringify({ scope: "user", reset: true }),
+            }).catch(() => { });
+          }
           $("brdStatus").textContent = mine ? "salvo ✓ — vale para toda a empresa"
                                             : "salvo ✓ no cliente " + body.customer_id;
           dirty = false;
@@ -996,10 +1071,30 @@
         .finally(() => { $("brdSave").disabled = false; });
     });
 
+    // pós-restauração: painel tem que ESPELHAR o estado restaurado, senão os
+    // inputs seguem com o tema antigo e qualquer mexida re-aplica ele inteiro
+    function syncPanelTo(b) {
+      const t0 = THEMES[0]; // AIOTI padrão
+      setInputs(b || { app_name: null, logo_data: null, robot_skin: "default", texts: {},
+        colors: { primary: t0.primary, accent: t0.accent, bg: t0.bg, bg2: t0.bg2, alarm: t0.alarm, layout: "default" } });
+      applied = JSON.stringify(draft());
+      hist = [];
+      $("brdUndo").disabled = true;
+      try { markThemes(); } catch { }
+    }
+
     $("brdReset").addEventListener("click", () => {
       if (scope === "user") {
         localStorage.removeItem(keyUser());
-        applyBranding(readJson(keyCompany()));
+        // apaga também no banco (senão volta no próximo login/aparelho)
+        fetch(API_BASE + "/branding", {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ scope: "user", reset: true }),
+        }).catch(() => { });
+        const company = readJson(keyCompany());
+        applyBranding(company);
+        syncPanelTo(company);
         $("brdStatus").textContent = "voltou ao padrão da empresa";
         dirty = false;
         return;
@@ -1015,8 +1110,12 @@
         .then((r) => { if (!r.ok) throw new Error("erro"); })
         .then(() => {
           localStorage.removeItem(keyCompany());
-          applyBranding(readJson(keyUser()));
-          $("brdStatus").textContent = "tema padrão AIOTI restaurado";
+          const mine = readJson(keyUser());
+          applyBranding(mine);
+          syncPanelTo(mine);
+          $("brdStatus").textContent = mine
+            ? "tema da empresa restaurado — sua personalização pessoal continua valendo"
+            : "tema padrão AIOTI restaurado";
           dirty = false;
         })
         .catch(() => { $("brdStatus").textContent = "não consegui restaurar — tente de novo"; });

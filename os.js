@@ -185,7 +185,9 @@ function initUser() {
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     if (typeof logout === "function") logout()
     else {
-      localStorage.clear()
+      // so remove a sessao — clear() apagava personalizacao pessoal (branding),
+      // preferencias de som/avisos e caches de todos os usuarios deste aparelho
+      localStorage.removeItem("user")
       window.location = "index.html"
     }
   })
@@ -2008,7 +2010,8 @@ function bindWizard() {
     document.getElementById("alreadyDoneCheck")?.classList.toggle("checked", KB.alreadyDoneChecked)
     document.getElementById("radioGroupNormal")?.classList.toggle("hidden", KB.alreadyDoneChecked)
     document.getElementById("radioGroupDone")?.classList.toggle("hidden", !KB.alreadyDoneChecked)
-    document.getElementById("responsavelGroup")?.classList.toggle("hidden", !KB.alreadyDoneChecked)
+    // responsavel fica sempre visivel; so vira OBRIGATORIO quando "ja realizada"
+    document.getElementById("responsavelLabel")?.classList.toggle("required", KB.alreadyDoneChecked)
   })
 
   document.getElementById("f-plant")?.addEventListener("change", (e) => {
@@ -2112,7 +2115,7 @@ function resetWizard() {
   document.getElementById("failureFields")?.classList.add("hidden")
   document.getElementById("radioGroupNormal")?.classList.remove("hidden")
   document.getElementById("radioGroupDone")?.classList.add("hidden")
-  document.getElementById("responsavelGroup")?.classList.add("hidden")
+  document.getElementById("responsavelLabel")?.classList.remove("required")
   document.getElementById("assetSelected")?.classList.add("hidden")
   document.getElementById("assetSearchBtn")?.classList.remove("hidden")
 
