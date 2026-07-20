@@ -9,7 +9,16 @@ function _getUserRole() {
 }
 function _canSendCommand() {
   if (typeof canSendCommand === "function") return canSendCommand();
-  const r = _getUserRole();
+  let u = {};
+  try { u = JSON.parse(localStorage.getItem("user") || "{}"); } catch { u = {}; }
+  // Espelha o backend can_send_command: superuser OU permissao especifica.
+  // (superuser tem role_key null -> nao pode depender so de role_key)
+  if (u.is_superuser === true || u.is_superuser === "true") return true;
+  const p = (u && typeof u.permissions === "object" && u.permissions) ? u.permissions : {};
+  const hasPerm = (k) => p[k] === true || p[k] === "true";
+  if (hasPerm("admin_customer") || hasPerm("remote_command") || hasPerm("device_command")) return true;
+  // Fallback por role_key (compatibilidade)
+  const r = u.role_key || "viewer";
   return ["superuser", "operator", "admin_customer"].includes(r);
 }
 
