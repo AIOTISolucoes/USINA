@@ -65,7 +65,7 @@ async function login(username, password) {
     throw new Error(data.error || "Erro ao autenticar");
   }
 
-  return data.user;
+  return data; // { ok, token, user }
 }
 
 // ============================================================
@@ -87,7 +87,8 @@ form.addEventListener("submit", async (e) => {
   try {
     setLoading(true);
 
-    const user = await login(username, password);
+    const data = await login(username, password);
+    const user = data.user;
 
     // 🔐 NORMALIZAÇÃO DO USUÁRIO
     const normalizedUser = {
@@ -96,7 +97,10 @@ form.addEventListener("submit", async (e) => {
       customer_id: user.customer_id,
       is_superuser: user.is_superuser === true || user.is_superuser === 1,
       role_key: user.role_key || "viewer",
-      permissions: user.permissions || {}
+      permissions: user.permissions || {},
+      // token de sessão assinado — prova de identidade nos endpoints
+      // sensíveis (gestão de usuários); null enquanto a Lambda antiga estiver no ar
+      token: data.token || null
     };
 
     // 🔥 AQUI É ONDE O LOGIN "FICA SALVO"

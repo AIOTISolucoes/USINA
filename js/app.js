@@ -57,6 +57,7 @@ function apiFetch(path, options = {}) {
   if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
   if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
   if (user.username) headers["X-Username"] = user.username;
+  if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
 
   return fetch(`${API_BASE}${path}`, {
     ...options,
