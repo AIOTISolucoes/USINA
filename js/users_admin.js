@@ -84,6 +84,7 @@
       .ua-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
       .ua-toolbar select{background:rgba(255,255,255,.05);border:1px solid rgba(57,229,140,.25);
         color:inherit;border-radius:8px;padding:6px 10px;font-size:.8rem;}
+      .ua-toolbar select option,.ua-field select option{background:#0d1f17;color:#e6f2ea;}
       .ua-btn{border:1px solid rgba(57,229,140,.35);background:rgba(57,229,140,.12);
         color:var(--accent,#39e58c);border-radius:8px;padding:7px 14px;font-size:.8rem;
         cursor:pointer;font-weight:600;}
@@ -257,8 +258,14 @@
     try {
       const res = await api("/plants");
       const arr = Array.isArray(res) ? res : (res.plants || res.items || []);
-      S.plants = arr.map(p => ({ id: p.id, name: p.name || p.plant_name || `Usina ${p.id}`,
-        customer_id: p.customer_id })).filter(p => p.id != null);
+      S.plants = arr.map(p => {
+        const id = p.power_plant_id ?? p.id;
+        return {
+          id,
+          name: p.display_name || p.power_plant_name || p.name || p.plant_name || `Usina ${id}`,
+          customer_id: p.customer_id
+        };
+      }).filter(p => p.id != null);
     } catch { S.plants = []; }
   }
 
