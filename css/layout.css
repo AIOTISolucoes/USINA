@@ -3060,6 +3060,47 @@ tbody tr:hover td {
 .clp-diag-json pre::-webkit-scrollbar-thumb { background: rgba(96,165,250,0.30); border-radius: 8px; }
 .clp-diag-json pre::-webkit-scrollbar-thumb:hover { background: rgba(96,165,250,0.50); }
 
+/* Aba "Envio de configurações" (admin) — publica JSON no gateway via MQTT */
+.clp-diag-cfg { margin-top: 12px; border: 1px solid rgba(57,229,140,0.25); border-radius: 10px; background: rgba(13,32,24,0.35); }
+.clp-diag-cfg summary {
+  cursor: pointer; padding: 11px 13px;
+  font-size: 12px; font-weight: 700; color: #7ee0aa;
+  list-style: none; display: flex; align-items: center; gap: 7px;
+  border-radius: 10px; user-select: none;
+}
+.clp-diag-cfg summary::-webkit-details-marker { display: none; }
+.clp-diag-cfg summary::after {
+  content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+  font-size: 9px; margin-left: auto; color: rgba(126,224,170,0.55);
+  transition: transform 0.18s ease-out;
+}
+.clp-diag-cfg[open] summary::after { transform: rotate(180deg); }
+.clp-diag-cfg summary:hover { background: rgba(57,229,140,0.06); }
+.clp-cfg-inner { padding: 4px 13px 14px; display: flex; flex-direction: column; gap: 7px; }
+.clp-cfg-hint { margin: 2px 0 4px; font-size: 11px; line-height: 1.4; color: #8aaea0; }
+.clp-cfg-label { font-size: 10.5px; font-weight: 700; color: #9adbb8; text-transform: uppercase; letter-spacing: .03em; }
+.clp-cfg-input, .clp-cfg-area {
+  width: 100%; box-sizing: border-box; padding: 8px 10px;
+  background: rgba(2,10,7,0.6); border: 1px solid rgba(57,229,140,0.2); border-radius: 8px;
+  color: #d8f2e4; font-size: 12px; font-family: 'JetBrains Mono', monospace;
+}
+.clp-cfg-area { resize: vertical; min-height: 96px; line-height: 1.45; }
+.clp-cfg-input:focus, .clp-cfg-area:focus { outline: none; border-color: rgba(57,229,140,0.55); }
+.clp-cfg-auth { display: flex; gap: 7px; }
+.clp-cfg-auth .clp-cfg-input { flex: 1; }
+.clp-cfg-btn {
+  margin-top: 3px; align-self: flex-start; cursor: pointer;
+  padding: 9px 16px; border-radius: 8px; border: 1px solid rgba(57,229,140,0.4);
+  background: rgba(57,229,140,0.12); color: #bdf2d6; font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 7px; transition: background .15s;
+}
+.clp-cfg-btn:hover { background: rgba(57,229,140,0.22); }
+.clp-cfg-result { font-size: 11.5px; min-height: 16px; }
+.clp-cfg-result code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #bdf2d6; word-break: break-all; }
+.clp-cfg-ok  { color: #7ee0aa; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.clp-cfg-err { color: #ffb4b4; display: inline-flex; align-items: center; gap: 6px; }
+.clp-cfg-wait { color: #9adbb8; display: inline-flex; align-items: center; gap: 6px; }
+
 /* Mobile / PWA: modal vira bottom-sheet (mais cara de app) */
 @media (max-width: 640px) {
   .clp-diag-overlay { padding: 0; align-items: flex-end; }

@@ -5605,6 +5605,22 @@ function renderStringsGrid(gridEl, payload) {
     return;
   }
 
+  // Última atualização das strings — elas têm cadência própria (~5 min, pipeline
+  // separado do inversor); mostrar o timestamp evita achar que a string travou.
+  const _strTimestamps = strings
+    .map(s => (s && s.last_ts) ? new Date(s.last_ts).getTime() : NaN)
+    .filter(t => !Number.isNaN(t));
+  if (_strTimestamps.length) {
+    const _latest = Math.max(..._strTimestamps);
+    const _ageSec = Math.max(0, Math.round((Date.now() - _latest) / 1000));
+    const _lbl = document.createElement("div");
+    _lbl.className = "strings-updated-row";
+    _lbl.style.gridColumn = "1 / -1";
+    _lbl.title = `Última leitura das strings: ${new Date(_latest).toLocaleString("pt-BR")}`;
+    _lbl.innerHTML = `<i class="fa-regular fa-clock"></i> Strings atualizadas ${_formatThermalAge(_ageSec)}`;
+    gridEl.appendChild(_lbl);
+  }
+
   const isEffectiveEnabled = (str) => {
     const disabledByPref = isDisabledPref(inverterRealId, str.string_index);
     return disabledByPref ? false : !!str.enabled;

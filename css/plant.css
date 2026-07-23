@@ -1152,6 +1152,21 @@ body::after{
   padding: 12px 12px 10px;
 }
 
+/* Rótulo "Strings atualizadas há X" — cadência própria (~5 min) das strings */
+.strings-updated-row{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .72rem;
+  color: rgba(154, 219, 184, .7);
+  padding: 2px 2px 4px;
+  letter-spacing: .01em;
+}
+.strings-updated-row i{
+  font-size: .7rem;
+  opacity: .8;
+}
+
 /* =========================================================
    STRING CARDS (base dashboard)
 ========================================================= */

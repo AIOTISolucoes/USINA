@@ -5308,6 +5308,8 @@ function openClpDiagModal(plantId, plantName) {
     document.body.appendChild(ov);
   }
   ov.classList.remove("hidden");
+  ov.dataset.plantId = plantId != null ? String(plantId) : "";
+  ov.dataset.plantName = plantName || "";
   ov.innerHTML = `
     <div class="clp-diag-modal" role="dialog" aria-label="Diagnóstico de conexão do CLP">
       <div class="clp-diag-head">
@@ -5397,7 +5399,76 @@ function _renderClpDiag(ov, data) {
       `</details>`;
   }
 
+  // Aba "Envio de configurações" (admin) — publica JSON no tópico exclusivo do
+  // gateway da usina via MQTT. Fase 1: teste manual (Igor define o JSON padrão).
+  if (data.is_admin) {
+    const _pid = ov.dataset.plantId || "";
+    html += `
+      <details class="clp-diag-cfg">
+        <summary><i class="fa-solid fa-gears"></i> Envio de configurações (admin)</summary>
+        <div class="clp-cfg-inner">
+          <p class="clp-cfg-hint">Publica um JSON de configuração no tópico exclusivo do gateway desta usina (MQTT). Deixe o tópico vazio para usar o padrão.</p>
+          <label class="clp-cfg-label">Tópico do gateway</label>
+          <input id="clpCfgTopic" class="clp-cfg-input" placeholder="padrão: dev/write/UFV/&lt;usina&gt;/config" autocomplete="off" spellcheck="false">
+          <label class="clp-cfg-label">Configuração (JSON)</label>
+          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="6" placeholder='{ "device": "inversor", "marca": "...", "registers": [ ... ] }' spellcheck="false"></textarea>
+          <div class="clp-cfg-auth">
+            <input id="clpCfgUser" class="clp-cfg-input" placeholder="usuário" autocomplete="off">
+            <input id="clpCfgPass" class="clp-cfg-input" type="password" placeholder="senha" autocomplete="new-password">
+          </div>
+          <button class="clp-cfg-btn" onclick="_clpSendConfig('${_pid}')"><i class="fa-solid fa-satellite-dish"></i> Publicar no gateway</button>
+          <div id="clpCfgResult" class="clp-cfg-result"></div>
+        </div>
+      </details>`;
+  }
+
   body.innerHTML = html;
+}
+
+// Publica o JSON de configuração no tópico exclusivo do gateway (MQTT).
+// Re-valida usuário+senha operacional no backend (mesma segurança do comando remoto).
+function _clpSendConfig(plantId) {
+  const topicEl = document.getElementById("clpCfgTopic");
+  const payEl   = document.getElementById("clpCfgPayload");
+  const userEl  = document.getElementById("clpCfgUser");
+  const passEl  = document.getElementById("clpCfgPass");
+  const resEl   = document.getElementById("clpCfgResult");
+  if (!payEl || !resEl) return;
+
+  const topic      = ((topicEl && topicEl.value) || "").trim();
+  const rawPayload = (payEl.value || "").trim();
+  const username   = ((userEl && userEl.value) || "").trim();
+  const password   = (passEl && passEl.value) || "";
+
+  if (!rawPayload) { resEl.innerHTML = `<span class="clp-cfg-err">Cole o JSON de configuração.</span>`; return; }
+  if (!username || !password) { resEl.innerHTML = `<span class="clp-cfg-err">Informe usuário e senha.</span>`; return; }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawPayload);
+  } catch (e) {
+    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> JSON inválido: ${_clpEsc(e.message)}</span>`;
+    return;
+  }
+
+  resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> Publicando...</span>`;
+  apiFetch(`/plants/${plantId}/clp/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, payload, username, password }),
+  })
+    .then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    })
+    .then((d) => {
+      resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> Publicado em <code>${_clpEsc(d.mqtt_topic)}</code></span>`;
+      if (passEl) passEl.value = "";
+    })
+    .catch((err) => {
+      resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
+    });
 }
 
 function renderPortfolioCards(plants) {
