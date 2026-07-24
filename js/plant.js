@@ -4601,7 +4601,7 @@ function renderHeaderSummary() {
   elCapacity.textContent = `${asNumber(PLANT_STATE.capacity_percent).toFixed(1)} %`;
   if (elCapacityAc) {
     const ac = PLANT_STATE.capacity_ac;
-    elCapacityAc.textContent = ac != null && ac > 0 ? `${Number(ac).toFixed(1)} kWp` : "—";
+    elCapacityAc.textContent = ac != null && ac > 0 ? `${Number(ac).toFixed(1)} kW` : "—";
   }
 }
 
@@ -5894,7 +5894,17 @@ function renderDailyChart() {
   const canvas = document.getElementById("plantMainChart");
   if (!canvas || !DAILY?.labels?.length) return;
   const ratedPower = asNumber(PLANT_STATE.rated_power_kwp, 0);
-  const powerAxisMax = ratedPower > 0 ? Math.ceil(ratedPower) : 1250;
+  // TESTE (supervisor 24/07 — só Pedra Branca / plant 18): o eixo da potência
+  // fecha na Capacity AC (kW) e o da irradiância no máximo do sensor
+  // (1500 W/m²). Antes os DOIS eixos usavam o rated DC (kWp) → a irradiância
+  // (pico real ~1285 hoje) ficava esmagada num eixo que ia até 3248. Se validar,
+  // estende para as outras usinas.
+  const _isPedraBrancaTest = String(PLANT_ID) === "18";
+  const _capAcKw = asNumber(PLANT_STATE.capacity_ac, 0);
+  const powerAxisMax = (_isPedraBrancaTest && _capAcKw > 0)
+    ? Math.ceil(_capAcKw)
+    : (ratedPower > 0 ? Math.ceil(ratedPower) : 1250);
+  const irrAxisMax = _isPedraBrancaTest ? 1500 : powerAxisMax;
 
   const ctx = canvas.getContext("2d");
 
@@ -6039,7 +6049,7 @@ function renderDailyChart() {
         yIrr: {
           position: "right",
           min: 0,
-          max: powerAxisMax,
+          max: irrAxisMax,
           ticks: { color: "#ffd84d", callback: v => `${v} W/m²` },
           grid: { drawOnChartArea: false }
         }
@@ -8518,6 +8528,26 @@ function _plantReportDownloadCsv(data) {
   a.click(); URL.revokeObjectURL(url);
 }
 
+// Rasteriza o relatório da usina limitando o canvas: scale fixo 2 num relatório comprido estoura o
+// teto de área do navegador (Safari/iOS ~16 Mpx) → toDataURL vazio → jsPDF "Incomplete or corrupt
+// PNG file". Reduz a escala p/ caber, com fallback JPEG e erro claro em último caso.
+async function _pdfRenderCanvasPlant(bodyEl) {
+  const cw = bodyEl.scrollWidth || bodyEl.clientWidth || 1;
+  const ch = bodyEl.scrollHeight || bodyEl.clientHeight || 1;
+  const MAX_DIM = 8000, MAX_AREA = 24 * 1024 * 1024;
+  let scale = Math.min(2, MAX_DIM / cw, MAX_DIM / ch, Math.sqrt(MAX_AREA / (cw * ch)));
+  if (!isFinite(scale) || scale <= 0) scale = 1;
+  scale = Math.max(0.5, scale);
+  const canvas = await html2canvas(bodyEl, { backgroundColor: "#1a1d23", scale, scrollY: 0, scrollX: 0, windowHeight: ch + 200 });
+  let imgData = canvas.toDataURL("image/png");
+  let imgFmt = "PNG";
+  if (!imgData || imgData.length < 1000) { imgData = canvas.toDataURL("image/jpeg", 0.92); imgFmt = "JPEG"; }
+  if (!imgData || imgData.length < 1000) {
+    throw new Error("relatório grande demais para o navegador gerar de uma vez. Tente reduzir o período ou gerar por seção.");
+  }
+  return { canvas, imgData, imgFmt };
+}
+
 async function _pdfCaptureFullPlant(bodyEl, panelEl, filename, orientation) {
   const overlay = document.createElement("div");
   overlay.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;font-size:14px;color:#39e58c;font-family:'Inter',sans-serif;";
@@ -8532,13 +8562,12 @@ async function _pdfCaptureFullPlant(bodyEl, panelEl, filename, orientation) {
     if (typeof html2canvas === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
     if (typeof jspdf === "undefined" && typeof jsPDF === "undefined") { const sc = document.createElement("script"); sc.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"; document.head.appendChild(sc); await new Promise((r, j) => { sc.onload = r; sc.onerror = j; }); }
     const JP = (typeof jsPDF !== "undefined") ? jsPDF : (typeof jspdf !== "undefined" ? jspdf.jsPDF : window.jspdf.jsPDF);
-    const canvas = await html2canvas(bodyEl, { backgroundColor: "#1a1d23", scale: 2, scrollY: 0, scrollX: 0, windowHeight: bodyEl.scrollHeight + 200 });
-    const imgData = canvas.toDataURL("image/png");
+    const { canvas, imgData, imgFmt } = await _pdfRenderCanvasPlant(bodyEl);
     const pdf = new JP({ orientation: orientation || "landscape", unit: "mm", format: "a4" });
     const pW = pdf.internal.pageSize.getWidth(), pH = pdf.internal.pageSize.getHeight(), m = 10, uW = pW - 2 * m;
     const imgH = (canvas.height / canvas.width) * uW;
     let yOff = 0;
-    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, "PNG", m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text(window.__BRANDING_PDF_FOOTER || "Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
+    while (yOff < imgH) { if (yOff > 0) pdf.addPage(); pdf.addImage(imgData, imgFmt, m, m - yOff, uW, imgH); pdf.setFontSize(8); pdf.setTextColor(150); pdf.text(window.__BRANDING_PDF_FOOTER || "Gerado automaticamente pela plataforma AIOTI Solar SCADA", pW / 2, pH - 5, { align: "center" }); yOff += pH - 2 * m; }
     pdf.save(filename);
   } catch (e) { console.error("[PDF]", e); alert("Erro ao gerar PDF: " + e.message); }
   finally { bodyEl.style.overflow = sO; bodyEl.style.maxHeight = sMH; bodyEl.style.height = sH; if (panelEl) { panelEl.style.height = sPH; panelEl.style.overflow = ""; } overlay.remove(); }
