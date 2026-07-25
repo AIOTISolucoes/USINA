@@ -5418,27 +5418,57 @@ function _renderClpDiag(ov, data) {
       `</details>`;
   }
 
-  // Aba "Envio de configurações" (admin) — publica JSON no tópico exclusivo do
-  // gateway da usina via MQTT. Fase 1: teste manual (Igor define o JSON padrão).
+  // Aba "Configuração do gateway" (admin) — edita o JSON de config da usina,
+  // salva no banco e publica como TRANSAÇÃO V2 (begin/put/validate/commit).
   if (data.is_admin) {
     const _pid = ov.dataset.plantId || "";
+    const gc = data.gateway_config || null;
+    const last = data.gateway_config_last_sent || null;
+    _CLP_CFG_SAVED = gc && gc.config && typeof gc.config === "object" ? gc.config : null;
+
+    const savedInfo = gc
+      ? `Salva em ${_clpEsc(new Date(gc.updated_at).toLocaleString("pt-BR"))}` +
+        (gc.updated_by ? ` por ${_clpEsc(gc.updated_by)}` : "")
+      : "Nenhuma configuração salva ainda.";
+    const lastInfo = last
+      ? `Último envio: ${_clpEsc(new Date(last.sent_at).toLocaleString("pt-BR"))} · ` +
+        `${last.entity_count || 0} entidades · CRC ${_clpEsc(last.crc32 || "—")}` +
+        (last.sent_by_username ? ` · ${_clpEsc(last.sent_by_username)}` : "")
+      : "";
+
     html += `
       <details class="clp-diag-cfg">
-        <summary><i class="fa-solid fa-gears"></i> Envio de configurações (admin)</summary>
+        <summary><i class="fa-solid fa-gears"></i> Configuração do gateway (admin)</summary>
         <div class="clp-cfg-inner">
-          <p class="clp-cfg-hint">Publica um JSON de configuração no tópico exclusivo do gateway desta usina (MQTT). Deixe o tópico vazio para usar o padrão.</p>
-          <label class="clp-cfg-label">Tópico do gateway</label>
-          <input id="clpCfgTopic" class="clp-cfg-input" placeholder="padrão: dev/write/UFV/&lt;usina&gt;/config" autocomplete="off" spellcheck="false">
+          <p class="clp-cfg-hint">
+            A configuração é enviada pelo protocolo V2 do gateway: ela é quebrada em entidades
+            (begin, um put por entidade, validate e commit). Nada chega aos equipamentos antes do
+            commit. Acompanhe o resultado no tópico <code>.../gateway/configuration/feedback</code>.
+          </p>
+          <div class="clp-cfg-meta">${savedInfo}${lastInfo ? `<br>${lastInfo}` : ""}</div>
           <label class="clp-cfg-label">
             Configuração (JSON)
-            <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">carregar modelo padrão</button>
+            <span>
+              <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">modelo padrão</button>
+              <button type="button" class="clp-cfg-tpl" onclick="_clpCfgPreview('${_pid}')">pré-visualizar envio</button>
+            </span>
           </label>
-          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="6" placeholder='{ "channels": [ ... ], "commands": [ ... ] }' spellcheck="false"></textarea>
+          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="10" spellcheck="false"
+            placeholder='{ "plant": {...}, "channels": [...], "templates": [...], "devices": [...] }'>${
+              _CLP_CFG_SAVED ? _clpEsc(JSON.stringify(_CLP_CFG_SAVED, null, 2)) : ""
+            }</textarea>
+          <div class="clp-cfg-preview" id="clpCfgPreview"></div>
+          <button class="clp-cfg-btn clp-cfg-btn--ghost" onclick="_clpCfgSave('${_pid}')">
+            <i class="fa-solid fa-floppy-disk"></i> Salvar no banco
+          </button>
+          <p class="clp-cfg-hint">Para publicar no gateway, confirme com o seu usuário e senha:</p>
           <div class="clp-cfg-auth">
             <input id="clpCfgUser" class="clp-cfg-input" placeholder="usuário" autocomplete="off">
             <input id="clpCfgPass" class="clp-cfg-input" type="password" placeholder="senha" autocomplete="new-password">
           </div>
-          <button class="clp-cfg-btn" onclick="_clpSendConfig('${_pid}')"><i class="fa-solid fa-satellite-dish"></i> Publicar no gateway</button>
+          <button class="clp-cfg-btn" onclick="_clpSendConfig('${_pid}')">
+            <i class="fa-solid fa-satellite-dish"></i> Publicar no gateway
+          </button>
           <div id="clpCfgResult" class="clp-cfg-result"></div>
         </div>
       </details>`;
@@ -5487,6 +5517,97 @@ const CLP_CONFIG_TEMPLATE = {
   commands: []
 };
 
+let _CLP_CFG_SAVED = null;
+
+function _clpCfgRead() {
+  const el = document.getElementById("clpCfgPayload");
+  const raw = (el && el.value || "").trim();
+  if (!raw) throw new Error("Cole ou carregue a configuração.");
+  return JSON.parse(raw);
+}
+
+// Monta a transação V2 com o emissor oficial do gateway (js/gateway_v2.js) e
+// mostra o que seria publicado, sem mandar nada.
+function _clpCfgBuild(plantId) {
+  if (typeof buildPublications !== "function") {
+    throw new Error("emissor do gateway não carregado (js/gateway_v2.js)");
+  }
+  const cfg = _clpCfgRead();
+  const usina = _clpCfgPlantSegment(plantId, cfg);
+  const rid = "cfg-" + Date.now();
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  return {
+    cfg,
+    rid,
+    txn: buildPublications(cfg, rid, { usina, originUser: user.username || "plataforma" }),
+  };
+}
+
+// O segmento do tópico é o NOME da usina no cadastro (a ingestão casa exato).
+function _clpCfgPlantSegment(plantId, cfg) {
+  const card = document.querySelector(`.plant-card[data-plant-id="${plantId}"]`);
+  const fromCard = card && (card.dataset.plantTopicName || card.dataset.plantName);
+  const fromCfg = cfg && ((cfg.plant && cfg.plant.id) || (cfg.general && cfg.general.plant_id));
+  const seg = String(fromCfg || fromCard || "").trim();
+  if (!seg) throw new Error('defina "plant".id no JSON com o nome da usina do tópico');
+  return seg;
+}
+
+function _clpCfgPreview(plantId) {
+  const box = document.getElementById("clpCfgPreview");
+  if (!box) return;
+  try {
+    const { txn } = _clpCfgBuild(plantId);
+    const porEntidade = {};
+    txn.publications.filter(p => p.kind === "put")
+      .forEach(p => { porEntidade[p.entity] = (porEntidade[p.entity] || 0) + 1; });
+    const resumo = Object.entries(porEntidade)
+      .map(([k, v]) => `${v}× ${_clpEsc(k)}`).join(" · ") || "nenhuma entidade";
+    const alerta = txn.issues.length
+      ? `<div class="clp-cfg-err">${txn.issues.length} entidade(s) passam do limite de 511 bytes e ` +
+        `seriam recusadas: ${_clpEsc(txn.issues.join("; "))}</div>`
+      : "";
+    box.innerHTML =
+      `<div><strong>${txn.publications.length}</strong> mensagens · ` +
+      `<strong>${txn.entityCount}</strong> entidades · CRC <code>${_clpEsc(txn.crc)}</code></div>` +
+      `<div class="clp-cfg-preview-list">${resumo}</div>` +
+      `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` + alerta;
+  } catch (e) {
+    box.innerHTML = `<div class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(e.message || e)}</div>`;
+  }
+}
+
+// Salva o JSON no banco sem publicar (não pede senha: não toca no equipamento).
+function _clpCfgSave(plantId) {
+  const res = document.getElementById("clpCfgResult");
+  if (!res) return;
+  let cfg;
+  try {
+    cfg = _clpCfgRead();
+  } catch (e) {
+    res.innerHTML = `<span class="clp-cfg-err">JSON inválido: ${_clpEsc(e.message)}</span>`;
+    return;
+  }
+  res.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> Salvando...</span>`;
+  apiFetch(`/plants/${plantId}/clp/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "save", config: cfg }),
+  })
+    .then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    })
+    .then(() => {
+      _CLP_CFG_SAVED = cfg;
+      res.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> Configuração salva no banco.</span>`;
+    })
+    .catch((err) => {
+      res.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
+    });
+}
+
 function _clpLoadConfigTemplate() {
   const el = document.getElementById("clpCfgPayload");
   const res = document.getElementById("clpCfgResult");
@@ -5498,37 +5619,60 @@ function _clpLoadConfigTemplate() {
   }
 }
 
-// Publica o JSON de configuração no tópico exclusivo do gateway (MQTT).
+// Publica a configuração como TRANSAÇÃO V2 (begin → put ×N → validate → commit).
+// O emissor roda aqui no front (js/gateway_v2.js, cópia da referência do Igor) e o
+// backend só repassa as mensagens ao IoT Core, na ordem e sem reserializar — o
+// gateway confere CRC32/SHA-256 sobre os bytes exatos.
 // Re-valida usuário+senha operacional no backend (mesma segurança do comando remoto).
 function _clpSendConfig(plantId) {
-  const topicEl = document.getElementById("clpCfgTopic");
-  const payEl   = document.getElementById("clpCfgPayload");
   const userEl  = document.getElementById("clpCfgUser");
   const passEl  = document.getElementById("clpCfgPass");
   const resEl   = document.getElementById("clpCfgResult");
-  if (!payEl || !resEl) return;
+  if (!resEl) return;
 
-  const topic      = ((topicEl && topicEl.value) || "").trim();
-  const rawPayload = (payEl.value || "").trim();
-  const username   = ((userEl && userEl.value) || "").trim();
-  const password   = (passEl && passEl.value) || "";
-
-  if (!rawPayload) { resEl.innerHTML = `<span class="clp-cfg-err">Cole o JSON de configuração.</span>`; return; }
-  if (!username || !password) { resEl.innerHTML = `<span class="clp-cfg-err">Informe usuário e senha.</span>`; return; }
-
-  let payload;
-  try {
-    payload = JSON.parse(rawPayload);
-  } catch (e) {
-    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> JSON inválido: ${_clpEsc(e.message)}</span>`;
+  const username = ((userEl && userEl.value) || "").trim();
+  const password = (passEl && passEl.value) || "";
+  if (!username || !password) {
+    resEl.innerHTML = `<span class="clp-cfg-err">Informe usuário e senha.</span>`;
     return;
   }
 
-  resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> Publicando...</span>`;
+  let built;
+  try {
+    built = _clpCfgBuild(plantId);
+  } catch (e) {
+    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(e.message || e)}</span>`;
+    return;
+  }
+
+  const { cfg, rid, txn } = built;
+  if (txn.issues.length) {
+    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ` +
+      `${txn.issues.length} entidade(s) passam de 511 bytes — o gateway recusaria. ` +
+      `Veja a pré-visualização.</span>`;
+    return;
+  }
+
+  if (!confirm(
+    `Publicar ${txn.publications.length} mensagens (${txn.entityCount} entidades) no gateway?\n\n` +
+    `Tópico: ${txn.topics.chunk}\n\n` +
+    `O commit aplica a configuração no equipamento.`
+  )) return;
+
+  resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
+    `Publicando ${txn.publications.length} mensagens...</span>`;
+
   apiFetch(`/plants/${plantId}/clp/config`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, payload, username, password }),
+    body: JSON.stringify({
+      publications: txn.publications,
+      request_id: rid,
+      crc: txn.crc,
+      config: cfg,
+      username,
+      password,
+    }),
   })
     .then(async (r) => {
       const d = await r.json().catch(() => ({}));
@@ -5536,7 +5680,10 @@ function _clpSendConfig(plantId) {
       return d;
     })
     .then((d) => {
-      resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> Publicado em <code>${_clpEsc(d.mqtt_topic)}</code></span>`;
+      resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
+        `${d.published} mensagens publicadas (${d.entities} entidades). ` +
+        `O resultado chega em <code>${_clpEsc(d.feedback_topic || "")}</code>: ` +
+        `espere received=${d.entities}, applied=1, rejected=0.</span>`;
       if (passEl) passEl.value = "";
     })
     .catch((err) => {

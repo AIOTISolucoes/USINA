@@ -3107,6 +3107,31 @@ tbody tr:hover td {
 .clp-cfg-err { color: #ffb4b4; display: inline-flex; align-items: center; gap: 6px; }
 .clp-cfg-wait { color: #9adbb8; display: inline-flex; align-items: center; gap: 6px; }
 
+/* Tela de configuração do gateway (protocolo V2) */
+.clp-cfg-meta {
+  font-size: 11px; line-height: 1.5; color: #8aaea0;
+  padding: 7px 9px; border-radius: 7px;
+  background: rgba(2,10,7,0.45); border: 1px solid rgba(57,229,140,0.10);
+}
+.clp-cfg-label > span { display: inline-flex; gap: 10px; }
+.clp-cfg-btn--ghost {
+  background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); color: #d8f2e4;
+}
+.clp-cfg-btn--ghost:hover { background: rgba(255,255,255,0.09); }
+.clp-cfg-preview:empty { display: none; }
+.clp-cfg-preview {
+  font-size: 11.5px; line-height: 1.6; color: #d8f2e4;
+  padding: 9px 10px; border-radius: 8px;
+  background: rgba(2,10,7,0.55); border: 1px solid rgba(57,229,140,0.16);
+}
+.clp-cfg-preview code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #bdf2d6; }
+.clp-cfg-preview-list { color: #9adbb8; }
+.clp-cfg-preview-topic {
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+  color: #8aaea0; word-break: break-all; margin-top: 3px;
+}
+.clp-cfg-preview .clp-cfg-err { margin-top: 6px; align-items: flex-start; }
+
 /* Mobile / PWA: modal vira bottom-sheet (mais cara de app) */
 @media (max-width: 640px) {
   .clp-diag-overlay { padding: 0; align-items: flex-end; }
