@@ -5858,6 +5858,37 @@ function renderSummaryStrip() {
 // ======================================================
 let dailyChartInstance = null;
 let monthlyChartInstance = null;
+
+// Irradiância acumulada por dia no gráfico mensal (pedido do supervisor 24/07):
+// opção DESLIGADA por padrão pra não poluir; só dias CONCLUÍDOS entram na curva.
+let MONTHLY_SHOW_IRR = (() => {
+  try { return localStorage.getItem("plant_monthly_irr") === "1"; } catch (e) { return false; }
+})();
+
+function ensureMonthlyIrrToggle(hasIrrData) {
+  const row = document.querySelector(".plant-chart-card--monthly .monthly-legend-row");
+  if (!row) return;
+  let btn = document.getElementById("monthlyIrrToggle");
+  if (!hasIrrData) {
+    if (btn) btn.remove();
+    return;
+  }
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "monthlyIrrToggle";
+    btn.className = "monthly-leg monthly-irr-toggle";
+    btn.innerHTML = '<span class="monthly-leg-sq monthly-leg-sq--irr"></span> Irradiância (kWh/m²)';
+    btn.title = "Mostrar/ocultar a irradiação acumulada de cada dia concluído";
+    btn.addEventListener("click", () => {
+      MONTHLY_SHOW_IRR = !MONTHLY_SHOW_IRR;
+      try { localStorage.setItem("plant_monthly_irr", MONTHLY_SHOW_IRR ? "1" : "0"); } catch (e) {}
+      renderMonthlyChart();
+    });
+    row.appendChild(btn);
+  }
+  btn.classList.toggle("is-on", MONTHLY_SHOW_IRR);
+}
 let LAST_INVERTER_ROWS_SIGNATURE = "";
 let DAILY_CHART_ZOOM_WIRED = false;
 
@@ -6275,6 +6306,23 @@ function renderMonthlyChart() {
   const deviation = totalExpectedToDate > 0 ? ((totalReal - totalExpectedToDate) / totalExpectedToDate) * 100 : 0;
   const elapsedDays = currentIndex + 1;
 
+  // Irradiação acumulada por dia (kWh/m², vem do fct via /energy/monthly).
+  // Só dia CONCLUÍDO (antes de hoje) e com leitura entra; o dia corrente ficaria
+  // "pela metade" e enganaria (combinado com o supervisor 24/07).
+  const irrRaw = Array.isArray(MONTHLY?.irradiation_daily_kwh_m2)
+    ? MONTHLY.irradiation_daily_kwh_m2.map(v => Number(v) || 0)
+    : [];
+  const irrDaily = daily.map((_, idx) => {
+    const v = Number(irrRaw[idx] ?? 0);
+    return (idx < currentIndex && v > 0) ? v : null;
+  });
+  const hasIrrData = irrDaily.some(v => v != null);
+  const irrMaxVal = hasIrrData ? Math.max(...irrDaily.filter(v => v != null)) : 0;
+  // Igor: "normalmente ela oscila até 10 kWh/m²" — teto mínimo 8 pro eixo não degenerar
+  const irrAxisMaxMonthly = Math.max(8, Math.ceil(irrMaxVal * 1.15));
+  ensureMonthlyIrrToggle(hasIrrData);
+  const showIrr = hasIrrData && MONTHLY_SHOW_IRR;
+
   const kpiRealEl = document.getElementById("monthlyKpiReal");
   const kpiExpectedMtdEl = document.getElementById("monthlyKpiExpectedMtd");
   const kpiExpEl = document.getElementById("monthlyKpiExp");
@@ -6356,6 +6404,26 @@ function renderMonthlyChart() {
     barPercentage: hasDailyExpected ? 0.70 : 0.92,
     order: 1
   });
+  if (showIrr) {
+    datasets.push({
+      label: "Irradiância",
+      type: "line",
+      data: irrDaily,
+      yAxisID: "yIrr",
+      borderColor: "rgba(255,214,102,.45)",
+      backgroundColor: "rgba(255,214,102,.85)",
+      pointBackgroundColor: "rgba(255,214,102,.85)",
+      pointBorderColor: "rgba(255,214,102,.95)",
+      pointRadius: isMobile ? 2 : 3,
+      pointHoverRadius: 5,
+      borderWidth: 1.5,
+      borderDash: [4, 4],
+      tension: 0.3,
+      spanGaps: true,
+      fill: false,
+      order: 2
+    });
+  }
 
   monthlyChartInstance = new Chart(ctx, {
     type: "bar",
@@ -6385,6 +6453,10 @@ function renderMonthlyChart() {
               const expected = Number(expectedPadded[idx] ?? 0);
               if (item?.dataset?.label === "Esperado") return `Esperado: ${formatKwhPtBR(expected)}`;
               if (item?.dataset?.label === "Real") return `Real: ${formatKwhPtBR(real)}`;
+              if (item?.dataset?.label === "Irradiância") {
+                const v = item?.parsed?.y;
+                return v == null ? "" : `Irradiância: ${Number(v).toFixed(2).replace(".", ",")} kWh/m²`;
+              }
               return "";
             },
             afterBody: (items) => {
@@ -6433,7 +6505,21 @@ function renderMonthlyChart() {
             color: "rgba(255,255,255,0.04)",
             drawBorder: false
           }
-        }
+        },
+        ...(showIrr ? {
+          yIrr: {
+            position: "right",
+            beginAtZero: true,
+            max: irrAxisMaxMonthly,
+            ticks: {
+              color: "rgba(255,214,102,.75)",
+              maxTicksLimit: 5,
+              padding: 6,
+              font: { size: tickFontSize }
+            },
+            grid: { display: false, drawBorder: false }
+          }
+        } : {})
       }
     }
   });
