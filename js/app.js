@@ -9274,6 +9274,13 @@ async function initPlatformUpdates() {
 
   if (closeBtn) closeBtn.addEventListener("click", () => { panel.style.display = "none"; });
 
+  const prefsBtn = document.getElementById("notifPrefsBtn");
+  if (prefsBtn) prefsBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.style.display = "none";
+    openNotifCenter();
+  });
+
   document.addEventListener("click", (e) => {
     if (panel.style.display !== "none" && !e.target.closest(".notif-bell-wrap")) {
       panel.style.display = "none";
@@ -9384,6 +9391,209 @@ function _notifEsc(s) {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
+}
+
+// =============================================================================
+// CENTRAL DE NOTIFICAÇÕES (engrenagem do sininho)
+// Pedido do supervisor 24/07: os alarmes notificam demais (tracker chega a
+// 150x/dia, falha de comunicação direto) — cada usuário escolhe o que quer
+// receber no celular/PC. Grava em app_user.notif_prefs (mesmo jsonb do robô,
+// com merge no backend) e o push_notifier.py da EC2 respeita na hora de enviar.
+// =============================================================================
+let _NOTIF_ALARM_CATALOG = [];
+
+function _notifCenterPrefs() {
+  const p = _robotGetNotifPrefs();
+  return {
+    push_muted: p.push_muted === true,
+    push_min_severity: p.push_min_severity || "all",
+    push_disabled_codes: Array.isArray(p.push_disabled_codes) ? p.push_disabled_codes.map(String) : [],
+  };
+}
+
+async function openNotifCenter() {
+  document.getElementById("notifCenterOverlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "notifCenterOverlay";
+  overlay.className = "notif-center-overlay";
+  overlay.innerHTML = `
+    <div class="notif-center-box" role="dialog" aria-modal="true" aria-labelledby="notifCenterTitle">
+      <div class="notif-center-head">
+        <h3 id="notifCenterTitle"><i class="fa-solid fa-bell"></i> Central de notificações</h3>
+        <button type="button" class="notif-center-close" aria-label="Fechar">&times;</button>
+      </div>
+      <p class="notif-center-hint">
+        Vale para as notificações no celular e no computador (push) deste usuário,
+        em qualquer aparelho.
+      </p>
+
+      <label class="notif-center-switch">
+        <input type="checkbox" id="notifCenterMuted">
+        <span>Pausar todas as notificações de alarme</span>
+      </label>
+
+      <div class="notif-center-field">
+        <span>Notificar a partir de</span>
+        <select id="notifCenterSeverity">
+          <option value="all">Todos os alarmes</option>
+          <option value="medium">Média e alta</option>
+          <option value="high">Somente alta</option>
+        </select>
+      </div>
+
+      <div class="notif-center-list-head">
+        <span>Alarmes que notificam</span>
+        <div class="notif-center-bulk">
+          <button type="button" id="notifCenterAll">Marcar todos</button>
+          <button type="button" id="notifCenterNone">Limpar</button>
+        </div>
+      </div>
+      <input type="search" id="notifCenterSearch" class="notif-center-search" placeholder="Buscar alarme…">
+      <div class="notif-center-list" id="notifCenterList">
+        <p class="notif-center-loading">Carregando alarmes…</p>
+      </div>
+
+      <div class="notif-center-feedback" id="notifCenterFeedback"></div>
+      <div class="notif-center-actions">
+        <button type="button" class="notif-center-btn" id="notifCenterCancel">Cancelar</button>
+        <button type="button" class="notif-center-btn primary" id="notifCenterSave">Salvar</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector(".notif-center-close")?.addEventListener("click", close);
+  document.getElementById("notifCenterCancel")?.addEventListener("click", close);
+  document.getElementById("notifCenterSave")?.addEventListener("click", _notifCenterSave);
+
+  const cur = _notifCenterPrefs();
+  const mutedEl = document.getElementById("notifCenterMuted");
+  const sevEl = document.getElementById("notifCenterSeverity");
+  if (mutedEl) mutedEl.checked = cur.push_muted;
+  if (sevEl) sevEl.value = cur.push_min_severity;
+
+  document.getElementById("notifCenterSearch")?.addEventListener("input", (e) => {
+    _notifCenterRenderList(String(e.target.value || "").toLowerCase());
+  });
+  document.getElementById("notifCenterAll")?.addEventListener("click", () => {
+    overlay.querySelectorAll(".notif-center-code").forEach(c => { c.checked = true; });
+  });
+  document.getElementById("notifCenterNone")?.addEventListener("click", () => {
+    overlay.querySelectorAll(".notif-center-code").forEach(c => { c.checked = false; });
+  });
+
+  await _notifCenterLoadCatalog();
+}
+
+async function _notifCenterLoadCatalog() {
+  const list = document.getElementById("notifCenterList");
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const r = await apiFetch("/users/notif-prefs", { headers: { "X-Username": user.username || "" } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const payload = d?.body ? (typeof d.body === "string" ? JSON.parse(d.body) : d.body) : d;
+    _NOTIF_ALARM_CATALOG = Array.isArray(payload?.alarm_catalog) ? payload.alarm_catalog : [];
+    if (payload?.prefs && typeof payload.prefs === "object") {
+      localStorage.setItem(ROBOT_NOTIF_PREFS_KEY, JSON.stringify(payload.prefs));
+      const cur = _notifCenterPrefs();
+      const mutedEl = document.getElementById("notifCenterMuted");
+      const sevEl = document.getElementById("notifCenterSeverity");
+      if (mutedEl) mutedEl.checked = cur.push_muted;
+      if (sevEl) sevEl.value = cur.push_min_severity;
+    }
+  } catch (e) {
+    console.warn("[notif-center] catálogo indisponível:", e);
+    if (list) {
+      list.innerHTML = '<p class="notif-center-loading">Não foi possível carregar a lista de alarmes. ' +
+        'As demais opções continuam valendo.</p>';
+    }
+    return;
+  }
+  _notifCenterRenderList("");
+}
+
+function _notifCenterRenderList(filter) {
+  const list = document.getElementById("notifCenterList");
+  if (!list) return;
+  if (!_NOTIF_ALARM_CATALOG.length) {
+    list.innerHTML = '<p class="notif-center-loading">Nenhum alarme no catálogo.</p>';
+    return;
+  }
+  // Preserva o que já estiver marcado na tela antes de redesenhar (busca)
+  const onScreen = new Map();
+  list.querySelectorAll(".notif-center-code").forEach(c => onScreen.set(c.value, c.checked));
+  const disabled = new Set(_notifCenterPrefs().push_disabled_codes);
+
+  const rows = _NOTIF_ALARM_CATALOG.filter(a => {
+    if (!filter) return true;
+    const hay = `${a.code} ${a.description_pt || ""}`.toLowerCase();
+    return hay.includes(filter);
+  });
+
+  if (!rows.length) {
+    list.innerHTML = '<p class="notif-center-loading">Nenhum alarme encontrado.</p>';
+    return;
+  }
+
+  list.innerHTML = rows.map(a => {
+    const code = String(a.code);
+    const checked = onScreen.has(code) ? onScreen.get(code) : !disabled.has(code);
+    const sev = String(a.severity || "").toLowerCase();
+    const sevClass = sev === "high" ? "high" : (sev === "medium" ? "medium" : "low");
+    return `<label class="notif-center-row">
+      <input type="checkbox" class="notif-center-code" value="${_notifEsc(code)}" ${checked ? "checked" : ""}>
+      <span class="notif-center-sev ${sevClass}"></span>
+      <span class="notif-center-desc">${_notifEsc(a.description_pt || code)}</span>
+      <span class="notif-center-codetag">${_notifEsc(code)}</span>
+    </label>`;
+  }).join("");
+}
+
+async function _notifCenterSave() {
+  const fb = document.getElementById("notifCenterFeedback");
+  const overlay = document.getElementById("notifCenterOverlay");
+  if (!overlay) return;
+
+  // Desmarcado = não notifica. Só conta o que está na tela + o que o filtro
+  // da busca escondeu (esses seguem com a preferência anterior).
+  const shown = new Set();
+  const disabled = new Set(_notifCenterPrefs().push_disabled_codes);
+  overlay.querySelectorAll(".notif-center-code").forEach(c => {
+    shown.add(c.value);
+    if (c.checked) disabled.delete(c.value);
+    else disabled.add(c.value);
+  });
+
+  const prefs = {
+    ..._robotGetNotifPrefs(),
+    push_muted: document.getElementById("notifCenterMuted")?.checked === true,
+    push_min_severity: document.getElementById("notifCenterSeverity")?.value || "all",
+    push_disabled_codes: Array.from(disabled),
+  };
+
+  if (fb) { fb.textContent = "Salvando…"; fb.className = "notif-center-feedback"; }
+  try {
+    localStorage.setItem(ROBOT_NOTIF_PREFS_KEY, JSON.stringify(prefs));
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const r = await apiFetch("/users/notif-prefs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Username": user.username || "" },
+      body: JSON.stringify({ prefs, merge: true }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (fb) { fb.textContent = "✓ Preferências salvas."; fb.className = "notif-center-feedback ok"; }
+    setTimeout(() => overlay.remove(), 800);
+  } catch (e) {
+    if (fb) {
+      fb.textContent = "Salvo neste aparelho, mas o servidor não respondeu — as notificações " +
+        "no celular podem continuar como estavam.";
+      fb.className = "notif-center-feedback err";
+    }
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

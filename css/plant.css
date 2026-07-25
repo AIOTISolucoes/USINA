@@ -505,6 +505,121 @@ body::after{
   border-color: rgba(255,214,102,.55);
 }
 
+/* Limites dos eixos do gráfico diário (admin, 24/07) */
+.daily-limits-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(4,10,8,.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 16px;
+}
+
+.daily-limits-box{
+  width: min(420px, 100%);
+  background: #0b1a14;
+  border: 1px solid rgba(57,229,140,.18);
+  border-radius: 14px;
+  padding: 18px 20px 16px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.55);
+}
+
+.daily-limits-head{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-limits-head h3{
+  margin: 0;
+  font-size: 15px;
+  color: #e9fff3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.daily-limits-close{
+  background: none;
+  border: none;
+  color: rgba(233,255,243,.55);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.daily-limits-close:hover{ color: #e9fff3; }
+
+.daily-limits-hint{
+  margin: 10px 0 16px;
+  font-size: 12px;
+  color: rgba(233,255,243,.62);
+  line-height: 1.45;
+}
+
+.daily-limits-field{
+  display: block;
+  margin-bottom: 12px;
+}
+
+.daily-limits-field span{
+  display: block;
+  font-size: 12px;
+  color: rgba(233,255,243,.78);
+  margin-bottom: 5px;
+}
+
+.daily-limits-field input{
+  width: 100%;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(57,229,140,.18);
+  border-radius: 8px;
+  color: #e9fff3;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 8px 10px;
+}
+.daily-limits-field input:focus{
+  outline: none;
+  border-color: rgba(57,229,140,.45);
+}
+
+.daily-limits-feedback{
+  min-height: 16px;
+  font-size: 12px;
+  color: rgba(233,255,243,.65);
+}
+.daily-limits-feedback.ok{ color: #7FD055; }
+.daily-limits-feedback.err{ color: #ff6b6b; }
+
+.daily-limits-actions{
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.daily-limits-btn{
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 8px;
+  color: #e9fff3;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 16px;
+  cursor: pointer;
+}
+.daily-limits-btn:hover{ background: rgba(255,255,255,.09); }
+.daily-limits-btn.primary{
+  background: rgba(57,229,140,.16);
+  border-color: rgba(57,229,140,.42);
+  color: #7FD055;
+}
+.daily-limits-btn.primary:hover{ background: rgba(57,229,140,.24); }
+
 .monthly-progress-wrap{
   margin-top: 10px;
   background: rgba(255,255,255,.04);

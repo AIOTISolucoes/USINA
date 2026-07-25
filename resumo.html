@@ -97,7 +97,15 @@
               <div class="notif-panel" id="notifPanel" style="display:none">
                 <div class="notif-panel-header">
                   <span>Atualizações</span>
-                  <button class="notif-panel-close" id="notifPanelClose" type="button"><i class="fa-solid fa-xmark"></i></button>
+                  <div class="notif-panel-head-actions">
+                    <button class="notif-panel-close" id="notifPrefsBtn" type="button"
+                            title="Configurar notificações" aria-label="Configurar notificações">
+                      <i class="fa-solid fa-gear"></i>
+                    </button>
+                    <button class="notif-panel-close" id="notifPanelClose" type="button" aria-label="Fechar">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
+                  </div>
                 </div>
                 <div class="notif-panel-list" id="notifPanelList">
                   <p class="notif-empty">Nenhuma atualização.</p>
