@@ -5983,7 +5983,7 @@ function openDailyLimitsModal() {
       <label class="daily-limits-field">
         <span>Eixo da potência (kW)</span>
         <input type="number" id="dailyLimitPower" min="1" step="1"
-               placeholder="automático — ${autoPower}"
+               placeholder="automático: ${autoPower}"
                value="${curPower != null ? curPower : ""}">
       </label>
       <label class="daily-limits-field">

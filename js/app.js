@@ -5441,16 +5441,20 @@ function _renderClpDiag(ov, data) {
         <summary><i class="fa-solid fa-gears"></i> Configuração do gateway (admin)</summary>
         <div class="clp-cfg-inner">
           <p class="clp-cfg-hint">
-            A configuração é enviada pelo protocolo V2 do gateway: ela é quebrada em entidades
-            (begin, um put por entidade, validate e commit). Nada chega aos equipamentos antes do
-            commit. Acompanhe o resultado no tópico <code>.../gateway/configuration/feedback</code>.
+            A configuração vai para o gateway quebrada em várias mensagens, e nada chega aos
+            equipamentos antes da última delas. Se alguma for recusada, a configuração antiga
+            continua valendo.
           </p>
           <div class="clp-cfg-meta">${savedInfo}${lastInfo ? `<br>${lastInfo}` : ""}</div>
           <label class="clp-cfg-label">
             Configuração (JSON)
             <span>
-              <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">modelo padrão</button>
-              <button type="button" class="clp-cfg-tpl" onclick="_clpCfgPreview('${_pid}')">pré-visualizar envio</button>
+              <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">
+                <i class="fa-solid fa-file-code" aria-hidden="true"></i> Modelo padrão
+              </button>
+              <button type="button" class="clp-cfg-tpl" onclick="_clpCfgPreview('${_pid}')">
+                <i class="fa-solid fa-eye" aria-hidden="true"></i> Pré-visualizar
+              </button>
             </span>
           </label>
           <textarea id="clpCfgPayload" class="clp-cfg-area" rows="10" spellcheck="false"
@@ -5614,8 +5618,8 @@ function _clpLoadConfigTemplate() {
   if (!el) return;
   el.value = JSON.stringify(CLP_CONFIG_TEMPLATE, null, 2);
   if (res) {
-    res.innerHTML = `<span class="clp-cfg-wait">Modelo carregado. Confira os valores antes de publicar — ` +
-      `as seções que vierem depois de "commands" ainda precisam ser completadas.</span>`;
+    res.innerHTML = `<span class="clp-cfg-wait">Modelo carregado. Confira os valores antes de publicar. ` +
+      `As seções que vierem depois de "commands" ainda precisam ser completadas.</span>`;
   }
 }
 
@@ -5648,7 +5652,7 @@ function _clpSendConfig(plantId) {
   const { cfg, rid, txn } = built;
   if (txn.issues.length) {
     resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ` +
-      `${txn.issues.length} entidade(s) passam de 511 bytes — o gateway recusaria. ` +
+      `${txn.issues.length} entidade(s) passam de 511 bytes e o gateway recusaria. ` +
       `Veja a pré-visualização.</span>`;
     return;
   }
