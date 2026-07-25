@@ -5895,16 +5895,16 @@ function renderDailyChart() {
   if (!canvas || !DAILY?.labels?.length) return;
   const ratedPower = asNumber(PLANT_STATE.rated_power_kwp, 0);
   // TESTE (supervisor 24/07 — só Pedra Branca / plant 18): o eixo da potência
-  // fecha na Capacity AC (kW) e o da irradiância no máximo do sensor
-  // (1500 W/m²). Antes os DOIS eixos usavam o rated DC (kWp) → a irradiância
-  // (pico real ~1285 hoje) ficava esmagada num eixo que ia até 3248. Se validar,
-  // estende para as outras usinas.
+  // fecha na Capacity AC (kW) e o da irradiância em 1300 W/m² (supervisor pediu
+  // 1300 em 24/07 à noite; pico real ~1285). Antes os DOIS eixos usavam o rated
+  // DC (kWp) → a irradiância ficava esmagada num eixo que ia até 3248. Se
+  // validar, estende para as outras usinas.
   const _isPedraBrancaTest = String(PLANT_ID) === "18";
   const _capAcKw = asNumber(PLANT_STATE.capacity_ac, 0);
   const powerAxisMax = (_isPedraBrancaTest && _capAcKw > 0)
     ? Math.ceil(_capAcKw)
     : (ratedPower > 0 ? Math.ceil(ratedPower) : 1250);
-  const irrAxisMax = _isPedraBrancaTest ? 1500 : powerAxisMax;
+  const irrAxisMax = _isPedraBrancaTest ? 1300 : powerAxisMax;
 
   const ctx = canvas.getContext("2d");
 
