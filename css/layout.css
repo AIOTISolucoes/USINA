@@ -3078,7 +3078,13 @@ tbody tr:hover td {
 .clp-diag-cfg summary:hover { background: rgba(57,229,140,0.06); }
 .clp-cfg-inner { padding: 4px 13px 14px; display: flex; flex-direction: column; gap: 7px; }
 .clp-cfg-hint { margin: 2px 0 4px; font-size: 11px; line-height: 1.4; color: #8aaea0; }
-.clp-cfg-label { font-size: 10.5px; font-weight: 700; color: #9adbb8; text-transform: uppercase; letter-spacing: .03em; }
+.clp-cfg-label { font-size: 10.5px; font-weight: 700; color: #9adbb8; text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.clp-cfg-tpl {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: #39e58c; font-family: inherit; font-size: 10px; font-weight: 600;
+  text-transform: none; letter-spacing: 0;
+}
+.clp-cfg-tpl:hover { text-decoration: underline; }
 .clp-cfg-input, .clp-cfg-area {
   width: 100%; box-sizing: border-box; padding: 8px 10px;
   background: rgba(2,10,7,0.6); border: 1px solid rgba(57,229,140,0.2); border-radius: 8px;

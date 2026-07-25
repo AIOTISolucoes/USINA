@@ -5429,8 +5429,11 @@ function _renderClpDiag(ov, data) {
           <p class="clp-cfg-hint">Publica um JSON de configuração no tópico exclusivo do gateway desta usina (MQTT). Deixe o tópico vazio para usar o padrão.</p>
           <label class="clp-cfg-label">Tópico do gateway</label>
           <input id="clpCfgTopic" class="clp-cfg-input" placeholder="padrão: dev/write/UFV/&lt;usina&gt;/config" autocomplete="off" spellcheck="false">
-          <label class="clp-cfg-label">Configuração (JSON)</label>
-          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="6" placeholder='{ "device": "inversor", "marca": "...", "registers": [ ... ] }' spellcheck="false"></textarea>
+          <label class="clp-cfg-label">
+            Configuração (JSON)
+            <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">carregar modelo padrão</button>
+          </label>
+          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="6" placeholder='{ "channels": [ ... ], "commands": [ ... ] }' spellcheck="false"></textarea>
           <div class="clp-cfg-auth">
             <input id="clpCfgUser" class="clp-cfg-input" placeholder="usuário" autocomplete="off">
             <input id="clpCfgPass" class="clp-cfg-input" type="password" placeholder="senha" autocomplete="new-password">
@@ -5442,6 +5445,57 @@ function _renderClpDiag(ov, data) {
   }
 
   body.innerHTML = html;
+}
+
+// Modelo de configuração do gateway enviado pelo Igor em 24/07 ("exatamente
+// esse vai ser o padrão"). O print do WhatsApp cortou depois de "commands" —
+// as chaves seguintes entram quando ele mandar o arquivo inteiro. Serve de
+// ponto de partida no textarea; o gateway é quem valida o conteúdo.
+const CLP_CONFIG_TEMPLATE = {
+  alarms: [],
+  auto_reclosing: {
+    allowed_protections: [],
+    allowed_schedule: {},
+    blocking_conditions: [],
+    delay_ms: 30000,
+    device_id: "",
+    enabled: false,
+    max_attempts: 0,
+    metadata: {},
+    require_communication: true,
+    require_voltage_normal: true,
+    retry_interval_ms: 60000,
+    stability_ms: 60000
+  },
+  channels: [
+    {
+      data_bits: 8,
+      enabled: false,
+      id: "tcp-inversores",
+      ip: "192.0.2.190",
+      metadata: {},
+      name: "Rede TCP dos inversores",
+      parity: "none",
+      poll_interval_ms: 1000,
+      port: 502,
+      retries: 1,
+      stop_bits: 1,
+      timeout_ms: 1000,
+      transport: "tcp"
+    }
+  ],
+  commands: []
+};
+
+function _clpLoadConfigTemplate() {
+  const el = document.getElementById("clpCfgPayload");
+  const res = document.getElementById("clpCfgResult");
+  if (!el) return;
+  el.value = JSON.stringify(CLP_CONFIG_TEMPLATE, null, 2);
+  if (res) {
+    res.innerHTML = `<span class="clp-cfg-wait">Modelo carregado. Confira os valores antes de publicar — ` +
+      `as seções que vierem depois de "commands" ainda precisam ser completadas.</span>`;
+  }
 }
 
 // Publica o JSON de configuração no tópico exclusivo do gateway (MQTT).
