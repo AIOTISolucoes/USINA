@@ -5666,35 +5666,35 @@ function _clpSendConfig(plantId) {
   _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl);
 }
 
-// Uma usina real gera centenas de mensagens (a Naturágua deu 433) e isso não
-// cabe numa chamada só: o API Gateway corta em ~29s. Então a transação vai em
-// lotes sequenciais, na ordem, e o backend publica cada lote assim que chega.
-const CLP_CFG_BATCH_SIZE = 100;
-
+// Manda a transação INTEIRA. Quem cuida do tempo é a API: ela publica o que
+// couber no orçamento dela e, se não terminar, responde `partial` com o índice
+// de onde continuar — aí a gente só reenvia o resto. Na maioria das usinas sai
+// numa chamada só.
 async function _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl) {
   const { cfg, rid, txn } = built;
   const pubs = txn.publications;
   const total = pubs.length;
-  const lotes = Math.ceil(total / CLP_CFG_BATCH_SIZE);
   let enviadas = 0;
+  let voltas = 0;
 
   try {
-    for (let i = 0; i < lotes; i++) {
-      const fatia = pubs.slice(i * CLP_CFG_BATCH_SIZE, (i + 1) * CLP_CFG_BATCH_SIZE);
-      const ultimo = i === lotes - 1;
+    while (enviadas < total) {
+      if (++voltas > 20) throw new Error("envio não terminou depois de 20 tentativas");
 
       resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
-        `Publicando ${enviadas}/${total} mensagens (lote ${i + 1} de ${lotes})...</span>`;
+        (enviadas
+          ? `Publicando... ${enviadas} de ${total} mensagens`
+          : `Publicando ${total} mensagens...`) + `</span>`;
 
       const r = await apiFetch(`/plants/${plantId}/clp/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          publications: fatia,
+          publications: pubs.slice(enviadas),
           request_id: rid,
           crc: txn.crc,
-          config: ultimo ? cfg : undefined,
-          final_batch: ultimo,
+          config: cfg,
+          final_batch: true,
           username,
           password,
         }),
@@ -5703,10 +5703,14 @@ async function _clpCfgPublishBatches(plantId, built, username, password, passEl,
       if (!r.ok || d.ok === false) {
         throw new Error(
           (d.error || `HTTP ${r.status}`) +
-          (enviadas ? ` (parou depois de ${enviadas} de ${total} mensagens; sem o commit o gateway não aplica nada)` : "")
+          (enviadas ? ` (parou em ${enviadas} de ${total} mensagens; sem o commit o gateway não aplica nada)` : "")
         );
       }
-      enviadas += fatia.length;
+
+      const publicadas = Number(d.published) || 0;
+      if (publicadas <= 0) throw new Error("a API não publicou nenhuma mensagem desta vez");
+      enviadas += publicadas;
+      if (!d.partial) break;
     }
 
     resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
