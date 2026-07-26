@@ -750,6 +750,22 @@
           <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
             <input type="checkbox" id="autoCfgTrigRelay" style="accent-color:#39e58c;"> Proteção do relé atuada (flags)
           </label>
+          <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.8);font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="autoCfgTrigAlarms" style="accent-color:#39e58c;"> Alarmes selecionados
+          </label>
+        </div>
+
+        <!-- seleção de QUAIS alarmes geram OS (aparece com o gatilho ligado) -->
+        <div id="autoAlarmBox" style="display:none;margin:10px 0 0 27px;border:1px dashed rgba(255,255,255,.12);border-radius:10px;padding:10px 12px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <span style="color:#9adbb8;font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:700;">Quais alarmes geram OS</span>
+            <span id="autoAlarmCount" style="color:rgba(255,255,255,.4);font-size:11px;"></span>
+            <span style="flex:1;"></span>
+            <button type="button" id="autoAlarmAll" style="background:none;border:none;color:#9adbb8;cursor:pointer;font-size:11px;">marcar todos</button>
+            <button type="button" id="autoAlarmNone" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:11px;">limpar</button>
+          </div>
+          <input type="text" id="autoAlarmSearch" placeholder="Buscar alarme..." style="width:100%;background:#0d1a14;border:1px solid rgba(57,229,140,.2);border-radius:8px;padding:7px 10px;color:#eafff3;font-size:12px;margin-bottom:8px;">
+          <div id="autoAlarmList" style="max-height:190px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;"></div>
         </div>
       </section>
 

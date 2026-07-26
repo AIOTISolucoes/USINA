@@ -3441,7 +3441,7 @@ function showToast(message, type = "success") {
 //  quem cria as OSs e o os_automator.py no cron da EC2)
 // =============================================================================
 
-const AUTO_OS = { config: null, plans: [], plantsLoaded: false, customerId: null, customersBound: false }
+const AUTO_OS = { config: null, plans: [], plantsLoaded: false, customerId: null, customersBound: false, alarmCatalog: [], alarmsBound: false }
 
 function autoOsShow(show) {
   const ov = document.getElementById("autoOsOverlay")
@@ -3503,8 +3503,69 @@ async function autoOsLoad() {
   set("autoCfgTrigShutdown", c.trigger_plant_shutdown)
   set("autoCfgTrigNoComm",   c.trigger_no_comm)
   set("autoCfgTrigRelay",    c.trigger_relay_flags)
+  set("autoCfgTrigAlarms",   c.trigger_alarms)
   set("autoCfgPreventive",   c.auto_preventive)
+  AUTO_OS.alarmCatalog = Array.isArray(data?.alarm_catalog) ? data.alarm_catalog : []
+  autoOsRenderAlarms()
   autoOsRenderPlans()
+}
+
+// lista de alarmes seleccionáveis do gatilho "Alarmes selecionados"
+function autoOsSelectedAlarms() {
+  return [...document.querySelectorAll("#autoAlarmList input[type=checkbox]:checked")].map(x => x.dataset.code)
+}
+
+function autoOsAlarmCount() {
+  const el = document.getElementById("autoAlarmCount")
+  if (el) el.textContent = `(${autoOsSelectedAlarms().length} de ${AUTO_OS.alarmCatalog.length} marcados)`
+}
+
+function autoOsRenderAlarms() {
+  const box  = document.getElementById("autoAlarmBox")
+  const list = document.getElementById("autoAlarmList")
+  const trig = document.getElementById("autoCfgTrigAlarms")
+  if (!box || !list || !trig) return
+
+  const selected = new Set(Array.isArray(AUTO_OS.config?.alarm_codes) ? AUTO_OS.config.alarm_codes : [])
+  if (!AUTO_OS.alarmCatalog.length) {
+    // Lambda antiga sem o catálogo: esconde o gatilho pra não salvar vazio
+    box.style.display = "none"
+    trig.closest("label").style.display = "none"
+    return
+  }
+  trig.closest("label").style.display = ""
+  box.style.display = trig.checked ? "" : "none"
+
+  list.innerHTML = AUTO_OS.alarmCatalog.map(a => `
+    <label style="display:flex;gap:8px;align-items:center;color:rgba(255,255,255,.75);font-size:12px;cursor:pointer;padding:3px 4px;border-radius:6px;" class="auto-alarm-item">
+      <input type="checkbox" data-code="${esc(a.code)}" ${selected.has(a.code) ? "checked" : ""} style="accent-color:#39e58c;">
+      <span style="flex:1;">${esc(a.description_pt || a.code)}</span>
+      <span style="color:rgba(255,255,255,.3);font-size:10.5px;font-family:monospace;">${esc(a.code)}</span>
+    </label>
+  `).join("")
+  list.querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", autoOsAlarmCount))
+  autoOsAlarmCount()
+
+  if (!AUTO_OS.alarmsBound) {
+    AUTO_OS.alarmsBound = true
+    trig.addEventListener("change", () => { box.style.display = trig.checked ? "" : "none" })
+    document.getElementById("autoAlarmSearch")?.addEventListener("input", (e) => {
+      const q = e.target.value.trim().toLowerCase()
+      list.querySelectorAll(".auto-alarm-item").forEach(item => {
+        item.style.display = !q || item.textContent.toLowerCase().includes(q) ? "" : "none"
+      })
+    })
+    document.getElementById("autoAlarmAll")?.addEventListener("click", () => {
+      list.querySelectorAll(".auto-alarm-item").forEach(item => {
+        if (item.style.display !== "none") item.querySelector("input").checked = true
+      })
+      autoOsAlarmCount()
+    })
+    document.getElementById("autoAlarmNone")?.addEventListener("click", () => {
+      list.querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = false })
+      autoOsAlarmCount()
+    })
+  }
 }
 
 function autoOsRenderPlans() {
@@ -3601,6 +3662,8 @@ function bindAutomationModal() {
             trigger_plant_shutdown: val("autoCfgTrigShutdown"),
             trigger_no_comm:        val("autoCfgTrigNoComm"),
             trigger_relay_flags:    val("autoCfgTrigRelay"),
+            trigger_alarms:         val("autoCfgTrigAlarms"),
+            alarm_codes:            autoOsSelectedAlarms(),
             auto_preventive:        val("autoCfgPreventive"),
           },
         }),
