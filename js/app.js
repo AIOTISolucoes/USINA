@@ -5663,36 +5663,60 @@ function _clpSendConfig(plantId) {
     `O commit aplica a configuração no equipamento.`
   )) return;
 
-  resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
-    `Publicando ${txn.publications.length} mensagens...</span>`;
+  _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl);
+}
 
-  apiFetch(`/plants/${plantId}/clp/config`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      publications: txn.publications,
-      request_id: rid,
-      crc: txn.crc,
-      config: cfg,
-      username,
-      password,
-    }),
-  })
-    .then(async (r) => {
+// Uma usina real gera centenas de mensagens (a Naturágua deu 433) e isso não
+// cabe numa chamada só: o API Gateway corta em ~29s. Então a transação vai em
+// lotes sequenciais, na ordem, e o backend publica cada lote assim que chega.
+const CLP_CFG_BATCH_SIZE = 100;
+
+async function _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl) {
+  const { cfg, rid, txn } = built;
+  const pubs = txn.publications;
+  const total = pubs.length;
+  const lotes = Math.ceil(total / CLP_CFG_BATCH_SIZE);
+  let enviadas = 0;
+
+  try {
+    for (let i = 0; i < lotes; i++) {
+      const fatia = pubs.slice(i * CLP_CFG_BATCH_SIZE, (i + 1) * CLP_CFG_BATCH_SIZE);
+      const ultimo = i === lotes - 1;
+
+      resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
+        `Publicando ${enviadas}/${total} mensagens (lote ${i + 1} de ${lotes})...</span>`;
+
+      const r = await apiFetch(`/plants/${plantId}/clp/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publications: fatia,
+          request_id: rid,
+          crc: txn.crc,
+          config: ultimo ? cfg : undefined,
+          final_batch: ultimo,
+          username,
+          password,
+        }),
+      });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status));
-      return d;
-    })
-    .then((d) => {
-      resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
-        `${d.published} mensagens publicadas (${d.entities} entidades). ` +
-        `O resultado chega em <code>${_clpEsc(d.feedback_topic || "")}</code>: ` +
-        `espere received=${d.entities}, applied=1, rejected=0.</span>`;
-      if (passEl) passEl.value = "";
-    })
-    .catch((err) => {
-      resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
-    });
+      if (!r.ok || d.ok === false) {
+        throw new Error(
+          (d.error || `HTTP ${r.status}`) +
+          (enviadas ? ` (parou depois de ${enviadas} de ${total} mensagens; sem o commit o gateway não aplica nada)` : "")
+        );
+      }
+      enviadas += fatia.length;
+    }
+
+    resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
+      `${enviadas} mensagens publicadas (${txn.entityCount} entidades). ` +
+      `O resultado chega em <code>${_clpEsc(txn.topics.feedback)}</code>: ` +
+      `espere received=${txn.entityCount}, applied=1, rejected=0.</span>`;
+    if (passEl) passEl.value = "";
+  } catch (err) {
+    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
+  }
 }
 
 function renderPortfolioCards(plants) {
