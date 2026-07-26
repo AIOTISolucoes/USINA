@@ -328,12 +328,20 @@ function buildPublications(cfg, rid, opts) {
   });
   pubs.push({ topic: txn.topics.request, payload: canon(txn.validate), kind: "validate" });
   pubs.push({ topic: txn.topics.request, payload: canon(txn.commit), kind: "commit" });
+
+  // Mensagem de abort da MESMA transacao: se o envio falhar no meio, ela
+  // descarta o staging do gateway na hora em vez de deixar ocupado ate o
+  // timeout. E o que a ferramenta de referencia faz no catch. Montada aqui
+  // porque o backend nao pode reimplementar o envelope canonico.
+  const abortMsg = makeMessage(rid, txn.specs.length + 3, "abort");
+
   return {
     publications: pubs,
     topics: txn.topics,
     crc: txn.crc,
     entityCount: txn.specs.length,
     issues: txn.issues,               // entidades que estouraram 511B/96 tokens
+    abort: { topic: txn.topics.request, payload: canon(abortMsg) },
   };
 }
 
