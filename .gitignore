@@ -1,0 +1,7 @@
+# lixo de ferramenta: o api2.py mora aqui por historico, mas quem roda ele e a
+# Lambda. py_compile local nao deve entrar no repo do GitHub Pages.
+__pycache__/
+*.pyc
+
+# screenshots de teste de UI
+/*.png
