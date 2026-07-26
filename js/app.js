@@ -5423,17 +5423,27 @@ function _renderClpDiag(ov, data) {
   if (data.is_admin) {
     const _pid = ov.dataset.plantId || "";
     const gc = data.gateway_config || null;
-    const last = data.gateway_config_last_sent || null;
     _CLP_CFG_SAVED = gc && gc.config && typeof gc.config === "object" ? gc.config : null;
+    _CLP_CFG_HISTORY = Array.isArray(data.gateway_config_history) ? data.gateway_config_history : [];
+    // o último envio é o primeiro do histórico; o campo separado é retrocompatibilidade
+    const last = data.gateway_config_last_sent || _CLP_CFG_HISTORY[0] || null;
 
     const savedInfo = gc
       ? `Salva em ${_clpEsc(new Date(gc.updated_at).toLocaleString("pt-BR"))}` +
-        (gc.updated_by ? ` por ${_clpEsc(gc.updated_by)}` : "")
+        (gc.updated_by ? ` por ${_clpEsc(gc.updated_by)}` : "") +
+        ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgRestoreSaved()">` +
+        `<i class="fa-solid fa-rotate-left"></i> Restaurar</button>` +
+        ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgDownload()">` +
+        `<i class="fa-solid fa-download"></i> Baixar</button>`
       : "Nenhuma configuração salva ainda.";
     const lastInfo = last
       ? `Último envio: ${_clpEsc(new Date(last.sent_at).toLocaleString("pt-BR"))} · ` +
         `${last.entity_count || 0} entidades · CRC ${_clpEsc(last.crc32 || "—")}` +
-        (last.sent_by_username ? ` · ${_clpEsc(last.sent_by_username)}` : "")
+        (last.sent_by_username ? ` · ${_clpEsc(last.sent_by_username)}` : "") +
+        (_CLP_CFG_HISTORY.length
+          ? ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgToggleHistory('${_pid}')">` +
+            `<i class="fa-solid fa-clock-rotate-left"></i> Histórico (${_CLP_CFG_HISTORY.length})</button>`
+          : "")
       : "";
 
     html += `
@@ -5446,6 +5456,7 @@ function _renderClpDiag(ov, data) {
             continua valendo.
           </p>
           <div class="clp-cfg-meta">${savedInfo}${lastInfo ? `<br>${lastInfo}` : ""}</div>
+          <div class="clp-cfg-history" id="clpCfgHistory"></div>
           <label class="clp-cfg-label">
             Configuração (JSON)
             <span>
@@ -5522,6 +5533,91 @@ const CLP_CONFIG_TEMPLATE = {
 };
 
 let _CLP_CFG_SAVED = null;
+let _CLP_CFG_HISTORY = [];
+
+// ---- Resgate da configuração -----------------------------------------------
+// Pedido do Igor 25/07: poder voltar para uma configuração que já funcionou.
+// A do banco é a "atual"; o histórico guarda o JSON de cada envio, então dá
+// para recuperar qualquer um deles se um envio novo der ruim.
+
+function _clpCfgRestoreSaved() {
+  const el = document.getElementById("clpCfgPayload");
+  const res = document.getElementById("clpCfgResult");
+  if (!el || !_CLP_CFG_SAVED) return;
+  if (el.value.trim() && !confirm("Substituir o que está na caixa pela configuração salva no banco?")) return;
+  el.value = JSON.stringify(_CLP_CFG_SAVED, null, 2);
+  if (res) res.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> Configuração salva recarregada.</span>`;
+}
+
+function _clpCfgDownload() {
+  let cfg;
+  try {
+    cfg = _clpCfgRead();
+  } catch (e) {
+    cfg = _CLP_CFG_SAVED;
+  }
+  if (!cfg) return;
+  const nome = `config-gateway-${(cfg.plant && cfg.plant.id) || "usina"}-${new Date().toISOString().slice(0, 10)}.json`;
+  const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = nome;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function _clpCfgToggleHistory(plantId) {
+  const box = document.getElementById("clpCfgHistory");
+  if (!box) return;
+  if (box.innerHTML.trim()) { box.innerHTML = ""; return; }
+
+  box.innerHTML = _CLP_CFG_HISTORY.map(h => {
+    const quando = h.sent_at ? new Date(h.sent_at).toLocaleString("pt-BR") : "—";
+    const btn = h.has_snapshot
+      ? `<button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgRestoreFromLog('${plantId}', ${h.id})">
+           <i class="fa-solid fa-rotate-left"></i> Usar esta
+         </button>`
+      : `<span class="clp-cfg-history-nosnap">sem cópia do JSON</span>`;
+    return `<div class="clp-cfg-history-item">
+      <div>
+        <strong>${_clpEsc(quando)}</strong> · ${h.entity_count || 0} entidades ·
+        CRC <code>${_clpEsc(h.crc32 || "—")}</code>
+        ${h.sent_by_username ? `· ${_clpEsc(h.sent_by_username)}` : ""}
+      </div>
+      ${btn}
+    </div>`;
+  }).join("");
+}
+
+function _clpCfgRestoreFromLog(plantId, logId) {
+  const res = document.getElementById("clpCfgResult");
+  const el = document.getElementById("clpCfgPayload");
+  if (!el) return;
+  if (el.value.trim() && !confirm("Substituir o que está na caixa por este envio anterior?")) return;
+
+  if (res) res.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> Recuperando...</span>`;
+  apiFetch(`/plants/${plantId}/clp/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "restore", log_id: logId }),
+  })
+    .then(async (r) => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    })
+    .then((d) => {
+      el.value = JSON.stringify(d.config, null, 2);
+      const quando = d.sent_at ? new Date(d.sent_at).toLocaleString("pt-BR") : "";
+      if (res) res.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
+        `Configuração de ${_clpEsc(quando)} carregada na caixa. ` +
+        `Confira e publique para aplicar no gateway.</span>`;
+      document.getElementById("clpCfgHistory").innerHTML = "";
+    })
+    .catch((err) => {
+      if (res) res.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
+    });
+}
 
 function _clpCfgRead() {
   const el = document.getElementById("clpCfgPayload");

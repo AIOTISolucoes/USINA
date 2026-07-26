@@ -3151,6 +3151,33 @@ tbody tr:hover td {
 }
 .clp-cfg-preview .clp-cfg-err { margin-top: 8px; align-items: flex-start; }
 
+/* Resgate: botões pequenos dentro da caixa de informação */
+.clp-cfg-tpl--mini {
+  min-height: 24px; padding: 2px 8px; font-size: 11px; vertical-align: middle;
+  margin-left: 4px;
+}
+.clp-cfg-history:empty { display: none; }
+.clp-cfg-history {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 190px; overflow-y: auto;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(2,10,7,0.55); border: 1px solid rgba(57,229,140,0.16);
+  scrollbar-width: thin; scrollbar-color: rgba(57,229,140,.25) transparent;
+}
+.clp-cfg-history-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px; color: #d8f2e4; line-height: 1.5;
+  padding: 5px 0;
+}
+.clp-cfg-history-item + .clp-cfg-history-item { border-top: 1px solid rgba(255,255,255,0.06); }
+.clp-cfg-history-item code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #bdf2d6; }
+.clp-cfg-history-nosnap { font-size: 11px; color: #8fb6a6; }
+
+@media (max-width: 640px) {
+  .clp-cfg-tpl--mini { min-height: 32px; padding: 4px 10px; flex: none; }
+}
+
 /* Mobile / PWA: alvo de toque de 44px nas ações secundárias */
 @media (max-width: 640px) {
   .clp-cfg-label { align-items: flex-start; }
