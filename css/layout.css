@@ -3151,6 +3151,12 @@ tbody tr:hover td {
 }
 .clp-cfg-preview .clp-cfg-err { margin-top: 8px; align-items: flex-start; }
 
+.clp-cfg-check {
+  display: flex; align-items: center; gap: 9px; cursor: pointer;
+  font-size: 12.5px; line-height: 1.45; color: #d8f2e4;
+}
+.clp-cfg-check input { accent-color: #39e58c; flex: 0 0 auto; }
+
 /* Resgate: botões pequenos dentro da caixa de informação */
 .clp-cfg-tpl--mini {
   min-height: 24px; padding: 2px 8px; font-size: 11px; vertical-align: middle;

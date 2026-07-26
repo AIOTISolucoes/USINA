@@ -5473,6 +5473,10 @@ function _renderClpDiag(ov, data) {
               _CLP_CFG_SAVED ? _clpEsc(JSON.stringify(_CLP_CFG_SAVED, null, 2)) : ""
             }</textarea>
           <div class="clp-cfg-preview" id="clpCfgPreview"></div>
+          <label class="clp-cfg-check" title="Template importado chega com o mapa não validado em campo; sem isso o gateway recusa a transação inteira">
+            <input type="checkbox" id="clpCfgAllowUnverified" checked>
+            <span>Aceitar mapa de template ainda não validado em campo</span>
+          </label>
           <button class="clp-cfg-btn clp-cfg-btn--ghost" onclick="_clpCfgSave('${_pid}')">
             <i class="fa-solid fa-floppy-disk"></i> Salvar no banco
           </button>
@@ -5632,15 +5636,38 @@ function _clpCfgBuild(plantId) {
   if (typeof buildPublications !== "function") {
     throw new Error("emissor do gateway não carregado (js/gateway_v2.js)");
   }
-  const cfg = _clpCfgRead();
+  const cfg = _clpCfgAplicaMapaNaoValidado(_clpCfgRead());
   const usina = _clpCfgPlantSegment(plantId, cfg);
-  const rid = "cfg-" + Date.now();
+  // request_id NOVO a cada envio: o gateway ignora um begin com id que ele já
+  // viu (idempotência), e aí o envio "some" sem erro nenhum. O sufixo aleatório
+  // cobre dois cliques dentro do mesmo milissegundo.
+  const rid = "cfg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   return {
     cfg,
     rid,
     txn: buildPublications(cfg, rid, { usina, originUser: user.username || "plataforma" }),
   };
+}
+
+// Template importado chega ao gateway com o mapa "não validado em campo", e a
+// validação recusa a transação inteira a não ser que o device permita. O campo
+// mora no metadata de cada device; quase nenhum JSON traz isso preenchido.
+function _clpCfgDevicesSemMapaLiberado(cfg) {
+  const devs = Array.isArray(cfg && cfg.devices) ? cfg.devices : [];
+  return devs.filter(d => !(d && d.metadata && d.metadata.allow_unverified_map === true)).length;
+}
+
+function _clpCfgAplicaMapaNaoValidado(cfg) {
+  const el = document.getElementById("clpCfgAllowUnverified");
+  if (!el || !el.checked || !Array.isArray(cfg.devices)) return cfg;
+  const copia = JSON.parse(JSON.stringify(cfg));
+  copia.devices.forEach(d => {
+    if (!d || typeof d !== "object") return;
+    if (!d.metadata || typeof d.metadata !== "object") d.metadata = {};
+    d.metadata.allow_unverified_map = true;
+  });
+  return copia;
 }
 
 // O segmento do tópico é o NOME da usina no cadastro (a ingestão casa exato).
@@ -5667,11 +5694,19 @@ function _clpCfgPreview(plantId) {
       ? `<div class="clp-cfg-err">${txn.issues.length} entidade(s) passam do limite de 511 bytes e ` +
         `seriam recusadas: ${_clpEsc(txn.issues.join("; "))}</div>`
       : "";
+    // Aviso do mapa não validado: é a recusa mais comum e não dá erro nenhum
+    // aqui — a transação sai inteira e o gateway rejeita no validate.
+    const semMapa = _clpCfgDevicesSemMapaLiberado(_clpCfgRead());
+    const avisoMapa = (semMapa && !document.getElementById("clpCfgAllowUnverified")?.checked)
+      ? `<div class="clp-cfg-err">${semMapa} equipamento(s) sem "mapa não validado" liberado. ` +
+        `Se o template for importado, o gateway recusa a configuração inteira. ` +
+        `Marque a opção abaixo ou valide o mapa em campo.</div>`
+      : "";
     box.innerHTML =
       `<div><strong>${txn.publications.length}</strong> mensagens · ` +
       `<strong>${txn.entityCount}</strong> entidades · CRC <code>${_clpEsc(txn.crc)}</code></div>` +
       `<div class="clp-cfg-preview-list">${resumo}</div>` +
-      `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` + alerta;
+      `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` + alerta + avisoMapa;
   } catch (e) {
     box.innerHTML = `<div class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(e.message || e)}</div>`;
   }
