@@ -3162,6 +3162,38 @@ tbody tr:hover td {
   min-height: 24px; padding: 2px 8px; font-size: 11px; vertical-align: middle;
   margin-left: 4px;
 }
+/* Resposta do gateway ao envio (tópico de feedback). Sem isto a tela só
+   sabia dizer "publicado", que não é a mesma coisa que "aplicado". */
+.clp-cfg-fb {
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(205,213,225,.22);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.clp-cfg-fb i { margin-right: 4px; }
+.clp-cfg-fb--ok {
+  border-color: rgba(57,229,140,.35);
+  background: rgba(57,229,140,.08);
+  color: #8ff0bd;
+}
+.clp-cfg-fb--erro {
+  border-color: rgba(255,107,107,.38);
+  background: rgba(255,107,107,.09);
+  color: #ffb3b3;
+}
+.clp-cfg-fb--mudo,
+.clp-cfg-fb--neutro {
+  background: rgba(205,213,225,.06);
+  color: var(--text-muted);
+}
+.clp-cfg-fb-msg {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  opacity: .85;
+}
+
 .clp-cfg-history:empty { display: none; }
 .clp-cfg-history {
   display: flex; flex-direction: column; gap: 4px;

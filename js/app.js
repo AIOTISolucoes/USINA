@@ -5456,6 +5456,7 @@ function _renderClpDiag(ov, data) {
             continua valendo.
           </p>
           <div class="clp-cfg-meta">${savedInfo}${lastInfo ? `<br>${lastInfo}` : ""}</div>
+          ${_clpCfgFeedbackHtml(data.gateway_config_feedback, last)}
           <div class="clp-cfg-history" id="clpCfgHistory"></div>
           <label class="clp-cfg-label">
             Configuração (JSON)
@@ -5661,6 +5662,39 @@ function _clpCfgBuild(plantId) {
 function _clpCfgDevicesSemMapaLiberado(cfg) {
   const devs = Array.isArray(cfg && cfg.devices) ? cfg.devices : [];
   return devs.filter(d => !(d && d.metadata && d.metadata.allow_unverified_map === true)).length;
+}
+
+// Resultado REAL do último envio, vindo do tópico de feedback do gateway
+// (IoT Rule -> app.gateway_config_feedback). Até 27/07 a tela dizia "publicado"
+// e ficava por isso mesmo, mesmo quando o CC100 recusava tudo em silêncio.
+// AUSÊNCIA de feedback também é diagnóstico: significa que o gateway não
+// respondeu nada — ou está fora do ar, ou o tópico não bate.
+function _clpCfgFeedbackHtml(lista, ultimoEnvio) {
+  if (!Array.isArray(lista) || !lista.length) {
+    return ultimoEnvio
+      ? `<div class="clp-cfg-fb clp-cfg-fb--mudo"><i class="fa-solid fa-circle-question"></i> ` +
+        `O gateway não respondeu nada neste envio. Confirme se ele está online e se a regra ` +
+        `de feedback está ativa.</div>`
+      : "";
+  }
+  const f = lista[0];
+  const st = String(f.status_final || "").toLowerCase();
+  // "partial_success" é FALHA na referência do Igor, não sucesso parcial benigno
+  const ruim = ["failed", "validation_error", "partial_success"].includes(st);
+  const classe = ruim ? "clp-cfg-fb--erro" : (st === "success" ? "clp-cfg-fb--ok" : "clp-cfg-fb--neutro");
+  const icone = ruim ? "fa-circle-xmark" : (st === "success" ? "fa-circle-check" : "fa-circle-info");
+  const num = v => (v === null || v === undefined ? "—" : v);
+  const casa = ultimoEnvio && String(ultimoEnvio.request_id || "") === String(f.request_id || "");
+
+  return `<div class="clp-cfg-fb ${classe}">` +
+    `<i class="fa-solid ${icone}"></i> ` +
+    `<strong>Resposta do gateway:</strong> ${_clpEsc(f.status_final || "sem status")}` +
+    ` · recebidas ${num(f.received)} · aplicadas ${num(f.applied)} · recusadas ${num(f.rejected)}` +
+    (f.devices_configured != null ? ` · ${f.devices_configured} entidades confirmadas` : "") +
+    (f.ultima_mensagem ? `<br><span class="clp-cfg-fb-msg">${_clpEsc(f.ultima_mensagem)}</span>` : "") +
+    (casa ? "" : `<br><span class="clp-cfg-fb-msg">(de um envio anterior — ` +
+      `${_clpEsc(String(f.request_id || ""))})</span>`) +
+    `</div>`;
 }
 
 // Capacidades do staging do CC100 (tabela "Capacidades" da documentacao do
