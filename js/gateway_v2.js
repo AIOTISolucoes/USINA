@@ -247,8 +247,25 @@ function configurationEntitySpecs(cfg){
     intn(g.default_qos,1),!!(g.scada_server_enabled??true),intn(g.scada_port,502),String(gm.scada_interface||"")]);
 
   // metadados
+  // ⚠️ DIVERGENCIA CORRIGIDA EM 27/07/2026 — ler antes de re-extrair.
+  // O bloco emissor do controle_gateway_v16.html (inclusive a versao de
+  // 27/07) NAO tem esta exclusao, mas o mqtt_entities.py — que o README do
+  // Igor chama de "referencia autoritativa" — tem. Medido no
+  // naturagua_plant_config.json: sem a exclusao saem 1467 entidades
+  // (CRC FE451C34); com ela, 615 (CRC FE512010), igual ao Python.
+  // O comentario dele explica: estes metadados JA viajam dentro da entidade
+  // tipada correspondente e, no PLC V16, a entidade descritiva nao tem uma
+  // segunda tabela persistente — reenviar so dobra o trafego.
+  // Se re-extrair o bloco de um HTML novo, REAPLICAR isto e conferir o CRC
+  // contra o mqtt_entities.py antes de publicar em PLC de cliente.
+  const EMBEDDED_META=new Set(["topic_slug","complex","domain","power_plant","energy_source",
+    "allow_unverified_map","linked_string_box","related_meter","related_weather","related_relay",
+    "max_sync_skew_ms","inter_device_ms","fast_skip_offline","auto_topics","telemetry_pattern",
+    "command_pattern","scada_interface","system_value","quote_value","address_based","publish",
+    "decimals","related_role","max_age_seconds","on_stale","calc_operation","calc_field_a",
+    "calc_field_b"]);
   const mslot=[1];
-  const addMeta=(ownerType,ownerSlot,ownerSub,recId,values)=>{ for(const k of Object.keys(values).sort()){ if(mslot[0]>1024)throw new Error("metadata excedeu 1024 entradas"); const val=values[k];
+  const addMeta=(ownerType,ownerSlot,ownerSub,recId,values)=>{ for(const k of Object.keys(values).sort()){ if(EMBEDDED_META.has(k))continue; if(mslot[0]>1024)throw new Error("metadata excedeu 1024 entradas"); const val=values[k];
     // str() do Python: bool -> "True"/"False"; dict/list -> JSON canônico; resto -> texto.
     const text=(val&&typeof val==="object")?canon(val):(typeof val==="boolean"?(val?"True":"False"):String(val));
     add("metadata",`${recId}.metadata.${k}`,"metadata",mslot[0],0,[ownerType,ownerSlot,ownerSub,String(k),text]); mslot[0]++; } };

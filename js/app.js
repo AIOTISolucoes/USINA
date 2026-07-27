@@ -5811,7 +5811,8 @@ function _clpCfgPreview(plantId) {
       : "";
     box.innerHTML =
       `<div><strong>${txn.publications.length}</strong> mensagens · ` +
-      `<strong>${txn.entityCount}</strong> entidades · CRC <code>${_clpEsc(txn.crc)}</code></div>` +
+      `<strong>${txn.entityCount}</strong> entidades <span class="clp-cfg-hint">` +
+      `(conferência local — quem compila de verdade é o servidor)</span></div>` +
       `<div class="clp-cfg-preview-list">${resumo}</div>` +
       `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` +
       alerta + avisoMapa + avisoLimite;
@@ -5897,70 +5898,83 @@ function _clpSendConfig(plantId) {
   }
 
   if (!confirm(
-    `Publicar ${txn.publications.length} mensagens (${txn.entityCount} entidades) no gateway?\n\n` +
-    `Tópico: ${txn.topics.chunk}\n\n` +
+    `Enviar a configuração (${txn.entityCount} entidades) ao gateway?\n\n` +
+    `O backend compila e publica uma mensagem por vez, esperando o gateway ` +
+    `confirmar cada uma. Isso leva alguns minutos.\n\n` +
     `O commit aplica a configuração no equipamento.`
   )) return;
 
-  _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl);
+  _clpCfgApplyV2(plantId, cfg, username, password, passEl, resEl);
 }
 
-// Manda a transação INTEIRA. Quem cuida do tempo é a API: ela publica o que
-// couber no orçamento dela e, se não terminar, responde `partial` com o índice
-// de onde continuar — aí a gente só reenvia o resto. Na maioria das usinas sai
-// numa chamada só.
-async function _clpCfgPublishBatches(plantId, built, username, password, passEl, resEl) {
-  const { cfg, rid, txn } = built;
-  const pubs = txn.publications;
-  const total = pubs.length;
-  let enviadas = 0;
-  let voltas = 0;
-
+// Caminho NOVO (contrato do Igor, 27/07). O front manda a configuração de ALTO
+// NÍVEL e não compila nada: quem compila é o backend, com o mqtt_entities.py
+// dele. A API responde 202 e o envio real acontece num worker assíncrono, que
+// espera o ACK de cada mensagem — por isso aqui só resta acompanhar.
+async function _clpCfgApplyV2(plantId, cfg, username, password, passEl, resEl) {
+  const espera = ms => new Promise(r => setTimeout(r, ms));
   try {
-    while (enviadas < total) {
-      if (++voltas > 20) throw new Error("envio não terminou depois de 20 tentativas");
+    resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
+      `Compilando a configuração...</span>`;
 
-      resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
-        (enviadas
-          ? `Publicando... ${enviadas} de ${total} mensagens`
-          : `Publicando ${total} mensagens...`) + `</span>`;
+    const r = await apiFetch(`/plants/${plantId}/clp/config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "apply_v2", configuration: cfg, username, password }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.error || `HTTP ${r.status}`);
+    if (passEl) passEl.value = "";
 
-      const r = await apiFetch(`/plants/${plantId}/clp/config`, {
+    const rid = d.request_id;
+    const total = Number(d.messages) || 0;
+    let ultimo = "";
+
+    // Polling do job. Sem teto de tentativas: quem decide o fim é o backend
+    // (success/failed), e uma transação grande pode passar de 10 minutos.
+    for (;;) {
+      await espera(1500);
+      const jr = await apiFetch(`/plants/${plantId}/clp/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          publications: pubs.slice(enviadas),
-          request_id: rid,
-          crc: txn.crc,
-          config: cfg,
-          final_batch: true,
-          abort_topic: txn.abort && txn.abort.topic,
-          abort_message: txn.abort && txn.abort.payload,
-          username,
-          password,
-        }),
+        body: JSON.stringify({ action: "job", request_id: rid }),
       });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) {
-        throw new Error(
-          (d.error || `HTTP ${r.status}`) +
-          (enviadas ? ` (parou em ${enviadas} de ${total} mensagens; sem o commit o gateway não aplica nada)` : "")
-        );
+      const j = await jr.json().catch(() => ({}));
+      if (!jr.ok) throw new Error(j.error || `HTTP ${jr.status}`);
+
+      const enviadas = Number(j.entities_sent) || 0;
+      const pct = total ? Math.min(100, Math.round((enviadas / total) * 100)) : 0;
+      const etapa = { begin: "abrindo a transação", put: "enviando entidades",
+                      validate: "o gateway está validando", commit: "aplicando",
+                      finished: "concluído" }[j.stage] || (j.stage || "");
+
+      if (j.status === "success") {
+        resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
+          `Configuração aplicada e confirmada pelo gateway ` +
+          `(${enviadas} de ${total} mensagens).</span>`;
+        _renderClpDiag && setTimeout(() => { try { openClpDiagModal(plantId); } catch (e) {} }, 1200);
+        return;
+      }
+      if (j.status === "failed") {
+        resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ` +
+          `O gateway recusou: ${_clpEsc(j.message || "sem detalhe")}<br>` +
+          `<small>Parou em ${enviadas} de ${total}. A configuração anterior continua valendo ` +
+          `(o backend publicou abort).</small></span>`;
+        return;
       }
 
-      const publicadas = Number(d.published) || 0;
-      if (publicadas <= 0) throw new Error("a API não publicou nenhuma mensagem desta vez");
-      enviadas += publicadas;
-      if (!d.partial) break;
+      const msg = `${pct}% · ${enviadas} de ${total} mensagens · ${etapa}`;
+      if (msg !== ultimo) {
+        ultimo = msg;
+        resEl.innerHTML = `<span class="clp-cfg-wait"><i class="fa-solid fa-circle-notch fa-spin"></i> ` +
+          `${_clpEsc(msg)}</span>` +
+          `<div class="clp-cfg-bar"><div class="clp-cfg-bar-fill" style="width:${pct}%"></div></div>` +
+          `<small class="clp-cfg-hint">Pode fechar esta janela — o envio continua no servidor.</small>`;
+      }
     }
-
-    resEl.innerHTML = `<span class="clp-cfg-ok"><i class="fa-solid fa-check"></i> ` +
-      `${enviadas} mensagens publicadas (${txn.entityCount} entidades). ` +
-      `O resultado chega em <code>${_clpEsc(txn.topics.feedback)}</code>: ` +
-      `espere received=${txn.entityCount}, applied=1, rejected=0.</span>`;
-    if (passEl) passEl.value = "";
   } catch (err) {
-    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(err.message || err)}</span>`;
+    resEl.innerHTML = `<span class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ` +
+      `${_clpEsc(err.message || err)}</span>`;
   }
 }
 

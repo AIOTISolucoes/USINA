@@ -3162,6 +3162,23 @@ tbody tr:hover td {
   min-height: 24px; padding: 2px 8px; font-size: 11px; vertical-align: middle;
   margin-left: 4px;
 }
+/* Barra de progresso do envio de configuração. O envio é assíncrono no
+   servidor (ACK por mensagem), então pode levar minutos — a barra vem do
+   polling em app.gateway_config_job. */
+.clp-cfg-bar {
+  margin: 6px 0 4px;
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(205,213,225,.14);
+  overflow: hidden;
+}
+.clp-cfg-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--green-bright, #39e58c), #7FD055);
+  transition: width .4s ease;
+}
+
 /* Resposta do gateway ao envio (tópico de feedback). Sem isto a tela só
    sabia dizer "publicado", que não é a mesma coisa que "aplicado". */
 .clp-cfg-fb {
