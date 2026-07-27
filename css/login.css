@@ -222,6 +222,21 @@ body.login-page {
     drop-shadow(0 0 20px rgba(61,255,176,0.2));
 }
 
+/* Lockup completo (simbolo + AIOTI OPERATIONS PLATFORM + assinatura).
+   So no login, unico lugar com espaco pra tagline ficar legivel — nos slots
+   de 38-58px (sidebar, modais, favicon) entra so o simbolo recortado. */
+.logo-img--full {
+  width: min(230px, 78%);
+  height: auto;
+  filter:
+    drop-shadow(0 0 10px rgba(61,255,176,0.28))
+    drop-shadow(0 0 26px rgba(61,255,176,0.12));
+}
+
+.logo-area:has(.logo-img--full) {
+  margin-bottom: 30px;
+}
+
 .logo-name {
   font-family: 'Exo 2', sans-serif;
   font-size: 2.4rem;
