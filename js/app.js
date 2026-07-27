@@ -5641,7 +5641,12 @@ function _clpCfgBuild(plantId) {
   // request_id NOVO a cada envio: o gateway ignora um begin com id que ele já
   // viu (idempotência), e aí o envio "some" sem erro nenhum. O sufixo aleatório
   // cobre dois cliques dentro do mesmo milissegundo.
-  const rid = "cfg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
+  // ⚠️ A API de referência do Igor (27/07) valida com ^[A-Za-z0-9._-]{1,16}$ —
+  // o limite caiu de 63 para 16. O formato antigo ("cfg-" + Date.now() + "-" +
+  // aleatório) dava 23 caracteres e seria recusado. Base36 do relógio resolve:
+  // 1 + 8 + 5 = 14, ainda único e compatível com o firmware antigo (16 < 63).
+  const rid = ("c" + Date.now().toString(36) +
+    Math.random().toString(36).slice(2, 7)).slice(0, 16);
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   return {
     cfg,
