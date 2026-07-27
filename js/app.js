@@ -5658,6 +5658,68 @@ function _clpCfgDevicesSemMapaLiberado(cfg) {
   return devs.filter(d => !(d && d.metadata && d.metadata.allow_unverified_map === true)).length;
 }
 
+// Capacidades do staging do CC100 (tabela "Capacidades" da documentacao do
+// gateway V16). Estourar qualquer uma faz o validate recusar a TRANSACAO
+// INTEIRA, e a doc e explicita: "config invalida nunca vira ativa". Como a
+// plataforma ainda nao assina o topico de feedback, sem esta checagem o erro
+// aparece como "publicou e nao aplicou" - o mesmo sintoma das outras 4
+// armadilhas. Barato conferir aqui antes de mandar 493 mensagens.
+const CLP_CFG_LIMITES = {
+  channels: 32, templates: 100, devices: 255,
+  sequences: 128, pid: 16, reclose_rules: 32, metadata: 1024,
+  requests_por_template: 32, fields_por_template: 192,
+  commands_por_device: 6, status_map_por_template: 16,
+  passos_por_sequencia: 16,
+};
+
+function _clpCfgLimitesEstourados(cfg) {
+  const problemas = [];
+  const arr = k => (Array.isArray(cfg && cfg[k]) ? cfg[k] : []);
+
+  // Limites globais (contagem simples da lista)
+  [
+    ["channels", "canais Modbus"], ["templates", "templates"],
+    ["devices", "equipamentos"], ["sequences", "sequencias"],
+    ["pid", "controladores PID"], ["metadata", "entradas de metadados"],
+  ].forEach(([chave, rotulo]) => {
+    const n = arr(chave).length;
+    const max = CLP_CFG_LIMITES[chave];
+    if (n > max) problemas.push(`${n} ${rotulo} (maximo ${max})`);
+  });
+
+  // Limites POR PAI: agrupa pelo id do template/device e olha o maior grupo.
+  const porPai = (lista, campoPai) => {
+    const c = {};
+    lista.forEach(x => {
+      const pai = x && (x[campoPai] != null ? String(x[campoPai]) : "");
+      if (pai) c[pai] = (c[pai] || 0) + 1;
+    });
+    let topo = ["", 0];
+    Object.entries(c).forEach(e => { if (e[1] > topo[1]) topo = e; });
+    return topo;
+  };
+  [
+    ["requests", "template_id", "requests_por_template", "requests no template"],
+    ["fields", "template_id", "fields_por_template", "campos no template"],
+    ["status_map", "template_id", "status_map_por_template", "correlacoes de status no template"],
+    ["commands", "device_id", "commands_por_device", "comandos no equipamento"],
+    ["sequence_steps", "sequence_id", "passos_por_sequencia", "passos na sequencia"],
+  ].forEach(([chave, campoPai, limite, rotulo]) => {
+    const [pai, n] = porPai(arr(chave), campoPai);
+    const max = CLP_CFG_LIMITES[limite];
+    if (n > max) problemas.push(`${n} ${rotulo} "${pai}" (maximo ${max})`);
+  });
+
+  // Regras de religamento: ora vem como lista, ora dentro de auto_reclosing.
+  const reclose = arr("reclose_rules").length ||
+    (cfg && cfg.auto_reclosing && Array.isArray(cfg.auto_reclosing.rules)
+      ? cfg.auto_reclosing.rules.length : 0);
+  if (reclose > CLP_CFG_LIMITES.reclose_rules) {
+    problemas.push(`${reclose} regras de religamento (maximo ${CLP_CFG_LIMITES.reclose_rules})`);
+  }
+  return problemas;
+}
+
 function _clpCfgAplicaMapaNaoValidado(cfg) {
   const el = document.getElementById("clpCfgAllowUnverified");
   if (!el || !el.checked || !Array.isArray(cfg.devices)) return cfg;
@@ -5702,11 +5764,18 @@ function _clpCfgPreview(plantId) {
         `Se o template for importado, o gateway recusa a configuração inteira. ` +
         `Marque a opção abaixo ou valide o mapa em campo.</div>`
       : "";
+    // Capacidades do staging: se estourar, o gateway recusa TUDO no validate.
+    const estourados = _clpCfgLimitesEstourados(_clpCfgRead());
+    const avisoLimite = estourados.length
+      ? `<div class="clp-cfg-err">Passa da capacidade do gateway: ` +
+        `${_clpEsc(estourados.join("; "))}. O validate recusaria a configuração inteira.</div>`
+      : "";
     box.innerHTML =
       `<div><strong>${txn.publications.length}</strong> mensagens · ` +
       `<strong>${txn.entityCount}</strong> entidades · CRC <code>${_clpEsc(txn.crc)}</code></div>` +
       `<div class="clp-cfg-preview-list">${resumo}</div>` +
-      `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` + alerta + avisoMapa;
+      `<div class="clp-cfg-preview-topic">${_clpEsc(txn.topics.chunk)}</div>` +
+      alerta + avisoMapa + avisoLimite;
   } catch (e) {
     box.innerHTML = `<div class="clp-cfg-err"><i class="fa-solid fa-triangle-exclamation"></i> ${_clpEsc(e.message || e)}</div>`;
   }
