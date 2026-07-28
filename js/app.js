@@ -5428,68 +5428,97 @@ function _renderClpDiag(ov, data) {
     // o último envio é o primeiro do histórico; o campo separado é retrocompatibilidade
     const last = data.gateway_config_last_sent || _CLP_CFG_HISTORY[0] || null;
 
+    // Estado da configuração. Os botões saem do meio do texto e vão para uma
+    // fila própria: intercalados, quebravam a leitura em qualquer largura.
+    // Dado técnico (entidades, CRC) em mono, como no resto da plataforma.
     const savedInfo = gc
       ? `Salva em ${_clpEsc(new Date(gc.updated_at).toLocaleString("pt-BR"))}` +
-        (gc.updated_by ? ` por ${_clpEsc(gc.updated_by)}` : "") +
-        ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgRestoreSaved()">` +
-        `<i class="fa-solid fa-rotate-left"></i> Restaurar</button>` +
-        ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgDownload()">` +
-        `<i class="fa-solid fa-download"></i> Baixar</button>`
+        (gc.updated_by ? ` por ${_clpEsc(gc.updated_by)}` : "")
       : "Nenhuma configuração salva ainda.";
+    // o nome de quem enviou vem ANTES da data: no fim, ele sobrava sozinho
+    // na última linha do balão estreito
     const lastInfo = last
-      ? `Último envio: ${_clpEsc(new Date(last.sent_at).toLocaleString("pt-BR"))} · ` +
-        `${last.entity_count || 0} entidades · CRC ${_clpEsc(last.crc32 || "—")}` +
-        (last.sent_by_username ? ` · ${_clpEsc(last.sent_by_username)}` : "") +
-        (_CLP_CFG_HISTORY.length
-          ? ` <button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgToggleHistory('${_pid}')">` +
-            `<i class="fa-solid fa-clock-rotate-left"></i> Histórico (${_CLP_CFG_HISTORY.length})</button>`
-          : "")
+      ? `Último envio${last.sent_by_username ? ` por ${_clpEsc(last.sent_by_username)}` : ""}: ` +
+        `${_clpEsc(new Date(last.sent_at).toLocaleString("pt-BR"))} · ` +
+        `<code>${last.entity_count || 0}</code> entidades · CRC <code>${_clpEsc(last.crc32 || "—")}</code>`
       : "";
+    const metaAcoes = [
+      gc ? `<button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgRestoreSaved()">
+              <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Restaurar</button>` : "",
+      gc ? `<button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgDownload()">
+              <i class="fa-solid fa-download" aria-hidden="true"></i> Baixar</button>` : "",
+      (last && _CLP_CFG_HISTORY.length)
+        ? `<button type="button" class="clp-cfg-tpl clp-cfg-tpl--mini" onclick="_clpCfgToggleHistory('${_pid}')">
+             <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i> Histórico (${_CLP_CFG_HISTORY.length})</button>`
+        : "",
+    ].filter(Boolean).join("");
 
     html += `
       <details class="clp-diag-cfg">
         <summary><i class="fa-solid fa-gears"></i> Configuração do gateway (admin)</summary>
         <div class="clp-cfg-inner">
-          <p class="clp-cfg-hint">
-            A configuração vai para o gateway quebrada em várias mensagens, e nada chega aos
-            equipamentos antes da última delas. Se alguma for recusada, a configuração antiga
-            continua valendo.
-          </p>
-          <div class="clp-cfg-meta">${savedInfo}${lastInfo ? `<br>${lastInfo}` : ""}</div>
+          <div class="clp-cfg-meta">
+            <div>${savedInfo}</div>
+            ${lastInfo ? `<div>${lastInfo}</div>` : ""}
+            ${metaAcoes ? `<div class="clp-cfg-meta-acoes">${metaAcoes}</div>` : ""}
+          </div>
           ${_clpCfgFeedbackHtml(data.gateway_config_feedback, last)}
           <div class="clp-cfg-history" id="clpCfgHistory"></div>
-          <label class="clp-cfg-label">
-            Configuração (JSON)
-            <span>
-              <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">
-                <i class="fa-solid fa-file-code" aria-hidden="true"></i> Modelo padrão
-              </button>
-              <button type="button" class="clp-cfg-tpl" onclick="_clpCfgPreview('${_pid}')">
-                <i class="fa-solid fa-eye" aria-hidden="true"></i> Pré-visualizar
-              </button>
+
+          <button type="button" class="clp-cfg-abrir" onclick="_clpAbreConfigurador('${_pid}')">
+            <i class="fa-solid fa-table-columns" aria-hidden="true"></i>
+            <span class="clp-cfg-abrir-txt">
+              <strong>${_CLP_CFG_SAVED ? "Abrir o configurador" : "Configurar este gateway"}</strong>
+              <small>Equipamentos, canais, campos, tópicos, comandos, sequências e PID.
+                O catálogo de modelos já traz o mapa Modbus pronto.</small>
             </span>
-          </label>
-          <textarea id="clpCfgPayload" class="clp-cfg-area" rows="10" spellcheck="false"
-            placeholder='{ "plant": {...}, "channels": [...], "templates": [...], "devices": [...] }'>${
-              _CLP_CFG_SAVED ? _clpEsc(JSON.stringify(_CLP_CFG_SAVED, null, 2)) : ""
-            }</textarea>
-          <div class="clp-cfg-preview" id="clpCfgPreview"></div>
-          <label class="clp-cfg-check" title="Template importado chega com o mapa não validado em campo; sem isso o gateway recusa a transação inteira">
-            <input type="checkbox" id="clpCfgAllowUnverified" checked>
-            <span>Aceitar mapa de template ainda não validado em campo</span>
-          </label>
-          <button class="clp-cfg-btn clp-cfg-btn--ghost" onclick="_clpCfgSave('${_pid}')">
-            <i class="fa-solid fa-floppy-disk"></i> Salvar no banco
+            <i class="fa-solid fa-arrow-right clp-cfg-abrir-seta" aria-hidden="true"></i>
           </button>
-          <p class="clp-cfg-hint">Para publicar no gateway, confirme com o seu usuário e senha:</p>
-          <div class="clp-cfg-auth">
-            <input id="clpCfgUser" class="clp-cfg-input" placeholder="usuário" autocomplete="off">
-            <input id="clpCfgPass" class="clp-cfg-input" type="password" placeholder="senha" autocomplete="new-password">
-          </div>
-          <button class="clp-cfg-btn" onclick="_clpSendConfig('${_pid}')">
-            <i class="fa-solid fa-satellite-dish"></i> Publicar no gateway
-          </button>
-          <div id="clpCfgResult" class="clp-cfg-result"></div>
+
+          <details class="clp-cfg-manual">
+            <summary><i class="fa-solid fa-code" aria-hidden="true"></i> Colar o JSON à mão</summary>
+            <div class="clp-cfg-manual-inner">
+              <p class="clp-cfg-hint">
+                A configuração vai para o gateway quebrada em várias mensagens, e nada chega aos
+                equipamentos antes da última delas. Se alguma for recusada, a configuração antiga
+                continua valendo.
+              </p>
+              <label class="clp-cfg-label" for="clpCfgPayload">
+                Configuração (JSON)
+                <span>
+                  <button type="button" class="clp-cfg-tpl" onclick="_clpLoadConfigTemplate()">
+                    <i class="fa-solid fa-file-code" aria-hidden="true"></i> Modelo padrão
+                  </button>
+                  <button type="button" class="clp-cfg-tpl" onclick="_clpCfgPreview('${_pid}')">
+                    <i class="fa-solid fa-eye" aria-hidden="true"></i> Pré-visualizar
+                  </button>
+                </span>
+              </label>
+              <textarea id="clpCfgPayload" class="clp-cfg-area" rows="10" spellcheck="false"
+                placeholder='{ "plant": {...}, "channels": [...], "templates": [...], "devices": [...] }'>${
+                  _CLP_CFG_SAVED ? _clpEsc(JSON.stringify(_CLP_CFG_SAVED, null, 2)) : ""
+                }</textarea>
+              <div class="clp-cfg-preview" id="clpCfgPreview"></div>
+              <label class="clp-cfg-check" title="Template importado chega com o mapa não validado em campo; sem isso o gateway recusa a transação inteira">
+                <input type="checkbox" id="clpCfgAllowUnverified" checked>
+                <span>Aceitar mapa de template ainda não validado em campo</span>
+              </label>
+              <button class="clp-cfg-btn clp-cfg-btn--ghost" onclick="_clpCfgSave('${_pid}')">
+                <i class="fa-solid fa-floppy-disk"></i> Salvar no banco
+              </button>
+              <p class="clp-cfg-hint">Para publicar no gateway, confirme com o seu usuário e senha:</p>
+              <div class="clp-cfg-auth">
+                <input id="clpCfgUser" class="clp-cfg-input" placeholder="usuário" autocomplete="off"
+                       aria-label="usuário">
+                <input id="clpCfgPass" class="clp-cfg-input" type="password" placeholder="senha"
+                       autocomplete="new-password" aria-label="senha">
+              </div>
+              <button class="clp-cfg-btn" onclick="_clpSendConfig('${_pid}')">
+                <i class="fa-solid fa-satellite-dish"></i> Publicar no gateway
+              </button>
+              <div id="clpCfgResult" class="clp-cfg-result"></div>
+            </div>
+          </details>
         </div>
       </details>`;
   }
@@ -5539,6 +5568,17 @@ const CLP_CONFIG_TEMPLATE = {
 
 let _CLP_CFG_SAVED = null;
 let _CLP_CFG_HISTORY = [];
+
+// Abre o configurador gráfico (gateway.html) na usina do modal. O segmento do
+// tópico é o NOME da usina no cadastro — vai junto para a tela já avisar quando
+// o "plant.id" do JSON não bater com ele (a ingestão casa exato).
+function _clpAbreConfigurador(plantId) {
+  const card = document.querySelector(`.plant-card[data-plant-id="${plantId}"]`);
+  const nome = (card && (card.dataset.plantTopicName || card.dataset.plantName)) || "";
+  const url = `gateway.html?plant_id=${encodeURIComponent(plantId)}` +
+    (nome ? `&plant=${encodeURIComponent(nome)}` : "");
+  window.open(url, "_blank", "noopener");
+}
 
 // ---- Resgate da configuração -----------------------------------------------
 // Pedido do Igor 25/07: poder voltar para uma configuração que já funcionou.

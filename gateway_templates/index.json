@@ -1,0 +1,35 @@
+{
+  "format": "aioti.gateway.template_catalog",
+  "schema_version": "1.0.0",
+  "updated_at": "2026-07-28",
+  "templates": [
+    {
+      "id": "chint-cps-403x",
+      "file": "chint-cps-403x.json",
+      "title": "Chint CPS 403X / SCA",
+      "manufacturer": "Chint",
+      "model": "CPS 403X / SCA",
+      "device_type": "inverter",
+      "summary": "Inversor central Chint. FC04 a partir do endereco 1, 72 registradores.",
+      "source": "cps-chint-Modbus-Map-Spec.pdf",
+      "requests": 1,
+      "fields": 111,
+      "commands": 6,
+      "verified": true
+    },
+    {
+      "id": "longmax-string-box",
+      "file": "longmax-string-box.json",
+      "title": "Longmax String Box",
+      "manufacturer": "Longmax",
+      "model": "String_box",
+      "device_type": "stringbox",
+      "summary": "String box Longmax, 5 requests (FC04 + FC02) com correntes por string.",
+      "source": "Extraido do V7 do gateway",
+      "requests": 5,
+      "fields": 177,
+      "commands": 0,
+      "verified": true
+    }
+  ]
+}

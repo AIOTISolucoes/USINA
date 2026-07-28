@@ -1,0 +1,367 @@
+/* ==========================================================================
+   gateway.css — Configurador remoto do Gateway V16 (tela cheia).
+   Mesma identidade das outras telas da plataforma (fundo escuro + verde AIOTI);
+   as variáveis abaixo são as que o branding.js remapeia no white-label.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  --accent: #39e58c;
+  --accent-dim: rgba(57, 229, 140, .14);
+  --bg-main: #030a05;
+  --bg-card: #0b140e;
+  --bg-card-alt: #101a13;
+  --bg-input: #060f09;
+  --text-main: #e8f5e9;
+  --text-muted: #4dab7a;
+  --border-soft: rgba(57, 229, 140, .10);
+  --border-mid: rgba(57, 229, 140, .22);
+  --danger: #ff6b6b;
+  --warn: #ffd84d;
+  font-family: "Roboto", sans-serif;
+  background: var(--bg-main);
+  color: var(--text-main);
+  background-image:
+    radial-gradient(900px 600px at 8% 0%, rgba(57, 229, 140, .05), transparent 55%),
+    radial-gradient(700px 500px at 92% 100%, rgba(57, 229, 140, .03), transparent 55%);
+  background-attachment: fixed;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---- estrutura: ocupa a janela inteira, só a tabela e o form rolam -------- */
+.gw-shell { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---- topo ---------------------------------------------------------------- */
+.gw-top {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, #0a120b, #060d07);
+  border-bottom: 1px solid var(--border-mid);
+  flex-shrink: 0;
+}
+.gw-voltar {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  border-radius: 9px; border: 1px solid var(--border-mid);
+  color: var(--text-muted); text-decoration: none; transition: .15s; flex-shrink: 0;
+}
+.gw-voltar:hover { color: var(--accent); background: var(--accent-dim); }
+.gw-logo { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.gw-titulo { min-width: 0; }
+.gw-titulo h1 {
+  font-family: "Exo 2", sans-serif; font-size: 15px; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
+}
+.gw-titulo p {
+  font-size: 11.5px; color: var(--text-muted); margin-top: 2px;
+  display: flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.gw-titulo p i { color: var(--accent); }
+.gw-salva { opacity: .75; font-style: italic; }
+.gw-salva::before { content: "·"; margin-right: 6px; }
+
+.gw-acoes { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gw-sep { width: 1px; height: 22px; background: var(--border-mid); margin: 0 4px; }
+
+/* ---- botões -------------------------------------------------------------- */
+.gw-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 13px; border-radius: 999px; cursor: pointer;
+  font-family: "Exo 2", sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
+  border: 1px solid var(--border-mid); background: transparent;
+  color: var(--text-main); transition: .15s; white-space: nowrap;
+}
+.gw-btn:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent); }
+.gw-btn:disabled { opacity: .35; cursor: not-allowed; }
+.gw-btn--accent { background: var(--accent); border-color: var(--accent); color: #041209; }
+.gw-btn--accent:hover:not(:disabled) { filter: brightness(1.12); background: var(--accent); }
+.gw-btn--danger { border-color: rgba(255, 107, 107, .45); color: var(--danger); }
+.gw-btn--danger:hover:not(:disabled) { background: rgba(255, 107, 107, .12); border-color: var(--danger); }
+.gw-btn--sm { padding: 5px 10px; font-size: 10px; }
+
+/* modo leitura: some tudo que grava */
+.is-readonly #gwBtnSalvar, .is-readonly #gwBtnPublicar,
+.is-readonly .gw-form-botoes, .is-readonly .gw-card-foot { display: none; }
+
+/* ---- barra de estado ----------------------------------------------------- */
+.gw-barra {
+  display: flex; align-items: center; gap: 16px;
+  padding: 7px 18px; font-size: 11.5px;
+  background: rgba(0, 0, 0, .25); border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0; min-height: 32px;
+}
+.gw-dirty { color: var(--text-muted); display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.gw-dirty--on { color: var(--warn); }
+.gw-msg { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.gw-msg--ok { color: var(--accent); }
+.gw-msg--erro { color: var(--danger); }
+.gw-msg--wait, .gw-msg--info { color: var(--text-muted); }
+
+/* ---- abas ---------------------------------------------------------------- */
+.gw-tabs {
+  display: flex; gap: 3px; padding: 8px 14px 0;
+  border-bottom: 1px solid var(--border-mid);
+  overflow-x: auto; flex-shrink: 0; scrollbar-width: thin;
+}
+.gw-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px 11px; border: 1px solid transparent; border-bottom: none;
+  border-radius: 9px 9px 0 0; background: transparent; cursor: pointer;
+  color: var(--text-muted); font-family: "Exo 2", sans-serif;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .03em;
+  white-space: nowrap; transition: .15s;
+}
+.gw-tab:hover { color: var(--text-main); background: rgba(57, 229, 140, .06); }
+.gw-tab.is-on {
+  color: var(--accent); background: var(--bg-card);
+  border-color: var(--border-mid); box-shadow: inset 0 2px 0 var(--accent);
+}
+.gw-tab-n {
+  font-family: "JetBrains Mono", monospace; font-size: 10px; font-style: normal;
+  padding: 1px 6px; border-radius: 999px;
+  background: rgba(57, 229, 140, .12); color: var(--accent);
+}
+
+/* ---- corpo --------------------------------------------------------------- */
+.gw-body { flex: 1; min-height: 0; overflow: hidden; padding: 14px 18px 18px; }
+
+/* ---- aba geral ----------------------------------------------------------- */
+.gw-geral { height: 100%; overflow-y: auto; padding-right: 6px; }
+.gw-card {
+  background: var(--bg-card); border: 1px solid var(--border-soft);
+  border-radius: 14px; padding: 20px 22px; max-width: 1180px;
+}
+.gw-card-head h2 {
+  font-family: "Exo 2", sans-serif; font-size: 14px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .05em;
+  display: flex; align-items: center; gap: 9px;
+}
+.gw-card-head h2 i { color: var(--accent); }
+.gw-card-head p { font-size: 12px; color: var(--text-muted); margin: 6px 0 18px; }
+.gw-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px 26px; }
+.gw-card-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-soft);
+}
+
+/* ---- split tabela + formulário ------------------------------------------- */
+.gw-split { display: flex; gap: 14px; height: 100%; min-height: 0; }
+.gw-list {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--border-soft);
+  border-radius: 14px; padding: 12px 14px;
+}
+.gw-list-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gw-filtro {
+  display: flex; align-items: center; gap: 7px; flex: 1; min-width: 180px;
+  padding: 7px 11px; border-radius: 9px;
+  background: var(--bg-input); border: 1px solid var(--border-soft);
+}
+.gw-filtro i { color: var(--text-muted); font-size: 11px; }
+.gw-filtro input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--text-main); font-family: "Roboto", sans-serif; font-size: 12.5px;
+}
+.gw-list-n {
+  font-family: "JetBrains Mono", monospace; font-size: 10.5px;
+  color: var(--text-muted); white-space: nowrap;
+}
+.gw-list-ajuda { font-size: 11px; color: var(--text-muted); margin: 8px 2px 6px; }
+
+.gw-table-wrap { flex: 1; min-height: 0; overflow: auto; border-radius: 9px; }
+.gw-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.gw-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg-card-alt); color: var(--text-muted);
+  font-family: "JetBrains Mono", monospace; font-size: 10px;
+  font-weight: 500; text-transform: uppercase; letter-spacing: .06em;
+  text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border-mid);
+  white-space: nowrap;
+}
+.gw-table tbody tr { cursor: pointer; transition: background .12s; }
+.gw-table tbody tr:hover { background: rgba(57, 229, 140, .05); }
+.gw-table tbody tr.is-on { background: var(--accent-dim); box-shadow: inset 3px 0 0 var(--accent); }
+.gw-table tbody tr.is-off td { opacity: .45; font-style: italic; }
+.gw-table tbody td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border-soft);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gw-table tr.gw-vazio td {
+  text-align: center; padding: 26px; color: var(--text-muted); cursor: default; font-style: italic;
+}
+.gw-table tr.gw-vazio:hover { background: none; }
+
+/* ---- formulário ---------------------------------------------------------- */
+.gw-form {
+  width: 400px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--border-soft);
+  border-radius: 14px; padding: 14px 16px; overflow: hidden;
+}
+.gw-form-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border-soft);
+}
+.gw-form-head h3 {
+  font-family: "Exo 2", sans-serif; font-size: 12px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted);
+  display: flex; align-items: center; gap: 7px;
+}
+.gw-form-head h3 i { color: var(--accent); }
+.gw-form-head h3 span { color: var(--text-main); }
+.gw-form-head code {
+  font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--accent);
+  max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gw-form-campos { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
+
+.gw-campo { display: block; margin-bottom: 10px; }
+.gw-rot {
+  display: block; font-family: "JetBrains Mono", monospace; font-size: 9.5px;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); margin-bottom: 4px;
+}
+.gw-input {
+  width: 100%; padding: 8px 11px; border-radius: 8px;
+  background: var(--bg-input); border: 1px solid var(--border-soft);
+  color: var(--text-main); font-family: "Roboto", sans-serif; font-size: 12.5px;
+  outline: none; transition: .15s;
+}
+.gw-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.gw-input--json {
+  font-family: "JetBrains Mono", monospace; font-size: 11px; resize: vertical; line-height: 1.5;
+}
+select.gw-input { cursor: pointer; }
+.gw-dica {
+  display: block; font-size: 10.5px; color: var(--text-muted);
+  margin-top: 4px; line-height: 1.45; opacity: .85;
+}
+.gw-check { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; font-size: 12.5px; }
+.gw-check input { margin-top: 2px; accent-color: var(--accent); }
+
+.gw-form-botoes {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-top: 12px; margin-top: 10px; border-top: 1px solid var(--border-soft);
+}
+
+/* ---- modal --------------------------------------------------------------- */
+.gw-modal {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(0, 0, 0, .68); backdrop-filter: blur(3px);
+  display: grid; place-items: center; padding: 24px;
+}
+.gw-modal-box {
+  width: 100%; max-height: 88vh; display: flex; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--border-mid);
+  border-radius: 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, .6); overflow: hidden;
+}
+.gw-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 15px 18px; border-bottom: 1px solid var(--border-soft);
+}
+.gw-modal-head h3 {
+  font-family: "Exo 2", sans-serif; font-size: 13px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.gw-modal-x {
+  background: none; border: none; color: var(--text-muted);
+  font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.gw-modal-x:hover { color: var(--danger); }
+.gw-modal-body { padding: 18px; overflow-y: auto; flex: 1; min-height: 0; }
+.gw-modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 13px 18px; border-top: 1px solid var(--border-soft); background: rgba(0, 0, 0, .18);
+}
+.gw-modal-txt { font-size: 12.5px; line-height: 1.6; color: var(--text-main); margin-bottom: 12px; }
+.gw-modal-txt--dica { color: var(--text-muted); font-size: 11.5px; }
+.gw-modal-txt--alerta { color: var(--warn); }
+.gw-modal-txt--ok { color: var(--accent); }
+.gw-lista-erros {
+  list-style: none; display: flex; flex-direction: column; gap: 7px;
+  font-size: 12px; line-height: 1.5;
+}
+.gw-lista-erros li {
+  padding: 9px 12px; border-radius: 8px;
+  background: rgba(255, 216, 77, .07); border-left: 3px solid var(--warn);
+}
+
+/* ---- catálogo ------------------------------------------------------------ */
+.gw-cat { display: flex; flex-direction: column; gap: 9px; }
+.gw-cat-item {
+  display: flex; align-items: flex-start; gap: 11px; cursor: pointer;
+  padding: 12px 14px; border-radius: 11px;
+  background: var(--bg-card-alt); border: 1px solid var(--border-soft); transition: .15s;
+}
+.gw-cat-item:hover { border-color: var(--border-mid); }
+.gw-cat-item.is-in { opacity: .55; cursor: default; }
+.gw-cat-item input { margin-top: 3px; accent-color: var(--accent); }
+.gw-cat-item strong { display: block; font-size: 13px; margin-bottom: 3px; }
+.gw-cat-item small { display: block; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+.gw-cat-src { opacity: .75; font-style: italic; }
+.gw-cat-tag {
+  display: inline-block; margin-top: 5px; font-size: 10px; font-style: normal;
+  color: var(--accent); background: var(--accent-dim);
+  padding: 2px 8px; border-radius: 999px;
+}
+
+/* ---- wizard -------------------------------------------------------------- */
+.gw-wiz { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+.gw-wiz .gw-check, .gw-wiz .gw-modal-txt { grid-column: 1 / -1; }
+
+/* ---- sub-listas (passos / alvos) ----------------------------------------- */
+.gw-sub { display: flex; gap: 14px; min-height: 320px; }
+.gw-sub-lista { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.gw-sub-lista .gw-table-wrap,
+.gw-sub-lista table { max-height: 380px; }
+.gw-sub-lista { align-items: flex-start; }
+.gw-sub-lista > table { width: 100%; }
+.gw-table--sub tbody td { max-width: 160px; }
+.gw-sub-limite { font-size: 10.5px; color: var(--text-muted); font-family: "JetBrains Mono", monospace; }
+.gw-sub-form {
+  width: 330px; flex-shrink: 0; max-height: 420px; overflow-y: auto;
+  padding: 12px 14px; border-radius: 11px;
+  background: var(--bg-card-alt); border: 1px solid var(--border-soft);
+}
+
+/* ---- progresso do envio -------------------------------------------------- */
+.gw-prog {
+  display: none; padding: 12px 18px;
+  border-top: 1px solid var(--border-mid); background: var(--bg-card); flex-shrink: 0;
+}
+.gw-prog.is-on { display: block; }
+.gw-prog-msg { display: flex; align-items: center; gap: 9px; font-size: 12.5px; flex-wrap: wrap; }
+.gw-prog-msg--ok { color: var(--accent); }
+.gw-prog-msg--erro { color: var(--danger); }
+.gw-prog-msg small { display: block; width: 100%; color: var(--text-muted); font-size: 11px; margin-top: 4px; }
+.gw-prog-bar {
+  height: 5px; border-radius: 999px; background: rgba(57, 229, 140, .12);
+  margin-top: 9px; overflow: hidden;
+}
+.gw-prog-bar span {
+  display: block; height: 100%; background: var(--accent);
+  border-radius: 999px; transition: width .4s ease;
+}
+.gw-prog-hint { display: block; font-size: 10.5px; color: var(--text-muted); margin-top: 6px; }
+
+/* ---- scrollbars ---------------------------------------------------------- */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(57, 229, 140, .18); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(57, 229, 140, .32); }
+
+/* ---- telas menores ------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .gw-split { flex-direction: column; overflow-y: auto; }
+  .gw-form { width: 100%; }
+  .gw-list { min-height: 320px; }
+  .gw-sub { flex-direction: column; }
+  .gw-sub-form { width: 100%; }
+}
+@media (max-width: 720px) {
+  body { overflow: auto; height: auto; }
+  .gw-shell { height: auto; min-height: 100vh; }
+  .gw-top { flex-wrap: wrap; }
+  .gw-acoes { width: 100%; margin-left: 0; }
+  .gw-wiz { grid-template-columns: 1fr; }
+}

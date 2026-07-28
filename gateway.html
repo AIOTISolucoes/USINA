@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Configurador do Gateway · AIOTI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="img/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Exo+2:wght@600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="css/gateway.css" />
+  <!-- personalização white-label por cliente (aplica antes do paint) -->
+  <script src="js/branding.js"></script>
+</head>
+<body>
+  <div class="gw-shell" id="gwShell">
+
+    <header class="gw-top">
+      <a class="gw-voltar" href="resumo.html" title="Voltar ao painel">
+        <i class="fa-solid fa-arrow-left"></i>
+      </a>
+      <img class="gw-logo" src="assets/logo-aioti.png" alt="AIOTI"
+           onerror="this.style.display='none'" />
+      <div class="gw-titulo">
+        <h1>Configurador remoto do gateway</h1>
+        <p><i class="fa-solid fa-solar-panel"></i> <span id="gwPlanta">—</span>
+           <span class="gw-salva" id="gwSalvaInfo"></span></p>
+      </div>
+
+      <div class="gw-acoes">
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnNova" title="Começar uma configuração do zero">
+          <i class="fa-solid fa-file"></i> Nova
+        </button>
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnAbrir" title="Abrir JSON do publicador local">
+          <i class="fa-solid fa-folder-open"></i> Abrir
+        </button>
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnBaixar" title="Baixar o JSON desta tela (abre no publicador local)">
+          <i class="fa-solid fa-download"></i> Baixar
+        </button>
+        <span class="gw-sep"></span>
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnRestaurar" title="Voltar ao que está no banco">
+          <i class="fa-solid fa-rotate-left"></i> Restaurar
+        </button>
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnSalvar" title="Gravar esta configuração no banco da usina">
+          <i class="fa-solid fa-floppy-disk"></i> Salvar
+        </button>
+        <button type="button" class="gw-btn gw-btn--ghost" id="gwBtnValidar" title="Conferir a configuração inteira sem publicar">
+          <i class="fa-solid fa-clipboard-check"></i> Validar
+        </button>
+        <button type="button" class="gw-btn gw-btn--accent" id="gwBtnPublicar">
+          <i class="fa-solid fa-satellite-dish"></i> Publicar no gateway
+        </button>
+      </div>
+    </header>
+
+    <div class="gw-barra">
+      <span class="gw-dirty" id="gwDirty"></span>
+      <span class="gw-msg" id="gwMsg"></span>
+    </div>
+
+    <nav class="gw-tabs" id="gwTabs"></nav>
+
+    <main class="gw-body" id="gwBody"></main>
+
+    <div class="gw-prog" id="gwProgresso"></div>
+  </div>
+
+  <script src="js/gateway_specs.js"></script>
+  <script src="js/gateway_editor.js"></script>
+  <script src="js/gateway_actions.js"></script>
+</body>
+</html>

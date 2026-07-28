@@ -3131,12 +3131,76 @@ tbody tr:hover td {
   padding: 9px 11px; border-radius: 8px;
   background: rgba(2,10,7,0.45); border: 1px solid rgba(57,229,140,0.10);
 }
+.clp-cfg-meta code {
+  font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #bdf2d6;
+}
+/* botões em fila própria — no meio do texto eles picotavam a leitura */
+.clp-cfg-meta-acoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .clp-cfg-label > span { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .clp-cfg-btn--ghost {
   background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.14); color: #e6f5ec;
 }
 .clp-cfg-btn--ghost:hover { background: rgba(255,255,255,0.10); }
 .clp-cfg-btn--ghost:active { background: rgba(255,255,255,0.14); }
+/* AÇÃO PRIMÁRIA da aba: abre o configurador gráfico (gateway.html).
+   Antes esta aba tinha DOIS editores concorrentes (a caixa de JSON e o
+   configurador), cada um com o seu "publicar" — dois pesos para a mesma ação.
+   Agora: estado em cima, uma ação primária aqui, e o JSON manual recolhido
+   logo abaixo como saída de emergência. */
+.clp-cfg-abrir {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%;
+  margin: 2px 0 4px; padding: 13px 15px; cursor: pointer; text-align: left;
+  border: 1px solid rgba(57,229,140,0.30); border-radius: 12px;
+  background: rgba(57,229,140,0.09); color: #d9ffe9;
+  font-family: inherit; font-size: 13px;
+  transition: background 0.18s ease-out, border-color 0.18s ease-out;
+}
+/* ícone alinhado com a PRIMEIRA linha (o rótulo), não com o meio do bloco:
+   centrado num texto de 3 linhas ele flutuava sem se referir a nada */
+.clp-cfg-abrir > i:first-child {
+  font-size: 16px; color: #39e58c; flex-shrink: 0; margin-top: 1px;
+}
+.clp-cfg-abrir-txt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.clp-cfg-abrir-txt strong { font-size: 13px; font-weight: 700; }
+.clp-cfg-abrir-txt small {
+  font-size: 11.5px; line-height: 1.5; color: #9fc4b2; font-weight: 400;
+  text-wrap: pretty;
+}
+.clp-cfg-abrir-seta {
+  margin-left: auto; align-self: center;
+  font-size: 12px; color: rgba(126,224,170,0.6); flex-shrink: 0;
+  transition: transform 0.18s ease-out, color 0.18s ease-out;
+}
+.clp-cfg-abrir:hover { background: rgba(57,229,140,0.16); border-color: rgba(57,229,140,0.50); }
+.clp-cfg-abrir:hover .clp-cfg-abrir-seta { transform: translateX(3px); color: #39e58c; }
+.clp-cfg-abrir:focus-visible { outline: 1px solid rgba(57,229,140,0.7); outline-offset: 2px; }
+.clp-cfg-abrir:active { background: rgba(57,229,140,0.22); }
+
+/* Saída manual (colar o JSON): existe, mas não disputa a atenção. */
+.clp-cfg-manual { border-top: 1px solid rgba(57,229,140,0.12); margin-top: 4px; }
+.clp-cfg-manual summary {
+  cursor: pointer; list-style: none; user-select: none;
+  display: flex; align-items: center; gap: 7px;
+  min-height: 34px; padding: 9px 2px;
+  font-size: 12px; font-weight: 600; color: #7fa494;
+  transition: color 0.15s ease-out;
+}
+.clp-cfg-manual summary::-webkit-details-marker { display: none; }
+.clp-cfg-manual summary::after {
+  content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900;
+  font-size: 9px; margin-left: auto; color: rgba(127,164,148,0.7);
+  transition: transform 0.18s ease-out;
+}
+.clp-cfg-manual[open] summary::after { transform: rotate(180deg); }
+.clp-cfg-manual summary:hover { color: #9adbb8; }
+.clp-cfg-manual summary:focus-visible { outline: 1px solid rgba(57,229,140,0.7); outline-offset: 2px; }
+.clp-cfg-manual-inner { display: flex; flex-direction: column; gap: 9px; padding-bottom: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .clp-cfg-abrir, .clp-cfg-abrir-seta, .clp-cfg-manual summary,
+  .clp-cfg-manual summary::after { transition: none; }
+  .clp-cfg-abrir:hover .clp-cfg-abrir-seta { transform: none; }
+}
 .clp-cfg-preview:empty { display: none; }
 .clp-cfg-preview {
   font-size: 12.5px; line-height: 1.6; color: #e6f5ec;
