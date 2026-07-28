@@ -320,11 +320,12 @@ function normalizeDailyPayload(payload) {
 
     points.push({
       minute,
-      power: powerRaw[i] != null ? asNumber(powerRaw[i], 0) : 0,
-      irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : 0,
+      // ausente = null (desconhecido), NUNCA 0 — ver comentário do preenchimento
+      power: powerRaw[i] != null ? asNumber(powerRaw[i], 0) : null,
+      irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : null,
       irrGhi: irrGhiRaw[i] != null ? asNumber(irrGhiRaw[i], 0) : null,
       meter: meterRaw[i] != null ? asNumber(meterRaw[i], 0) : null,
-      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : 0
+      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : null
     });
   }
 
@@ -364,8 +365,28 @@ function normalizeDailyPayload(payload) {
     mapE.set(p.minute, p.expected);
   });
 
-  // começa SEMPRE em 00:00 e termina no último minuto que chegou dado hoje
+  // Começa SEMPRE em 00:00. Vai até o último dado recebido e, quando a usina
+  // está muda há mais que a tolerância, o eixo CONTINUA até a hora atual —
+  // com BURACO (null), nunca com zero.
+  //
+  // Zero e ausência de dado são coisas diferentes: zero afirma "a usina não
+  // gerou"; ausência significa "não sabemos" (ela pode estar gerando normal e
+  // só o coletor estar mudo — foi o caso da PedraBranca em 28/07). Como este
+  // gráfico é lido pela ÁREA da curva, preencher com zero vira "perdemos a
+  // manhã inteira", que pode ser falso. Ticket #14 (samara.anjos).
   const lastMin = Math.max(...mins);
+
+  const nowFortaleza = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Fortaleza" })
+  );
+  const nowMin = nowFortaleza.getHours() * 60 + nowFortaleza.getMinutes();
+
+  // A plataforma tem atraso natural (cadência do CLP + pipeline + refresh da
+  // tela). Só é "sem comunicação" quando passa disso — senão a faixa apareceria
+  // o tempo todo, em usina saudável.
+  const gapToleranceMin = Math.max(15, step * 3);
+  const isStale = Number.isFinite(nowMin) && nowMin > lastMin + gapToleranceMin;
+  const endMin = isStale ? Math.min(nowMin, 24 * 60 - 1) : lastMin;
 
   const labels = [];
   const activePower = [];
@@ -374,16 +395,20 @@ function normalizeDailyPayload(payload) {
   const meterPower = [];
   const expectedPower = [];
 
-  for (let m = 0; m <= lastMin; m += step) {
-    const hh = String(Math.floor(m / 60)).padStart(2, "0");
-    const mm = String(m % 60).padStart(2, "0");
-    labels.push(`${hh}:${mm}`);
+  const minuteLabel = (m) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
-    activePower.push(mapP.has(m) ? mapP.get(m) : 0);
-    irradiance.push(mapI.has(m) ? mapI.get(m) : 0);
-    irradianceGhi.push(mapIG.has(m) ? mapIG.get(m) : null);
-    meterPower.push(mapM.has(m) ? mapM.get(m) : null);
-    expectedPower.push(mapE.has(m) ? mapE.get(m) : 0);
+  for (let m = 0; m <= endMin; m += step) {
+    labels.push(minuteLabel(m));
+
+    // depois do último dado: nada é conhecido, então tudo é null
+    const unknown = m > lastMin;
+
+    activePower.push(unknown || !mapP.has(m) ? null : mapP.get(m));
+    irradiance.push(unknown || !mapI.has(m) ? null : mapI.get(m));
+    irradianceGhi.push(unknown || !mapIG.has(m) ? null : mapIG.get(m));
+    meterPower.push(unknown || !mapM.has(m) ? null : mapM.get(m));
+    expectedPower.push(unknown || !mapE.has(m) ? null : mapE.get(m));
   }
 
   const hasMeter = meterPower.some(v => v != null);
@@ -398,7 +423,11 @@ function normalizeDailyPayload(payload) {
     meterPower,
     expectedPower,
     hasMeter,
-    hasGhi
+    hasGhi,
+    // Faixa de "sem comunicação" desenhada pelo gráfico (plugin noCommBand).
+    // null = usina reportando em dia, nenhuma faixa.
+    noCommFromLabel: isStale ? minuteLabel(lastMin) : null,
+    noCommMinutes: isStale ? nowMin - lastMin : 0
   };
 }
 
@@ -6174,6 +6203,9 @@ function renderDailyChart() {
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { display: false },
+        // faixa de "sem comunicação" (ticket #14) — null quando a usina
+        // está reportando em dia
+        noCommBand: { fromLabel: DAILY.noCommFromLabel || null },
         tooltip: {
           backgroundColor: "rgba(6,18,14,0.96)",
           borderColor: "rgba(57,229,140,0.18)",
@@ -6183,6 +6215,9 @@ function renderDailyChart() {
           padding: 10,
           displayColors: true,
           usePointStyle: true,
+          // ponto sem dado não vira linha no tooltip: `Number(raw ?? 0)`
+          // mostraria "0 kW" onde o certo é "não sabemos" (ticket #14)
+          filter: (item) => item?.raw != null,
           callbacks: {
             label: (item) => {
               const label = item?.dataset?.label || "";
@@ -6226,9 +6261,94 @@ function renderDailyChart() {
           grid: { drawOnChartArea: false }
         }
       }
-    }
+    },
+    plugins: [_noCommBandPlugin]
   });
 }
+
+// Faixa de "sem comunicação" no gráfico diário.
+// O eixo segue até a hora atual mesmo sem dado (ticket #14), e o trecho
+// desconhecido é marcado como FAIXA — não como linha no zero. A curva
+// simplesmente para; quem olha vê o tempo correndo e desde quando a usina
+// está muda, sem concluir que a geração foi zero.
+const _noCommBandPlugin = {
+  id: "noCommBand",
+  beforeDatasetsDraw(chart) {
+    // lê da config DESTE gráfico (não de uma global): se o auto-refresh trocar
+    // os dados, a faixa nunca é desenhada a partir de outro conjunto
+    const fromLabel = chart?.options?.plugins?.noCommBand?.fromLabel;
+    if (!fromLabel) return;
+
+    const labels = chart?.data?.labels || [];
+    const idx = labels.indexOf(fromLabel);
+    if (idx < 0) return;
+
+    const area = chart.chartArea;
+    const xScale = chart.scales?.x;
+    if (!area || !xScale) return;
+
+    const xStart = Math.max(area.left, xScale.getPixelForValue(idx));
+    const xEnd = area.right;
+    const w = xEnd - xStart;
+    const h = area.bottom - area.top;
+    if (!(w > 2) || !(h > 2)) return;
+
+    const ctx = chart.ctx;
+    ctx.save();
+
+    // fundo
+    ctx.fillStyle = "rgba(255,107,107,0.06)";
+    ctx.fillRect(xStart, area.top, w, h);
+
+    // hachura diagonal (recortada na faixa)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(xStart, area.top, w, h);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,107,107,0.16)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let px = xStart - h; px < xEnd + h; px += 9) {
+      ctx.moveTo(px, area.bottom);
+      ctx.lineTo(px + h, area.top);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // borda de início
+    ctx.strokeStyle = "rgba(255,107,107,0.5)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(xStart, area.top);
+    ctx.lineTo(xStart, area.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // rótulo — some quando a faixa é estreita demais para ele caber
+    const texto = `sem comunicação desde ${fromLabel}`;
+    ctx.font = "600 11px 'Inter', system-ui, sans-serif";
+    const tw = ctx.measureText(texto).width;
+    if (w > tw + 20) {
+      const cx = xStart + w / 2;
+      const cy = area.top + 16;
+      ctx.fillStyle = "rgba(6,18,14,0.86)";
+      ctx.strokeStyle = "rgba(255,107,107,0.34)";
+      const bw = tw + 16, bh = 20;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(cx - bw / 2, cy - bh / 2, bw, bh, 5);
+      else ctx.rect(cx - bw / 2, cy - bh / 2, bw, bh);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#ff9d9d";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(texto, cx, cy);
+    }
+
+    ctx.restore();
+  }
+};
 
 function _updateDailyChartToggles() {
   const meterBtn = document.getElementById("dailyToggleMeter");
