@@ -27,6 +27,7 @@ const GW = {
   filtro: {},           // texto do filtro por aba
   sujo: false,
   catalogo: null,       // índice de gateway_templates/index.json
+  leuDoBanco: false,    // a leitura inicial do banco deu certo?
 };
 
 // ---------------------------------------------------------------------------

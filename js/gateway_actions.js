@@ -534,7 +534,9 @@ async function gwValidaTudo() {
 async function gwCarregaDoBanco(silencioso = false) {
   if (!silencioso) gwStatus("Carregando a configuração da usina...", "wait");
   const r = await gwFetch(`/plants/${GW.plantId}/clp/diagnostics`);
-  if (!r.ok) throw new Error(`não consegui ler a usina (HTTP ${r.status})`);
+  if (!r.ok) throw new Error(r.status === 401 || r.status === 403
+    ? `o servidor recusou o acesso (HTTP ${r.status}) — talvez seja preciso entrar de novo`
+    : `o servidor respondeu HTTP ${r.status}`);
   const d = await r.json();
 
   GW.podeEditar = !!d.is_admin;
@@ -554,6 +556,13 @@ async function gwCarregaDoBanco(silencioso = false) {
 }
 
 async function gwSalvaNoBanco() {
+  // Se a leitura inicial falhou, a tela não sabe o que está gravado: salvar
+  // aqui pode enterrar uma configuração boa. Perguntar antes.
+  if (!GW.leuDoBanco && !(await gwPergunta("Salvar sem ter lido a atual",
+      "Não consegui ler a configuração que está gravada nesta usina. Salvar agora " +
+      "substitui o que estiver lá — inclusive uma configuração que esteja funcionando. Continuar?"))) {
+    return;
+  }
   if (GW.aba === "geral") gwGeralAplica(false);
   gwStatus("Salvando no banco...", "wait");
   try {
@@ -735,13 +744,18 @@ async function gwInicia() {
   }
 
   GW.cfg = doBanco || gwNovaConfiguracao(GW.plantName);
+  GW.leuDoBanco = respondeu;
   GW.sujo = false;
   gwRender();
-  if (doBanco) {
-    gwStatus("Configuração carregada do banco desta usina.", "ok");
-  } else {
-    gwStatus("Usina ainda sem configuração — começamos de uma em branco. " +
-             "Comece pela aba Usina e gateway.", "info");
+  // "não consegui ler" e "ainda não tem configuração" produzem a mesma tela em
+  // branco, e são coisas MUITO diferentes: no primeiro caso pode haver uma
+  // configuração boa gravada. Só dá a mensagem de vazio quando a leitura deu
+  // certo; senão o aviso de erro fica de pé (e o salvar pede confirmação).
+  if (respondeu) {
+    gwStatus(doBanco
+      ? "Configuração carregada do banco desta usina."
+      : "Usina ainda sem configuração — começamos de uma em branco. " +
+        "Comece pela aba Usina e gateway.", doBanco ? "ok" : "info");
   }
 
   // ações da barra
