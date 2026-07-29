@@ -1201,6 +1201,34 @@ body::after{
     0 0 24px rgba(47,210,125,.15);
 }
 
+/* ── Número de série, ao lado do nome do inversor ──────────────
+   min-width reserva um espaço fixo de propósito: o serial varia muito de
+   tamanho conforme o fabricante, e sem a reserva a coluna dançaria de uma
+   linha para a outra. Serial longo encolhe com reticências e o valor
+   completo fica no title. */
+.inv-sn{
+  font-family: 'Space Mono', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: rgba(154,219,184,.82);
+  background: rgba(57,229,140,.07);
+  border: 1px solid rgba(57,229,140,.16);
+  border-radius: 6px;
+  padding: 2px 7px;
+  min-width: 92px;
+  max-width: 250px;
+  flex: 0 1 auto;
+  /* ancora no fim da coluna do nome: como "Inversor1" e "Inversor10" têm
+     larguras diferentes, sem isto cada chip parava num ponto distinto. */
+  margin-left: auto;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: none;
+}
+
 .inverter-row > span{
   min-width: 0;
 }
@@ -4007,17 +4035,35 @@ body.plant-enter #relaySection{
   background:linear-gradient(90deg, #39e58c, #7fd055);
 }
 
+/* A coluna do nome cresce para caber o S/N; as métricas encolhem na mesma
+   proporção (o total de fr não muda), então elas se deslocam para a direita
+   sem que a linha fique mais larga. */
 @media (min-width: 901px){
   .inverter-header,
   .inverter-row{
-    grid-template-columns: 14px 1.15fr 0.82fr 0.82fr 0.82fr 0.82fr 0.55fr 1.2fr 88px;
+    grid-template-columns: 14px 2fr 0.66fr 0.66fr 0.66fr 0.66fr 0.46fr 1.08fr 88px;
+  }
+
+  .inv-metric{
+    font-size: 12px;
   }
 }
 
 @media (max-width: 900px){
   .inverter-header,
   .inverter-row{
-    grid-template-columns: 14px 1.15fr 0.9fr 0.9fr 0.85fr 0.85fr 0.6fr 1.2fr 88px;
+    grid-template-columns: 14px 1.95fr 0.72fr 0.72fr 0.72fr 0.72fr 0.5fr 1.12fr 88px;
+  }
+
+  .inv-metric{
+    font-size: 11.5px;
+  }
+
+  .inv-sn{
+    min-width: 78px;
+    max-width: 140px;
+    font-size: 10px;
+    padding: 2px 5px;
   }
 }
 
@@ -4310,6 +4356,16 @@ body.plant-enter #relaySection{
     grid-row: 1;
     grid-column: 2;
     font-size: 15px;
+    flex-wrap: wrap;
+  }
+
+  /* Em card o espaço é curto: o S/N não reserva largura, só acompanha o nome. */
+  .inv-sn{
+    min-width: 0;
+    max-width: 100%;
+    margin-left: 0;
+    font-size: 10px;
+    padding: 1px 6px;
   }
 
   .inverter-row > .device-command-cell{

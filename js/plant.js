@@ -866,9 +866,28 @@ function openCommandConsole({ deviceType, deviceId }) {
   const typeLabel = String(deviceType || "").toUpperCase();
   nameEl.textContent = `${typeLabel} — ID ${deviceId}`;
 
-  const state = getDevicePersistentState(deviceType, deviceId, "off");
-  dotEl.className = "cmd-console__state-dot " + (state === "on" ? "is-on" : "is-off");
-  textEl.textContent = state === "on" ? "ESTADO ATUAL: LIGADO" : "ESTADO ATUAL: DESLIGADO";
+  // O estado tem que vir da TELEMETRIA, não do último comando que este
+  // navegador mandou. Antes daqui o padrão era "off", então o console
+  // chegava a escrever DESLIGADO num inversor gerando (Naturágua Inversor7,
+  // 235 kW, relatado em 29/07). O estado do comando só vale como reserva,
+  // e quando não há leitura nenhuma o console admite que não sabe.
+  let state = null;
+  if (String(deviceType).toLowerCase() === "inverter") {
+    const real = getInverterOnlineStateById(deviceId);
+    if (real !== null) state = real ? "on" : "off";
+  }
+  if (state === null) state = getDevicePersistentState(deviceType, deviceId, null);
+
+  if (state === "on") {
+    dotEl.className = "cmd-console__state-dot is-on";
+    textEl.textContent = "ESTADO ATUAL: LIGADO";
+  } else if (state === "off") {
+    dotEl.className = "cmd-console__state-dot is-off";
+    textEl.textContent = "ESTADO ATUAL: DESLIGADO";
+  } else {
+    dotEl.className = "cmd-console__state-dot is-unknown";
+    textEl.textContent = "ESTADO ATUAL: SEM LEITURA";
+  }
 
   // Limpa feedback anterior
   if (feedbackEl) feedbackEl.classList.add("hidden");
@@ -2031,7 +2050,7 @@ function ensureInverterRowsFromRealtime(inverters) {
     row.dataset.inverterRealId = String(realId);
     row.innerHTML = `
       <span class="status-dot"></span>
-      <span class="inverter-name">${title}<i class="arrow fa-solid fa-chevron-down"></i></span>
+      <span class="inverter-name">${title}<i class="arrow fa-solid fa-chevron-down"></i><span class="inv-sn" hidden></span></span>
       <div class="inv-metrics-grid">
         <span class="inv-metric" data-label="Power">—</span>
         <span class="inv-metric" data-label="Efficiency">—</span>
@@ -5447,6 +5466,29 @@ function isZeroSnapshot(inv) {
   return powerKw === 0 && freqHz === 0 && tempC === 0;
 }
 
+// Numero de serie lido do equipamento via Modbus. E dado de CADASTRO
+// (public.device.serial_number), nao telemetria: some da tela apenas quando o
+// equipamento nunca informou, e nao quando a leitura atrasa.
+function setInverterSerial(rowEl, inv) {
+  const el = rowEl?.querySelector(".inv-sn");
+  if (!el) return;
+
+  const raw = inv?.serial_number ?? inv?.serialNumber ?? null;
+  const sn = raw == null ? "" : String(raw).trim();
+
+  if (!sn) {
+    el.hidden = true;
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+
+  // textContent (nao innerHTML): o valor vem do payload do equipamento.
+  el.textContent = `S/N ${sn}`;
+  el.title = `Número de série: ${sn}`;
+  el.hidden = false;
+}
+
 function renderInverterRowKpis(rowEl, inv) {
   const powerKw = inv.active_power_kw ?? inv.power_kw ?? inv.power ?? inv.active_power;
   const effPct  = inv.efficiency_pct ?? inv.efficiency ?? inv.eff_pct;
@@ -5479,6 +5521,8 @@ function renderInverterRowKpis(rowEl, inv) {
     pr: prText,
     last: lastText
   });
+
+  setInverterSerial(rowEl, inv);
 
   const freshOnline = isOnlineByFreshness(inv);
   const online = freshOnline && !isZeroSnapshot(inv);
