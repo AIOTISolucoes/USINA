@@ -9786,7 +9786,15 @@ function _tkDate(s) {
 // =============================================================================
 const NOTIF_STORAGE_KEY = "platform_last_seen_update";
 
+// Quem chegou por `?infra=1` clicou num aviso de usina parada. As novidades da
+// plataforma não podem abrir por cima disso — nesse momento elas são ruído.
+let _NOTIF_VEIO_POR_INFRA = false;
+
 async function initPlatformUpdates() {
+  try {
+    _NOTIF_VEIO_POR_INFRA = new URLSearchParams(location.search).get("infra") === "1";
+  } catch (e) { /* URL exótica não pode derrubar o sininho */ }
+
   const bellBtn = document.getElementById("notifBellBtn");
   const panel = document.getElementById("notifPanel");
   const closeBtn = document.getElementById("notifPanelClose");
@@ -9807,6 +9815,13 @@ async function initPlatformUpdates() {
     e.stopPropagation();
     panel.style.display = "none";
     openNotifCenter();
+  });
+
+  const infraStrip = document.getElementById("notifInfraStrip");
+  if (infraStrip) infraStrip.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.style.display = "none";
+    openInfraHealth();
   });
 
   document.addEventListener("click", (e) => {
@@ -9831,6 +9846,15 @@ async function initPlatformUpdates() {
   }
 
   await _notifFetchAndRender();
+
+  // Saúde da infra: a faixa acompanha o sininho e se atualiza no ritmo do cron.
+  await _infraFetch();
+  setInterval(_infraFetch, INFRA_REFRESH_MS);
+
+  // O push de infraestrutura aponta para cá (`?infra=1`). Sem isto o clique na
+  // notificação abria a usina e a pessoa não via nem o histórico nem o que
+  // mais caiu junto — que é o dado que aponta para o CLP.
+  if (_NOTIF_VEIO_POR_INFRA) openInfraHealth();
 }
 
 let _notifAllUpdates = [];
@@ -9891,6 +9915,7 @@ function _notifRenderPanel(updates, lastSeen) {
 }
 
 function _notifShowModal(unseen) {
+  if (_NOTIF_VEIO_POR_INFRA) return;
   const overlay = document.getElementById("notifModalOverlay");
   const body = document.getElementById("notifModalBody");
   if (!overlay || !body) return;
@@ -9934,9 +9959,26 @@ function _notifCenterPrefs() {
   const p = _robotGetNotifPrefs();
   return {
     push_muted: p.push_muted === true,
+    // Chave que o infra_watch.py já lê desde 02/08 e que até agora ninguém
+    // tinha como marcar: quem quer alarme de equipamento mas não quer aviso
+    // de infraestrutura desliga só esta e continua recebendo o resto.
+    push_infra_muted: p.push_infra_muted === true,
     push_min_severity: p.push_min_severity || "all",
     push_disabled_codes: Array.isArray(p.push_disabled_codes) ? p.push_disabled_codes.map(String) : [],
   };
+}
+
+// Escreve as preferências salvas nos controles. Roda duas vezes de propósito:
+// na abertura (com o que está no localStorage, para a tela não piscar) e de
+// novo quando o servidor responde, que é a fonte de verdade.
+function _notifCenterApplyPrefs() {
+  const cur = _notifCenterPrefs();
+  const mutedEl = document.getElementById("notifCenterMuted");
+  const infraEl = document.getElementById("notifCenterInfraMuted");
+  const sevEl = document.getElementById("notifCenterSeverity");
+  if (mutedEl) mutedEl.checked = cur.push_muted;
+  if (infraEl) infraEl.checked = cur.push_infra_muted;
+  if (sevEl) sevEl.value = cur.push_min_severity;
 }
 
 async function openNotifCenter() {
@@ -9959,6 +10001,12 @@ async function openNotifCenter() {
       <label class="notif-center-switch">
         <input type="checkbox" id="notifCenterMuted">
         <span>Pausar todas as notificações de alarme</span>
+      </label>
+
+      <label class="notif-center-switch">
+        <input type="checkbox" id="notifCenterInfraMuted">
+        <span>Pausar avisos de usina sem comunicação
+          <small>(infraestrutura — separado dos alarmes de equipamento)</small></span>
       </label>
 
       <div class="notif-center-field">
@@ -9997,11 +10045,7 @@ async function openNotifCenter() {
   document.getElementById("notifCenterCancel")?.addEventListener("click", close);
   document.getElementById("notifCenterSave")?.addEventListener("click", _notifCenterSave);
 
-  const cur = _notifCenterPrefs();
-  const mutedEl = document.getElementById("notifCenterMuted");
-  const sevEl = document.getElementById("notifCenterSeverity");
-  if (mutedEl) mutedEl.checked = cur.push_muted;
-  if (sevEl) sevEl.value = cur.push_min_severity;
+  _notifCenterApplyPrefs();
 
   document.getElementById("notifCenterSearch")?.addEventListener("input", (e) => {
     _notifCenterRenderList(String(e.target.value || "").toLowerCase());
@@ -10027,11 +10071,7 @@ async function _notifCenterLoadCatalog() {
     _NOTIF_ALARM_CATALOG = Array.isArray(payload?.alarm_catalog) ? payload.alarm_catalog : [];
     if (payload?.prefs && typeof payload.prefs === "object") {
       localStorage.setItem(ROBOT_NOTIF_PREFS_KEY, JSON.stringify(payload.prefs));
-      const cur = _notifCenterPrefs();
-      const mutedEl = document.getElementById("notifCenterMuted");
-      const sevEl = document.getElementById("notifCenterSeverity");
-      if (mutedEl) mutedEl.checked = cur.push_muted;
-      if (sevEl) sevEl.value = cur.push_min_severity;
+      _notifCenterApplyPrefs();
     }
   } catch (e) {
     console.warn("[notif-center] catálogo indisponível:", e);
@@ -10099,6 +10139,7 @@ async function _notifCenterSave() {
   const prefs = {
     ..._robotGetNotifPrefs(),
     push_muted: document.getElementById("notifCenterMuted")?.checked === true,
+    push_infra_muted: document.getElementById("notifCenterInfraMuted")?.checked === true,
     push_min_severity: document.getElementById("notifCenterSeverity")?.value || "all",
     push_disabled_codes: Array.from(disabled),
   };
@@ -10122,6 +10163,218 @@ async function _notifCenterSave() {
       fb.className = "notif-center-feedback err";
     }
   }
+}
+
+// =============================================================================
+// SAÚDE DA INFRAESTRUTURA (assistente de infra — elo 1)
+// O detector roda no cron da EC2 desde 02/08 e o push avisa a cada transição.
+// Faltava o lugar de OLHAR: até aqui o histórico só existia por SQL ou pelo
+// `--report` via SSH. Um cartão por USINA, nunca um por achado — a Pacajus2
+// abriu 5 achados (um por tabela) para UM problema só, e repetir isso na tela
+// desfaz o agrupamento que o push já faz de propósito.
+// =============================================================================
+const INFRA_REFRESH_MS = 5 * 60 * 1000;   // mesma cadência do cron da EC2
+let _INFRA_STATE = null;
+
+function _infraUnwrap(d) {
+  // Algumas respostas chegam embrulhadas em {body}. Mesmo tratamento do
+  // catálogo de alarmes — melhor aceitar as duas formas do que depender disso.
+  if (d && d.body) return typeof d.body === "string" ? JSON.parse(d.body) : d.body;
+  return d;
+}
+
+async function _infraFetch() {
+  try {
+    const r = await apiFetch("/infra/health?days=7");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _INFRA_STATE = _infraUnwrap(await r.json());
+  } catch (e) {
+    console.warn("[infra] indisponível:", e);
+    _INFRA_STATE = null;
+  }
+  _infraRenderStrip();
+  return _INFRA_STATE;
+}
+
+function _infraDur(s) {
+  const n = Math.max(0, Math.round(Number(s) || 0));
+  if (n < 90) return `${n} s`;
+  const min = Math.round(n / 60);
+  if (min < 90) return `${min} min`;
+  // Horas até 3 dias: numa parada de usina "51,6 h" diz muito mais do que
+  // "2 dias", e é esse número que vai para a conversa com o cliente.
+  const h = n / 3600;
+  if (h < 72) return `${h.toFixed(1).replace(".", ",")} h`;
+  return `${(h / 24).toFixed(1).replace(".", ",")} dias`;
+}
+
+function _infraWhen(iso) {
+  if (!iso) return "";
+  const d = _tkDate(iso);
+  return isNaN(d) ? "" : d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit",
+                                                    hour: "2-digit", minute: "2-digit" });
+}
+
+// A faixa dentro do sininho. É o único ponto da tela que diz, sem clique
+// nenhum, se a plataforma está recebendo dado das usinas.
+function _infraRenderStrip() {
+  const strip = document.getElementById("notifInfraStrip");
+  const bell = document.getElementById("notifBellBtn");
+  if (!strip) return;
+
+  const st = _INFRA_STATE;
+  if (!st || st.available === false) {
+    strip.style.display = "none";
+    bell?.classList.remove("infra-alert");
+    return;
+  }
+
+  const down = st.summary?.plants_down || 0;
+  const stale = st.watch?.stale === true;
+  strip.style.display = "";
+  strip.className = "notif-infra-strip " + (down ? "down" : (stale ? "unknown" : "ok"));
+  bell?.classList.toggle("infra-alert", down > 0);
+
+  let icone, texto;
+  if (down) {
+    icone = "fa-plug-circle-xmark";
+    texto = down === 1
+      ? `${_notifEsc(st.incidents[0]?.plant_name || "1 usina")} sem comunicação`
+      : `${down} usinas sem comunicação`;
+  } else if (stale) {
+    // Vigia calado não é "tudo bem": é "não sei". A diferença entre as duas
+    // coisas é justamente o que faz um painel de monitoramento valer algo.
+    icone = "fa-triangle-exclamation";
+    texto = `Vigilância sem sinal há ${_infraDur(st.watch?.quiet_s)}`;
+  } else {
+    icone = "fa-plug-circle-check";
+    texto = "Infraestrutura: tudo comunicando";
+  }
+  strip.innerHTML = `<i class="fa-solid ${icone}"></i><span>${texto}</span>` +
+                    `<i class="fa-solid fa-chevron-right notif-infra-go"></i>`;
+}
+
+async function openInfraHealth() {
+  document.getElementById("infraHealthOverlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "infraHealthOverlay";
+  overlay.className = "notif-center-overlay";
+  overlay.innerHTML = `
+    <div class="notif-center-box infra-box" role="dialog" aria-modal="true" aria-labelledby="infraHealthTitle">
+      <div class="notif-center-head">
+        <h3 id="infraHealthTitle"><i class="fa-solid fa-heart-pulse"></i> Saúde da infraestrutura</h3>
+        <button type="button" class="notif-center-close" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="infra-body" id="infraHealthBody">
+        <p class="notif-center-loading">Consultando…</p>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector(".notif-center-close")?.addEventListener("click", close);
+
+  await _infraFetch();
+  _infraRenderModal();
+}
+
+function _infraRenderModal() {
+  const body = document.getElementById("infraHealthBody");
+  if (!body) return;
+  const st = _INFRA_STATE;
+
+  if (!st) {
+    body.innerHTML = `<p class="notif-center-loading">Não foi possível consultar a
+      saúde da infraestrutura agora. Os avisos no celular continuam valendo.</p>`;
+    return;
+  }
+  if (st.available === false) {
+    body.innerHTML = `<p class="notif-center-loading">O monitoramento ainda não está
+      instalado neste banco.<br><small>${_notifEsc(st.hint || "")}</small></p>`;
+    return;
+  }
+
+  const down = st.summary?.plants_down || 0;
+  const partes = [];
+
+  partes.push(`<div class="infra-hero ${down ? "down" : "ok"}">
+      <i class="fa-solid ${down ? "fa-plug-circle-xmark" : "fa-plug-circle-check"}"></i>
+      <div>
+        <strong>${down ? (down === 1 ? "1 usina sem comunicação" : `${down} usinas sem comunicação`)
+                       : "Todas as usinas comunicando"}</strong>
+        <span>${down ? "A equipe AIOTI já foi avisada."
+                     : "Nenhum problema aberto no caminho do dado."}</span>
+      </div>
+    </div>`);
+
+  if (st.watch?.stale === true) {
+    partes.push(`<div class="infra-warn"><i class="fa-solid fa-triangle-exclamation"></i>
+      <span>O monitoramento não registra atividade há ${_infraDur(st.watch.quiet_s)}.
+      Ou a frota inteira parou, ou a própria vigilância parou — vale conferir.</span></div>`);
+  }
+
+  if (down) {
+    partes.push(`<div class="infra-sec-title">Agora</div>`);
+    partes.push(st.incidents.map(_infraCard).join(""));
+  }
+
+  const hist = st.history || [];
+  partes.push(`<div class="infra-sec-title">Últimos ${st.days || 7} dias</div>`);
+  partes.push(hist.length
+    ? hist.map(_infraCard).join("")
+    : `<p class="infra-empty">Nenhuma interrupção registrada no período.</p>`);
+
+  if (st.technical && st.watch?.scopes) {
+    partes.push(`<div class="infra-foot">Vigiando ${st.watch.scopes} escopos ·
+      ritmo recalculado em ${_infraWhen(st.watch.computed_at) || "—"}</div>`);
+  }
+
+  body.innerHTML = partes.join("");
+}
+
+function _infraCard(g) {
+  const aberto = g.open === true;
+  const sev = aberto ? (g.severity === "critical" ? "crit" : "warn") : "done";
+  // started_at é quando a usina calou, não quando o detector percebeu — a
+  // Acopiara caiu 26 h antes do detector existir e apareceria como "10 min".
+  const quando = aberto
+    ? `parou ${_infraWhen(g.started_at)} · há ${_infraDur(g.duration_s)}`
+    : `${_infraWhen(g.started_at)} → ${_infraWhen(g.closed_at)} · ${_infraDur(g.duration_s)} fora`;
+
+  // Detector que ainda não estava de pé é informação de operação: sem esta
+  // linha o incidente parece ter sido acompanhado desde o primeiro minuto.
+  let atraso = "";
+  if (g.detected_at && g.started_at) {
+    const gap = (_tkDate(g.detected_at) - _tkDate(g.started_at)) / 1000;
+    if (gap > 1800) {
+      atraso = `<div class="infra-src">Detectado só ${_infraWhen(g.detected_at)} ·
+                  ${_infraDur(gap)} depois do início</div>`;
+    }
+  }
+
+  // Nome de tabela só para a equipe: é o que aponta para o CLP. O cliente vê a
+  // usina e o tempo, sem `raw_thermalrelay` nenhum (mesma regra do push).
+  const fontes = Array.isArray(g.sources) && g.sources.length
+    ? `<div class="infra-src">${g.sources.length === 1 ? "Fonte" : `${g.sources.length} fontes`}:
+         ${_notifEsc(g.sources.join(", "))}</div>`
+    : "";
+
+  const link = g.plant_id
+    ? `<a class="infra-link" href="plant.html?plant_id=${encodeURIComponent(g.plant_id)}">
+         Abrir usina <i class="fa-solid fa-arrow-right"></i></a>`
+    : "";
+
+  return `<div class="infra-card ${sev}">
+      <div class="infra-card-top">
+        <span class="infra-plant">${_notifEsc(g.plant_name || `Usina ${g.plant_id}`)}</span>
+        <span class="infra-when">${quando}</span>
+      </div>
+      ${fontes}
+      ${atraso}
+      ${link}
+    </div>`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {

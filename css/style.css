@@ -1059,6 +1059,129 @@ body {
   color: #7FD055;
 }
 .notif-center-btn.primary:hover { background: rgba(57,229,140,0.24); }
+.notif-center-switch small {
+  display: block;
+  font-size: 11px;
+  color: rgba(233,255,243,0.45);
+  margin-top: 2px;
+}
+
+/* ===========================================================
+   SAÚDE DA INFRAESTRUTURA (assistente de infra, 03/08)
+   Faixa no sininho + modal. Verde/vermelho/âmbar: âmbar é o
+   "não sei" (o vigia calou), que não pode parecer verde.
+   =========================================================== */
+.notif-infra-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+  color: #e9fff3;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.notif-infra-strip:hover { background: rgba(255,255,255,0.07); }
+.notif-infra-strip span { flex: 1; }
+.notif-infra-go { font-size: 10px; opacity: 0.45; }
+.notif-infra-strip.ok      { color: #7FD055; }
+.notif-infra-strip.down    { color: #ff6b6b; background: rgba(239,68,68,0.10); }
+.notif-infra-strip.unknown { color: #ffd666; background: rgba(255,214,102,0.08); }
+
+/* Sino com anel vermelho enquanto houver usina muda — o badge numérico
+   continua sendo das atualizações, são dois assuntos diferentes. */
+.notif-bell-btn.infra-alert {
+  box-shadow: 0 0 0 2px rgba(239,68,68,0.55);
+  border-radius: 50%;
+}
+
+.infra-box { width: min(560px, 100%); }
+.infra-body {
+  overflow-y: auto;
+  margin-top: 12px;
+  padding-right: 4px;
+}
+.infra-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.infra-hero i { font-size: 20px; }
+.infra-hero div { display: flex; flex-direction: column; gap: 2px; }
+.infra-hero strong { font-size: 14px; }
+.infra-hero span { font-size: 12px; color: rgba(233,255,243,0.6); }
+.infra-hero.ok   { background: rgba(57,229,140,0.10); color: #7FD055; }
+.infra-hero.down { background: rgba(239,68,68,0.12);  color: #ff6b6b; }
+
+.infra-warn {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(255,214,102,0.10);
+  color: #ffd666;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+.infra-sec-title {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(233,255,243,0.45);
+  margin: 16px 0 8px;
+}
+.infra-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-left: 3px solid rgba(255,255,255,0.18);
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(255,255,255,0.03);
+}
+.infra-card.crit { border-left-color: #ef4444; }
+.infra-card.warn { border-left-color: #ffd666; }
+.infra-card.done { border-left-color: #7FD055; opacity: 0.82; }
+.infra-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.infra-plant { font-size: 13px; font-weight: 700; color: #e9fff3; }
+.infra-when  { font-size: 11px; color: rgba(233,255,243,0.55); }
+.infra-src   { font-size: 11px; color: rgba(233,255,243,0.45); margin-top: 5px; }
+.infra-link {
+  display: inline-block;
+  margin-top: 7px;
+  font-size: 11px;
+  color: #7FD055;
+  text-decoration: none;
+}
+.infra-link:hover { text-decoration: underline; }
+.infra-empty {
+  font-size: 12px;
+  color: rgba(233,255,243,0.5);
+  padding: 6px 2px;
+}
+.infra-foot {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 11px;
+  color: rgba(233,255,243,0.4);
+}
 .notif-panel-list {
   overflow-y: auto;
   flex: 1;
