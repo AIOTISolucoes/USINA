@@ -107,6 +107,11 @@
       .ua-form .ua-full{grid-column:1/-1;}
       .ua-field label{display:block;font-size:.7rem;color:var(--text-muted,#7fa892);
         margin-bottom:4px;font-weight:600;}
+      .ua-temp-pw{margin-top:10px;padding:10px 12px;border-radius:10px;
+        border:1px solid rgba(57,229,140,.45);background:rgba(57,229,140,.08);}
+      .ua-temp-pw-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
+      .ua-temp-pw-row code{font-size:1.05rem;letter-spacing:.08em;font-weight:700;
+        background:rgba(0,0,0,.25);padding:6px 10px;border-radius:8px;user-select:all;}
       .ua-field input[type=text],.ua-field input[type=email],.ua-field input[type=password],
       .ua-field select{width:100%;box-sizing:border-box;background:rgba(255,255,255,.05);
         border:1px solid rgba(57,229,140,.25);color:inherit;border-radius:8px;
@@ -323,8 +328,15 @@
             ${user ? "disabled" : ""} maxlength="40" autocomplete="off"></div>
         <div class="ua-field"><label>E-mail</label>
           <input type="email" id="uaFEmail" value="${user ? (user.email || "") : ""}" autocomplete="off"></div>
-        <div class="ua-field"><label>${user ? "Nova senha (em branco = manter)" : "Senha (mín. 8)"}</label>
-          <input type="password" id="uaFPassword" autocomplete="new-password"></div>
+        <div class="ua-field ua-full"><label>Senha</label>
+          ${user
+            ? `<button class="ua-btn ua-ghost" id="uaFReset" type="button">Resetar senha</button>
+               <div class="ua-muted" style="margin-top:6px">Gera uma senha temporária para entregar
+                 a ${user.username}. A senha atual dele para de funcionar na hora.</div>`
+            : `<div class="ua-muted">A plataforma gera uma senha temporária e mostra aqui uma única
+                 vez, para você entregar à pessoa. Ela é obrigada a trocar no primeiro acesso —
+                 depois disso ninguém, nem você, conhece a senha dela.</div>`}
+          <div id="uaTempPw"></div></div>
         ${custSel}
         ${restricted}
       </div>
@@ -360,6 +372,65 @@
 
     body.querySelector("#uaCancel").addEventListener("click", loadAndRenderList);
     body.querySelector("#uaSave").addEventListener("click", () => saveForm(user, editingSelf));
+
+    const resetBtn = body.querySelector("#uaFReset");
+    if (resetBtn) {
+      resetBtn.addEventListener("click", async () => {
+        if (!confirm(`Resetar a senha de ${user.username}?\n\n`
+                   + `A senha atual dele para de funcionar imediatamente e você recebe uma `
+                   + `temporária para entregar.`)) return;
+        resetBtn.disabled = true;
+        try {
+          const r = await api(`/users/${user.id}`, {
+            method: "PATCH", body: JSON.stringify({ reset_password: true })
+          });
+          showTempPassword(user.username, r && r.temp_password);
+        } catch (err) {
+          const errBox = body.querySelector("#uaFormError");
+          errBox.textContent = err.message || "erro ao resetar senha";
+          errBox.style.display = "block";
+        } finally {
+          resetBtn.disabled = false;
+        }
+      });
+    }
+  }
+
+  // Mostra a senha temporária UMA VEZ. Não existe rota que devolva ela depois:
+  // se a pessoa perder, o caminho é resetar de novo.
+  function showTempPassword(username, pw) {
+    const box = document.getElementById("uaTempPw");
+    if (!box) return;
+    if (!pw) {
+      box.innerHTML = `<div class="ua-error" style="display:block">Senha resetada, mas o servidor
+        não devolveu a temporária. Rode a migration primeiro_acesso_2026_08_04.sql e tente de novo.</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="ua-temp-pw">
+        <div class="ua-muted">Senha temporária de <b>${username}</b> — anote agora, ela não
+          aparece de novo:</div>
+        <div class="ua-temp-pw-row">
+          <code id="uaTempPwVal">${pw}</code>
+          <button class="ua-btn ua-ghost" type="button" id="uaTempPwCopy">Copiar</button>
+        </div>
+        <div class="ua-muted">A pessoa é obrigada a trocar no primeiro acesso.</div>
+      </div>`;
+    const copyBtn = box.querySelector("#uaTempPwCopy");
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pw);
+        copyBtn.textContent = "Copiado";
+      } catch (_) {
+        // clipboard bloqueado (http, permissão): seleciona para copiar na mão
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(box.querySelector("#uaTempPwVal"));
+        sel.removeAllRanges();
+        sel.addRange(range);
+        copyBtn.textContent = "Selecionado";
+      }
+    });
   }
 
   async function saveForm(user, editingSelf) {
@@ -372,9 +443,8 @@
       full_name: body.querySelector("#uaFName").value.trim(),
       email: body.querySelector("#uaFEmail").value.trim()
     };
-    const pw = body.querySelector("#uaFPassword").value;
-    if (pw) payload.password = pw;
-
+    // Senha nao vai mais no payload: quem cria nao escolhe senha de ninguem.
+    // Criacao gera temporaria no backend; troca depois e pelo botao "Resetar".
     if (!editingSelf) {
       const roleEl = body.querySelector("#uaFRole");
       if (roleEl) {
@@ -397,17 +467,23 @@
 
     const saveBtn = body.querySelector("#uaSave");
     saveBtn.disabled = true;
+    let criado = false;
     try {
       if (user) {
         await api(`/users/${user.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        loadAndRenderList();
       } else {
         payload.username = body.querySelector("#uaFUsername").value.trim();
-        if (!pw) return showErr("Informe a senha do novo usuário (mínimo 8 caracteres).");
         const custSelEl = body.querySelector("#uaFCustomer");
         if (custSelEl) payload.customer_id = Number(custSelEl.value);
-        await api("/users", { method: "POST", body: JSON.stringify(payload) });
+        const r = await api("/users", { method: "POST", body: JSON.stringify(payload) });
+        // NAO volta para a lista: a senha temporaria aparece uma vez so, e sair
+        // da tela agora perderia ela sem ninguem ter anotado. O "Voltar" fica
+        // como saida consciente depois de anotar.
+        criado = true;
+        showTempPassword(payload.username, r && r.temp_password);
+        saveBtn.textContent = "Usuário criado";
       }
-      loadAndRenderList();
     } catch (err) {
       let msg = err.message || "erro ao salvar";
       if (err.code === "token_required" || err.code === "token_invalid") {
@@ -415,7 +491,9 @@
       }
       showErr(msg);
     } finally {
-      saveBtn.disabled = false;
+      // depois de criar, o botao fica travado de proposito: clicar de novo
+      // tentaria criar o mesmo username e so devolveria 409.
+      saveBtn.disabled = criado;
     }
   }
 
