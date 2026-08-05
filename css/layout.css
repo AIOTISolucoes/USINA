@@ -360,11 +360,16 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
   z-index: 1;
 }
 
+/* Active Power e Rated Power (DC) trocaram de posição em 05/08. A troca é
+   feita pela grid-area, não mexendo no HTML: assim cada bloco leva junto o
+   visual dele (o Active continua verde e 26px, o Rated continua discreto).
+   As áreas do template seguem chamando "rated" e "active" pelo lugar que
+   ocupam na tela, não por quem mora nelas. */
 .psf-status-icons { grid-area: status; justify-self: start; }
 .psf-gauge        { grid-area: gauge; justify-self: center; }
-.psf-rated--dc    { grid-area: rated; justify-self: end; }
+.psf-active       { grid-area: rated; justify-self: end; }
 .psf-rated--ac    { grid-area: ac;    justify-self: start; }
-.psf-active       { grid-area: active; justify-self: end; }
+.psf-rated--dc    { grid-area: active; justify-self: end; }
 
 .psf-sep {
   height: 40px;
@@ -380,9 +385,12 @@ html { scrollbar-gutter: stable; overflow-x: hidden; }
   gap: 4px;
 }
 
-.psf-rated--dc { padding: 0 12px 0 0; }
+/* O recuo e o filete são do LUGAR, não do bloco: quem está à esquerda do anel
+   respira para a direita, quem está na ponta direita ganha o separador. Com a
+   troca acima, eles acompanham a posição para o cabeçalho ficar idêntico. */
+.psf-active    { padding: 0 12px 0 0; border-left: none; }
 .psf-rated--ac { padding: 0 0 0 12px; }
-.psf-active    { padding: 0 0 0 16px; border-left: 1px solid rgba(57,229,140,0.14); }
+.psf-rated--dc { padding: 0 0 0 16px; border-left: 1px solid rgba(57,229,140,0.14); }
 
 .psf-rated-label,
 .psf-active-label {
@@ -1305,9 +1313,10 @@ tbody tr:hover td {
     justify-self: center;
     padding: 0 6px;
   }
-  .psf-rated--dc{ grid-area: rated; justify-self: end; }
+  /* troca de 05/08: ver comentário na regra base */
+  .psf-active   { grid-area: rated; justify-self: end; }
   .psf-rated--ac{ grid-area: ac;    justify-self: start; }
-  .psf-active   { grid-area: active; }
+  .psf-rated--dc{ grid-area: active; }
   .psf-status-icons{
     grid-area: status;
     justify-self: start;
@@ -1370,9 +1379,10 @@ tbody tr:hover td {
     padding: 0 6px;
   }
 
-  .psf-rated--dc{ grid-area: rated; justify-self: end; }
+  /* troca de 05/08: ver comentário na regra base */
+  .psf-active   { grid-area: rated; justify-self: end; }
   .psf-rated--ac{ grid-area: ac;    justify-self: start; }
-  .psf-active   { grid-area: active; }
+  .psf-rated--dc{ grid-area: active; }
 
   .psf-gauge-circle{
     width: 74px;
@@ -1564,11 +1574,18 @@ tbody tr:hover td {
     font-size: 12px;
   }
 
-  .psf-rated--dc{
+  /* troca de 05/08. No celular as posições não são espelhadas: "rated" é uma
+     coluna estreita ao lado do anel e "active" é uma linha inteira embaixo.
+     Então aqui não basta trocar a área — o alinhamento, o recuo e o filete
+     também são do LUGAR e trocaram junto, senão o bloco que subiu ficaria
+     centralizado dentro de uma coluna estreita. */
+  .psf-active{
     grid-area: rated;
     align-items: flex-end;
     padding: 0 10px 0 0;
     border-right: 1px solid rgba(57,229,140,0.14);
+    border-left: none;
+    justify-self: auto;
   }
 
   .psf-rated--ac{
@@ -1578,16 +1595,16 @@ tbody tr:hover td {
     border-left: 1px solid rgba(57,229,140,0.14);
   }
 
-  .psf-active{
+  .psf-rated--dc{
     grid-area: active;
     align-items: center;
     padding: 0;
-    border-left: none;
+    border-right: none;
     justify-self: center;
   }
 
-  .psf-rated--dc .psf-rated-label,
-  .psf-rated--dc .psf-rated-value{
+  .psf-active-label,
+  .psf-active-value{
     text-align: right;
   }
 
@@ -1596,8 +1613,8 @@ tbody tr:hover td {
     text-align: left;
   }
 
-  .psf-active-label,
-  .psf-active-value{
+  .psf-rated--dc .psf-rated-label,
+  .psf-rated--dc .psf-rated-value{
     text-align: center;
   }
 
