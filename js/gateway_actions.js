@@ -754,8 +754,13 @@ async function gwInicia() {
   if (respondeu) {
     gwStatus(doBanco
       ? "Configuração carregada do banco desta usina."
-      : "Usina ainda sem configuração — começamos de uma em branco. " +
-        "Comece pela aba Usina e gateway.", doBanco ? "ok" : "info");
+      // quem não é administrador não enxerga a aba "Usina e gateway", então
+      // mandar começar por ela seria mandar procurar o que não existe
+      : GW.podeEditar
+        ? "Usina ainda sem configuração — começamos de uma em branco. " +
+          "Comece pela aba Usina e gateway."
+        : "Esta usina ainda não tem configuração de gateway salva.",
+      doBanco ? "ok" : "info");
   }
 
   // ações da barra

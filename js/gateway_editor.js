@@ -181,13 +181,29 @@ function gwPergunta(titulo, texto) {
 // Render — abas
 // ---------------------------------------------------------------------------
 
+// Abas que o CLIENTE enxerga. As outras (canais, tópicos MQTT, sequências,
+// PID, comandos de escrita...) descrevem como o gateway conversa com o
+// equipamento e com a AWS: mexer ali derruba a ingestão da usina inteira, e
+// é trabalho nosso. Devices e Requests Modbus são o que o cliente precisa
+// consultar para saber o que está sendo lido de cada equipamento.
+//
+// Isto é REDUÇÃO DE RUÍDO, não é a barreira de segurança. Quem barra escrita
+// é o backend (is_admin em /clp/diagnostics -> GW.podeEditar, e a validação
+// no salvar/publicar). Esconder aba no browser não protege nada sozinho.
+const GW_ABAS_CLIENTE = ["devices", "requests"];
+
+function gwAbaLiberada(key) {
+  return GW.podeEditar || GW_ABAS_CLIENTE.includes(key);
+}
+
 function gwRenderAbas() {
   const nav = document.getElementById("gwTabs");
   if (!nav) return;
   const abas = [{ key: "geral", titulo: "Usina e gateway", icone: "fa-industry" }]
     .concat(GW_SECOES.map((s) => ({
       key: s.key, titulo: s.titulo, icone: s.icone, n: gwLista(s.key).length,
-    })));
+    })))
+    .filter((a) => gwAbaLiberada(a.key));
   nav.innerHTML = abas.map((a) => `
     <button type="button" class="gw-tab ${a.key === GW.aba ? "is-on" : ""}"
             data-aba="${a.key}">
@@ -201,6 +217,10 @@ function gwRenderAbas() {
 }
 
 function gwRender() {
+  // A aba padrão é "geral", que o cliente não vê. Sem esta linha ele abriria
+  // o configurador numa aba inexistente: nenhuma acesa na barra e o conteúdo
+  // dela renderizado assim mesmo, que é o pior dos dois mundos.
+  if (!gwAbaLiberada(GW.aba)) GW.aba = GW_ABAS_CLIENTE[0];
   gwRenderAbas();
   const corpo = document.getElementById("gwBody");
   if (!corpo) return;
