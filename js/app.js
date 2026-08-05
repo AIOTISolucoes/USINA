@@ -1962,6 +1962,58 @@ async function togglePlantCollectorMaintenance(plantId, plantName, isOn) {
   }
 }
 
+// --- Manutenção em campo (equipe DO CLIENTE) no card do portfólio ---------
+// Espelha o can_flag_field_maintenance do api2.py. Se divergir, o botão
+// aparece e a rota responde 403: confuso, mas não perigoso.
+function canFlagFieldMaintenance() {
+  let u = {};
+  try { u = JSON.parse(localStorage.getItem("user") || "{}"); } catch { u = {}; }
+  const p = u.permissions || {};
+  return u.is_superuser === true || u.role_key === "admin_customer" ||
+    u.role_key === "operator" || p.admin_customer === true ||
+    p.plant_edit === true || p.remote_command === true;
+}
+
+function _syncCardFieldBtn(btn, isOn) {
+  btn.dataset.fieldOn = isOn ? "1" : "0";
+  btn.classList.toggle("is-on", isOn);
+  btn.title = isOn
+    ? "Encerrar manutenção em campo"
+    : "Marcar manutenção em campo (sua equipe na usina)";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+async function togglePlantFieldMaintenance(plantId, plantName, isOn) {
+  const turnOn = !isOn;
+  let nota = null;
+  if (turnOn) {
+    const resp = window.prompt(
+      `Marcar a usina "${plantName}" como EM MANUTENÇÃO EM CAMPO?\n\n` +
+      "O aviso fica visível para todos até você encerrar, e a queda de geração\n" +
+      "no período deixa de ser tratada como falha pelo diagnóstico.\n\n" +
+      "Descreva o serviço (opcional):", "");
+    if (resp === null) return;
+    nota = resp.trim() || null;
+  } else if (!window.confirm(`Encerrar a manutenção em campo da usina "${plantName}"?`)) {
+    return;
+  }
+  try {
+    const res = await apiFetch(`/plants/${plantId}/maintenance`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maintenance: turnOn, scope: "field", note: nota })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.hint || data?.error || `HTTP ${res.status}`);
+    const btn = document.querySelector(`.plant-card__field-btn[data-field-plant-id="${plantId}"]`);
+    if (btn) _syncCardFieldBtn(btn, data?.field_maintenance === true);
+    if (typeof refreshDashboard === "function") refreshDashboard();
+  } catch (e) {
+    console.error("[field-maintenance] erro", e);
+    alert("Falha ao alterar a manutenção em campo: " + (e?.message || e));
+  }
+}
+
 function getPlantCardStatus(plant) {
   // Modo manutenção do coletor local tem prioridade sobre qualquer status:
   // a equipe está mexendo no CLP, então "offline" aqui NÃO é falha.
@@ -5134,6 +5186,11 @@ function updatePortfolioCardData(plants) {
     // Sincroniza o toggle de manutenção do coletor (estado pode mudar por outro admin)
     const maintBtn = card.querySelector(".plant-card__maint-btn");
     if (maintBtn) _syncCardMaintBtn(maintBtn, plant.collector_maintenance === true);
+
+    // Idem para o de campo: duas pessoas da mesma equipe podem estar na usina,
+    // e quem não clicou precisa ver o estado mudar sozinho
+    const fieldBtn = card.querySelector(".plant-card__field-btn");
+    if (fieldBtn) _syncCardFieldBtn(fieldBtn, plant.field_maintenance === true);
   });
 }
 
@@ -6137,6 +6194,14 @@ function renderPortfolioCards(plants) {
       <div class="plant-card__top">
         <div class="${iconClass}"><i class="fa-solid fa-seedling"></i></div>
         <div class="plant-card__name">${plantName}</div>
+        <button
+          class="plant-card__field-btn"
+          data-field-plant-id="${plantId}"
+          type="button"
+          style="display:none;"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17h20"/><path d="M4 17a8 8 0 0 1 16 0"/><path d="M9 9.5V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2v4.3"/><path d="M2 17v1.5A1.5 1.5 0 0 0 3.5 20h17a1.5 1.5 0 0 0 1.5-1.5V17"/></svg>
+        </button>
         ${commBadgeHtml}
       </div>
       <div class="plant-card__stats">
@@ -6235,6 +6300,19 @@ function renderPortfolioCards(plants) {
       _maintBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         togglePlantCollectorMaintenance(plantId, plantName, _maintBtn.dataset.maintOn === "1");
+      });
+    }
+
+    // Manutenção em campo (equipe DO CLIENTE) — ao lado do nome, não na fila de
+    // ícones do canto. Lá já moram lápis, chave inglesa e CLP; um quarto em
+    // right:106px apertaria o nome da usina, que é o bug da PedraBranca.
+    const _fieldBtn = card.querySelector(".plant-card__field-btn");
+    if (_fieldBtn && canFlagFieldMaintenance()) {
+      _fieldBtn.style.display = "";
+      _syncCardFieldBtn(_fieldBtn, plant.field_maintenance === true);
+      _fieldBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        togglePlantFieldMaintenance(plantId, plantName, _fieldBtn.dataset.fieldOn === "1");
       });
     }
 
