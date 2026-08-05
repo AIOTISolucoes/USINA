@@ -1968,6 +1968,13 @@ function getPlantCardStatus(plant) {
   if (plant.collector_maintenance === true) {
     return { colorClass: 'plant-card--maintenance', badge: 'Atualizando coletor local', badgeClass: 'badge--maintenance' };
   }
+  // Manutenção da equipe DO CLIENTE. Vem depois do coletor de propósito: se as
+  // duas estiverem ligadas, quem manda no que a tela diz é a nossa intervenção,
+  // porque durante ela o dado em si pode estar inconsistente — na do cliente o
+  // dado está certo, a usina é que está parada por escolha.
+  if (plant.field_maintenance === true) {
+    return { colorClass: 'plant-card--field-maint', badge: 'Manutenção em campo', badgeClass: 'badge--field-maint' };
+  }
   // "Sem comunicação" = somente quando NÃO recebemos dados recentes (comunicação real perdida)
   if (plant.comm_status === 'offline') {
     return { colorClass: 'plant-card--offline', badge: 'Sem comunicação', badgeClass: 'badge--offline' };
@@ -2017,7 +2024,9 @@ function renderPortfolioTable(plants) {
     const commStatus = getPlantCardStatus(plant);
     const isCommOffline = commStatus.colorClass === 'plant-card--offline';
     const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
+    const isFieldMaint = commStatus.badgeClass === 'badge--field-maint';
     if (isMaintenance) tr.classList.add("portfolio-row--maintenance");
+    else if (isFieldMaint) tr.classList.add("portfolio-row--field-maint");
     else if (plantState.isOffline || isCommOffline) tr.classList.add("portfolio-row--offline");
 
     const alarmSeverity =
@@ -5053,10 +5062,12 @@ function updatePortfolioCardData(plants) {
 
     // Update status dot + text
     const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
+    const isFieldMaint = commStatus.badgeClass === 'badge--field-maint';
     const isOffline = plantState.isOffline || isCommOffline;
     let statusDotClass = "plant-card__status-dot";
     let statusText;
     if (isMaintenance) { statusDotClass += " maintenance"; statusText = "Atualizando coletor local"; }
+    else if (isFieldMaint) { statusDotClass += " field-maint"; statusText = "Manuten\u00E7\u00E3o em campo"; }
     else if (isCommOffline) { statusDotClass += " offline"; statusText = "Sem comunica\u00E7\u00E3o"; }
     else if (plantState.kind === "offline") { statusDotClass += " offline"; statusText = "Desligada"; }
     else if (plantState.kind === "generating") { statusDotClass += " generating"; statusText = "Em gera\u00E7\u00E3o"; }
@@ -5065,7 +5076,11 @@ function updatePortfolioCardData(plants) {
     const dot = card.querySelector(".plant-card__status-dot");
     const txt = card.querySelector(".plant-card__status-text");
     if (dot) dot.className = statusDotClass;
-    if (txt) txt.textContent = statusText;
+    if (txt) {
+      // o capacete entra como ::before desta classe (ver layout.css)
+      txt.className = "plant-card__status-text" + (isFieldMaint ? " is-field-maint" : "");
+      txt.textContent = statusText;
+    }
 
     // Update card class (comm > alarm > offline)
     const pname = card.dataset.plantName || "";
@@ -5098,8 +5113,8 @@ function updatePortfolioCardData(plants) {
 
     // Update comm badge — manutenção e "Sem comunicação" não usam badge no topo (o status
     // embaixo já avisa e o badge sumia com o nome da usina). Só a comunicação parcial fica.
-    const existingBadge = card.querySelector(".badge--offline, .badge--partial, .badge--maintenance");
-    if (commStatus.badge && !isMaintenance && !isCommOffline) {
+    const existingBadge = card.querySelector(".badge--offline, .badge--partial, .badge--maintenance, .badge--field-maint");
+    if (commStatus.badge && !isMaintenance && !isFieldMaint && !isCommOffline) {
       if (existingBadge) {
         existingBadge.className = commStatus.badgeClass;
         existingBadge.textContent = commStatus.badge;
@@ -6062,6 +6077,7 @@ function renderPortfolioCards(plants) {
     const prAcc = plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "\u2014";
 
     const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
+    const isFieldMaint = commStatus.badgeClass === 'badge--field-maint';
     const isOffline = plantState.isOffline || isCommOffline;
     const isGenerating = plantState.kind === "generating";
     let statusDotClass = "plant-card__status-dot";
@@ -6069,6 +6085,10 @@ function renderPortfolioCards(plants) {
     if (isMaintenance) {
       statusDotClass += " maintenance";
       statusText = "Atualizando coletor local";
+    }
+    else if (isFieldMaint) {
+      statusDotClass += " field-maint";
+      statusText = "Manutenção em campo";
     }
     else if (isCommOffline) {
       statusDotClass += " offline";
@@ -6100,7 +6120,7 @@ function renderPortfolioCards(plants) {
     // Manutenção e "Sem comunicação" NÃO ganham badge no topo: o status embaixo já avisa
     // e o badge inline engolia o espaço da linha, sumindo com o nome da usina (ex.: PedraBranca).
     // Só a comunicação parcial (que não aparece no status de baixo) mantém o badge no topo.
-    const commBadgeHtml = commStatus.badge && !isMaintenance && !isCommOffline
+    const commBadgeHtml = commStatus.badge && !isMaintenance && !isFieldMaint && !isCommOffline
       ? `<span class="${commStatus.badgeClass}">${commStatus.badge}</span>`
       : '';
     const activePowerDisplay = isCommOffline ? '—' : activePower.toFixed(1) + ' kW';
@@ -6165,7 +6185,7 @@ function renderPortfolioCards(plants) {
       </div>
       <div class="plant-card__status">
         <div class="${statusDotClass}"></div>
-        <span class="plant-card__status-text">${statusText}</span>
+        <span class="plant-card__status-text${isFieldMaint ? ' is-field-maint' : ''}">${statusText}</span>
       </div>
       <button
         class="plant-card__edit-btn"

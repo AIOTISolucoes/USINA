@@ -6072,6 +6072,73 @@ select.pem-ctrl option {
 .portfolio-row--maintenance .plant-name-text  { color: rgba(180,195,220,0.75) !important; }
 .portfolio-row--maintenance .plant-icon--ok   { background: rgba(96,165,250,0.08) !important; border-color: rgba(96,165,250,0.22) !important; color: rgba(147,197,253,0.6) !important; box-shadow: none !important; }
 
+/* ── Manutenção em campo (equipe DO CLIENTE na usina) ──────────────────
+   Âmbar + capacete, contra o azul + chave inglesa do coletor. A cor não é
+   enfeite: é o que responde "quem está lá, nós ou eles?" de longe.
+   ---------------------------------------------------------------------- */
+.badge--field-maint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(69,39,4,0.55);
+  color: #fcd34d;
+  border: 1px solid rgba(217,119,6,0.55);
+  animation: field-maint-glow 2.4s ease-in-out infinite;
+}
+.badge--field-maint::before,
+.plant-card__status-text.is-field-maint::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 5px;
+  flex: 0 0 auto;
+  vertical-align: -1px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fcd34d' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 17h20'/%3E%3Cpath d='M4 17a8 8 0 0 1 16 0'/%3E%3Cpath d='M9 9.5V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2v4.3'/%3E%3Cpath d='M2 17v1.5A1.5 1.5 0 0 0 3.5 20h17a1.5 1.5 0 0 0 1.5-1.5V17'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+@keyframes field-maint-glow {
+  0%, 100% { border-color: rgba(217,119,6,0.40); box-shadow: 0 0 6px rgba(217,119,6,0.14), 0 0 16px rgba(180,83,9,0.08); }
+  50%      { border-color: rgba(251,191,36,0.85); box-shadow: 0 0 12px rgba(217,119,6,0.42), 0 0 26px rgba(180,83,9,0.25); }
+}
+
+.plant-card--field-maint {
+  background: linear-gradient(145deg, rgba(20,16,10,0.99) 0%, rgba(13,10,7,0.99) 100%) !important;
+  border: 1px solid rgba(217,119,6,0.50) !important;
+  animation: field-maint-glow 2.4s ease-in-out infinite;
+}
+.plant-card--field-maint::before {
+  background: linear-gradient(90deg, transparent, rgba(251,191,36,0.35), transparent);
+  opacity: 0.5;
+}
+.plant-card--field-maint .plant-card__name       { color: rgba(224,205,170,0.85); }
+.plant-card--field-maint .plant-card__icon       { background: rgba(251,191,36,0.10); border-color: rgba(251,191,36,0.25); color: rgba(252,211,77,0.8); box-shadow: none; }
+.plant-card--field-maint .plant-card__stat       { background: rgba(251,191,36,0.03); border-color: rgba(251,191,36,0.08); }
+.plant-card--field-maint .plant-card__stat-label { opacity: 0.5; }
+.plant-card--field-maint .plant-card__chart-area { opacity: 0.45; }
+
+/* o capacete ao lado do texto de status, no rodapé do card */
+.plant-card__status-text.is-field-maint {
+  display: inline-flex;
+  align-items: center;
+  color: #fcd34d;
+}
+.plant-card__status-dot.field-maint {
+  background: #d97706;
+  box-shadow: 0 0 7px rgba(217,119,6,0.9), 0 0 14px rgba(217,119,6,0.4);
+  animation: maintenance-blink 2.4s ease-in-out infinite;
+}
+
+.portfolio-row--field-maint td               { color: rgba(200,180,140,0.62) !important; text-shadow: none !important; }
+.portfolio-row--field-maint .plant-name-text { color: rgba(224,205,170,0.82) !important; }
+.portfolio-row--field-maint .plant-icon--ok  { background: rgba(251,191,36,0.08) !important; border-color: rgba(251,191,36,0.22) !important; color: rgba(252,211,77,0.65) !important; box-shadow: none !important; }
+
 /* Toggle de manutenção no card (só admin vê; espelha o .plant-card__edit-btn) */
 .plant-card__maint-btn {
   position: absolute;
