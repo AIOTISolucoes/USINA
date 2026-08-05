@@ -29,9 +29,15 @@
     ["low", "Baixa"]
   ];
   const SEV_LABEL = Object.fromEntries(SEVERIDADES);
-  const TIPOS = [
-    ["inverter", "Inversor", 1],
-    ["relay", "Relé", 2]
+  // Lista de partida. A de verdade vem do backend (device_types no GET), para
+  // o seletor não ficar fora de sincronia com o que a rota aceita.
+  const TIPOS_PADRAO = [
+    { key: "inverter", id: 1, label: "Inversor" },
+    { key: "relay", id: 2, label: "Relé" },
+    { key: "weather_station", id: 4, label: "Estação meteorológica" },
+    { key: "tracker", id: 7, label: "Tracker" },
+    { key: "meter", id: 10, label: "Medidor" },
+    { key: "thermalrelay", id: 11, label: "Relé térmico" }
   ];
 
   function getUser() {
@@ -72,14 +78,20 @@
   // ---------------------------------------------------------------------------
   const S = {
     tipo: "inverter",
+    tipos: TIPOS_PADRAO, // substituída pela lista do backend na 1ª carga
     escopo: "",          // "" = global; "<id>" = cliente
     itens: [],
     customers: null,     // só superuser
     busca: "",
     editando: null,      // code em edição (um por vez)
+    criando: false,      // linha de cadastro aberta
     overridesOk: true,
     aviso: null          // resultado do último salvamento
   };
+
+  function tipoAtual() {
+    return S.tipos.find(t => t.key === S.tipo) || S.tipos[0];
+  }
 
   // ---------------------------------------------------------------------------
   // estilos + esqueleto do modal
@@ -204,6 +216,7 @@
     const body = document.getElementById("acBody");
     body.innerHTML = `<div class="ac-muted">Carregando catálogo…</div>`;
     S.editando = null;
+    S.criando = false;
     try {
       const u = getUser();
       // a lista de clientes só existe no /users; não há rota /customers
@@ -218,6 +231,9 @@
       const data = await api(`/alarms/catalog?${qs.toString()}`);
       S.itens = data.items || [];
       S.overridesOk = data.overrides_disponiveis !== false;
+      if (Array.isArray(data.device_types) && data.device_types.length) {
+        S.tipos = data.device_types;
+      }
       render();
     } catch (err) {
       renderErro(err);
@@ -244,8 +260,8 @@
     const body = document.getElementById("acBody");
     const u = getUser();
 
-    const tipoOpts = TIPOS.map(([v, label]) =>
-      `<option value="${v}" ${S.tipo === v ? "selected" : ""}>${label}</option>`).join("");
+    const tipoOpts = S.tipos.map(t =>
+      `<option value="${esc(t.key)}" ${S.tipo === t.key ? "selected" : ""}>${esc(t.label)}</option>`).join("");
 
     let escopoSel = "";
     if (u.is_superuser) {
@@ -269,8 +285,18 @@
       String(it.code).toLowerCase().includes(busca) ||
       String(it.description_pt || "").toLowerCase().includes(busca));
 
-    const linhas = visiveis.map(it => linhaHTML(it)).join("") ||
-      `<tr><td colspan="5" class="ac-muted">Nenhum código encontrado.</td></tr>`;
+    const corpo = visiveis.map(it => linhaHTML(it)).join("");
+    const vazio = !corpo && !S.criando
+      ? `<tr><td colspan="5" class="ac-muted">${S.itens.length
+            ? "Nenhum código encontrado com esse filtro."
+            : "Nenhum código cadastrado para este equipamento ainda."}</td></tr>`
+      : "";
+    const linhas = (S.criando ? linhaNovaHTML() : "") + corpo + vazio;
+
+    // Só superusuário cadastra: o catálogo é global por tipo de equipamento.
+    const btnNovo = u.is_superuser
+      ? `<button class="ac-btn" id="acNovo"><i class="fa-solid fa-plus"></i> Novo alarme</button>`
+      : "";
 
     const aviso = S.aviso
       ? `<div class="ac-aviso ${S.aviso.erro ? "erro" : ""}">${esc(S.aviso.texto)}</div>`
@@ -282,6 +308,7 @@
         ${escopoSel}
         <input type="text" id="acBusca" placeholder="Buscar código ou descrição"
                value="${esc(S.busca)}">
+        ${btnNovo}
         <span class="ac-muted" style="margin-left:auto;">${visiveis.length} de ${S.itens.length} códigos</span>
       </div>
       ${nota}
@@ -297,6 +324,8 @@
       <div class="ac-legenda">
         Mudar a severidade também corrige os alarmes que já estão abertos.
         Desativar um código fecha os abertos dele e para de gerar novos.
+        Cadastrar um código vale para todos os clientes e passa a valer para
+        os eventos que chegarem daí em diante, não para os que já passaram.
       </div>`;
 
     body.querySelector("#acTipo").addEventListener("change", (e) => {
@@ -316,12 +345,46 @@
       novo.focus(); novo.setSelectionRange(pos, pos);
     });
 
+    const bn = body.querySelector("#acNovo");
+    if (bn) bn.addEventListener("click", () => {
+      S.criando = true; S.editando = null; S.aviso = null; render();
+      const c = document.getElementById("acNCode");
+      if (c) c.focus();
+    });
+
     body.querySelectorAll("[data-edit]").forEach(b =>
-      b.addEventListener("click", () => { S.editando = b.getAttribute("data-edit"); S.aviso = null; render(); }));
+      b.addEventListener("click", () => {
+        S.editando = b.getAttribute("data-edit"); S.criando = false; S.aviso = null; render();
+      }));
     body.querySelectorAll("[data-cancel]").forEach(b =>
       b.addEventListener("click", () => { S.editando = null; render(); }));
     body.querySelectorAll("[data-save]").forEach(b =>
       b.addEventListener("click", () => salvar(b.getAttribute("data-save"))));
+
+    const bnc = body.querySelector("#acNCancel");
+    if (bnc) bnc.addEventListener("click", () => { S.criando = false; render(); });
+    const bns = body.querySelector("#acNSave");
+    if (bns) bns.addEventListener("click", criar);
+  }
+
+  // linha de cadastro, no TOPO da tabela: o código novo some no meio de 56
+  // linhas se aparecer no fim, e a pessoa fica sem saber se salvou
+  function linhaNovaHTML() {
+    const sevOpts = SEVERIDADES.map(([v, label]) =>
+      `<option value="${v}" ${v === "high" ? "selected" : ""}>${label}</option>`).join("");
+    return `
+      <tr class="ac-editando ac-edit">
+        <td><input type="text" id="acNCode" placeholder="ID45 / flag_51"
+                   maxlength="60" autocomplete="off"></td>
+        <td><input type="text" id="acNDesc" placeholder="Descrição em português"
+                   autocomplete="off"></td>
+        <td><select id="acNSev">${sevOpts}</select></td>
+        <td><span class="ac-pill low">Ativo</span></td>
+        <td class="ac-acoes">
+          <button class="ac-btn ac-ghost" id="acNCancel">Cancelar</button>
+          <button class="ac-btn" id="acNSave">Cadastrar</button>
+        </td>
+      </tr>`;
   }
 
   function linhaHTML(it) {
@@ -365,6 +428,51 @@
           <button class="ac-btn" data-save="${esc(it.code)}">Salvar</button>
         </td>
       </tr>`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // cadastrar código novo
+  // ---------------------------------------------------------------------------
+  async function criar() {
+    const code = document.getElementById("acNCode").value.trim();
+    const desc = document.getElementById("acNDesc").value.trim();
+    const sev = document.getElementById("acNSev").value;
+    const t = tipoAtual();
+
+    if (!code) { S.aviso = { erro: true, texto: "Informe o código do alarme." }; return render(); }
+    if (!desc) { S.aviso = { erro: true, texto: "Informe a descrição." }; return render(); }
+    if (S.itens.some(i => String(i.code).toLowerCase() === code.toLowerCase())) {
+      S.aviso = { erro: true, texto: `O código ${code} já existe para ${t.label}.` };
+      return render();
+    }
+
+    const btn = document.getElementById("acNSave");
+    if (btn) { btn.disabled = true; btn.textContent = "Cadastrando…"; }
+    try {
+      const r = await api("/alarms/catalog", {
+        method: "POST",
+        body: JSON.stringify({
+          device_type_id: t.id, code, description_pt: desc, severity: sev
+        })
+      });
+      S.criando = false;
+      S.aviso = {
+        erro: false,
+        // as 2 linhas não são detalhe interno: é o que faz o alarme fechar
+        texto: `Código ${r.code} cadastrado em ${t.label} ` +
+               `(${r.linhas_criadas} linhas: uma para o alarme atuar, outra para sair).`
+      };
+      await carregar();
+    } catch (err) {
+      let msg = err.message || "erro desconhecido";
+      if (err.code === "token_required" || err.code === "token_invalid") {
+        msg = "Sua sessão não tem o token de segurança. Saia e entre de novo.";
+      } else if (err.hint) {
+        msg += ` (${err.hint})`;
+      }
+      S.aviso = { erro: true, texto: msg };
+      render();
+    }
   }
 
   // ---------------------------------------------------------------------------
