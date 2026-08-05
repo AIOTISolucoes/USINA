@@ -143,6 +143,15 @@
         border:1px solid rgba(57,229,140,.4);background:rgba(57,229,140,.08);}
       .ac-aviso.erro{border-color:rgba(255,107,107,.45);background:rgba(255,107,107,.09);color:#ff9b9b;}
       .ac-legenda{margin-top:14px;font-size:.7rem;color:var(--text-muted,#7fa892);line-height:1.6;}
+      /* botão no canto da tela de alertas: margin-left:auto encosta na direita
+         do flex das abas sem precisar mexer no layout existente */
+      .ac-open-btn{margin-left:auto;align-self:center;display:inline-flex;align-items:center;
+        gap:8px;border:1px solid rgba(57,229,140,.3);background:rgba(57,229,140,.1);
+        color:var(--accent,#39e58c);border-radius:8px;padding:9px 16px;font-size:.78rem;
+        font-weight:600;cursor:pointer;font-family:inherit;
+        transition:background .18s ease,border-color .18s ease;}
+      .ac-open-btn:hover{background:rgba(57,229,140,.2);border-color:rgba(57,229,140,.5);}
+      @media (max-width:640px){ .ac-open-btn span{display:none;} .ac-open-btn{padding:9px 12px;} }
     `;
     document.head.appendChild(st);
   }
@@ -424,28 +433,42 @@
   }
 
   // ---------------------------------------------------------------------------
-  // botão na sidebar (mesmo slot do branding / usuários)
+  // botão no canto da TELA DE ALERTAS (não na sidebar)
+  //
+  // Fica ao lado das abas do #alarmsView, empurrado para a direita pelo
+  // margin-left:auto do flex. O lugar certo é aqui e não na barra lateral:
+  // quem vai reclassificar um código chegou nisso olhando a lista de
+  // alarmes, não procurando um ícone de configuração.
   // ---------------------------------------------------------------------------
-  function injectSidebarButton() {
+  function injectOpenButton() {
     const u = getUser();
     if (!u.username || !isAdmin(u)) return;
-    const slot = document.querySelector(".sidebar-bottom");
-    if (!slot || document.getElementById("btnAlarmesAdmin")) return;
+    if (document.getElementById("btnAlarmesAdmin")) return;
+    const barra = document.querySelector("#alarmsView .alarms-tabs");
+    if (!barra) return;
+    injectStyles();
     const btn = document.createElement("button");
     btn.id = "btnAlarmesAdmin";
-    btn.className = "sidebar-btn";
-    btn.title = "Catálogo de alarmes";
-    btn.setAttribute("aria-label", "Catálogo de alarmes");
-    btn.innerHTML = '<i class="fa-solid fa-bell"></i>';
+    btn.className = "ac-open-btn";
+    btn.title = "Editar severidade e descrição dos códigos de alarme";
+    btn.innerHTML = '<i class="fa-solid fa-sliders"></i><span>Editar catálogo</span>';
     btn.addEventListener("click", openModal);
-    slot.insertBefore(btn, slot.firstChild);
+    barra.appendChild(btn);
   }
 
   window.__openAlarmesAdmin = openModal; // acesso via console
 
+  // A tela de alertas já existe no DOM desde o load (só fica com .hidden),
+  // então não precisa esperar troca de aba. Mas o login pode terminar depois
+  // do DOMContentLoaded, e aí getUser() ainda estaria vazio: por isso a
+  // segunda tentativa.
+  function agenda() {
+    injectOpenButton();
+    setTimeout(injectOpenButton, 1500);
+  }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", injectSidebarButton);
+    document.addEventListener("DOMContentLoaded", agenda);
   } else {
-    injectSidebarButton();
+    agenda();
   }
 })();
