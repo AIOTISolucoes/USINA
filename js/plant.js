@@ -7030,6 +7030,139 @@ async function toggleCollectorMaintenance() {
 }
 
 // ======================================================
+// 🦺 MANUTENÇÃO EM CAMPO — da equipe DO CLIENTE
+//
+// Irmão do modo acima, e de propósito NÃO é o mesmo botão. O de cima é a
+// AIOTI mexendo no coletor local (azul, chave inglesa, superusuário). Este é
+// o pessoal do cliente subindo na usina para limpar módulo, trocar string ou
+// mexer no quadro (âmbar, capacete, quem tem acesso à usina).
+//
+// Sem isto, manutenção do cliente aparecia na plataforma como defeito:
+// potência zerada com sol batendo, que é exatamente o que o diagnóstico
+// "usina parada" procura. A pessoa que causou a queda era a única que sabia
+// que ela era esperada, e não tinha onde dizer isso.
+// ======================================================
+let FIELD_MAINTENANCE = false;
+let FIELD_MAINTENANCE_INFO = { by: null, started_at: null, note: null };
+
+const FMB_HELMET_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 17h20"/><path d="M4 17a8 8 0 0 1 16 0"/><path d="M9 9.5V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2v4.3"/><path d="M2 17v1.5A1.5 1.5 0 0 0 3.5 20h17a1.5 1.5 0 0 0 1.5-1.5V17"/></svg>';
+
+function canFlagFieldMaintenance() {
+  let u = {};
+  try { u = JSON.parse(localStorage.getItem("user") || "{}"); } catch { u = {}; }
+  const p = u.permissions || {};
+  // mesma regra do can_flag_field_maintenance no api2.py. Se divergir, o botão
+  // aparece e o PUT responde 403, que é confuso mas não perigoso.
+  return u.is_superuser === true || u.role_key === "admin_customer" ||
+    u.role_key === "operator" || p.admin_customer === true ||
+    p.plant_edit === true || p.remote_command === true;
+}
+
+function _fmDesde(iso) {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (!isFinite(t)) return "";
+  const min = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  return h < 24 ? `há ${h}h${String(min % 60).padStart(2, "0")}` : `há ${Math.floor(h / 24)} dia(s)`;
+}
+
+function renderFieldMaintenance(realtime) {
+  if (realtime && typeof realtime.field_maintenance !== "undefined") {
+    FIELD_MAINTENANCE = realtime.field_maintenance === true;
+    FIELD_MAINTENANCE_INFO = {
+      by: realtime.field_maintenance_by || FIELD_MAINTENANCE_INFO.by,
+      started_at: realtime.field_maintenance_started_at || FIELD_MAINTENANCE_INFO.started_at,
+      note: realtime.field_maintenance_note || null
+    };
+  }
+
+  const podeMarcar = canFlagFieldMaintenance();
+  const state = FIELD_MAINTENANCE ? "on" : (podeMarcar ? "idle" : "none");
+
+  let banner = document.getElementById("fieldMaintenanceBanner");
+  const chave = state + "|" + (FIELD_MAINTENANCE_INFO.started_at || "");
+  if (banner && banner.dataset.state === chave) return;
+  if (banner) banner.remove();
+  if (state === "none") return;
+
+  const headerCard = document.querySelector(".plant-header-card");
+  if (!headerCard || !headerCard.parentNode) return;
+
+  banner = document.createElement("div");
+  banner.id = "fieldMaintenanceBanner";
+  banner.dataset.state = chave;
+
+  if (state === "on") {
+    const quem = FIELD_MAINTENANCE_INFO.by ? ` por ${FIELD_MAINTENANCE_INFO.by}` : "";
+    const desde = _fmDesde(FIELD_MAINTENANCE_INFO.started_at);
+    const nota = FIELD_MAINTENANCE_INFO.note
+      ? `<span class="fmb-note">“${FIELD_MAINTENANCE_INFO.note}”</span>` : "";
+    banner.className = "field-maintenance-banner";
+    banner.innerHTML =
+      FMB_HELMET_SVG +
+      '<strong>MANUTENÇÃO EM CAMPO</strong>' +
+      `<span class="fmb-sub">equipe na usina${quem}${desde ? ", iniciada " + desde : ""}; ` +
+      'a queda de geração no período é esperada</span>' +
+      nota +
+      (podeMarcar
+        ? '<button id="fieldMaintenanceBtn" class="fmb-action" type="button" title="Encerrar manutenção em campo">' + FMB_HELMET_SVG + '<span>Encerrar</span></button>'
+        : '');
+  } else {
+    banner.className = "field-maintenance-banner field-maintenance-banner--idle";
+    banner.innerHTML =
+      '<button id="fieldMaintenanceBtn" class="fmb-action" type="button" title="Avisar na plataforma que sua equipe está na usina">' + FMB_HELMET_SVG + '<span>Marcar manutenção em campo</span></button>';
+  }
+
+  // sempre depois do banner do coletor, para os dois poderem coexistir sem
+  // brigar por posição quando a AIOTI e o cliente estiverem na usina juntos
+  const acima = document.getElementById("collectorMaintenanceBanner") || headerCard;
+  acima.parentNode.insertBefore(banner, acima.nextSibling);
+  const btn = banner.querySelector("#fieldMaintenanceBtn");
+  if (btn) btn.addEventListener("click", toggleFieldMaintenance);
+}
+
+async function toggleFieldMaintenance() {
+  const turnOn = !FIELD_MAINTENANCE;
+  let nota = null;
+  if (turnOn) {
+    const resp = window.prompt(
+      'Marcar esta usina como EM MANUTENÇÃO EM CAMPO?\n\n' +
+      'O aviso fica visível para todos os usuários até você encerrar, e a queda de\n' +
+      'geração no período deixa de ser tratada como falha pelo diagnóstico.\n\n' +
+      'Descreva o serviço (opcional):', '');
+    if (resp === null) return;              // cancelou
+    nota = resp.trim() || null;
+  } else if (!window.confirm("Encerrar a manutenção em campo desta usina?")) {
+    return;
+  }
+
+  const btn = document.getElementById("fieldMaintenanceBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/plants/${PLANT_ID}/maintenance`, {
+      method: "PATCH",
+      headers: buildWriteAuthHeaders(),
+      body: JSON.stringify({ maintenance: turnOn, scope: "field", note: nota })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.hint || data?.error || `HTTP ${res.status}`);
+    FIELD_MAINTENANCE = data?.field_maintenance === true;
+    FIELD_MAINTENANCE_INFO = {
+      by: data?.by || null, started_at: data?.started_at || null, note: data?.note || null
+    };
+    renderFieldMaintenance(null);
+  } catch (e) {
+    console.error("[field-maintenance] erro", e);
+    alert("Falha ao alterar a manutenção em campo: " + (e?.message || e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ======================================================
 // ✅ REFRESH (realtime + alarms + inverters rows + strings abertas + relay)
 // ======================================================
 async function refreshRealtimeEverything() {
@@ -7052,6 +7185,7 @@ async function refreshRealtimeEverything() {
       realtime = realtimeRes.value;
       renderPlantName(realtime);
       renderCollectorMaintenance(realtime);
+      renderFieldMaintenance(realtime);
       if (realtime) {
         const rated = asNumber(
           realtime.rated_power_ac_kw ?? realtime.rated_power_kw ?? realtime.rated_power_kwp,

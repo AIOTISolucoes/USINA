@@ -10120,3 +10120,89 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
     font-size: 0.7rem;
   }
 }
+
+/* ======================================================================
+   MANUTENÇÃO EM CAMPO (equipe DO CLIENTE)
+
+   Âmbar de propósito. O azul acima é da AIOTI no coletor local; se os dois
+   fossem da mesma cor, a pessoa não saberia se quem está na usina é a nossa
+   equipe ou a dela — que é justamente a informação que o aviso existe para
+   dar. Âmbar também não colide com vermelho (alarme) nem verde (normal).
+   ====================================================================== */
+.field-maintenance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(217,119,6,0.50);
+  background: linear-gradient(90deg, rgba(69,39,4,0.45), rgba(120,53,15,0.24), rgba(69,39,4,0.45));
+  color: #fde68a;
+  font-size: 0.85rem;
+  animation: field-glow 2.6s ease-in-out infinite;
+}
+.field-maintenance-banner svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: #fbbf24;
+}
+.field-maintenance-banner strong {
+  color: #fef3c7;
+  letter-spacing: 0.06em;
+}
+.field-maintenance-banner .fmb-sub { opacity: 0.85; }
+.field-maintenance-banner .fmb-note {
+  width: 100%;
+  text-align: center;
+  font-style: italic;
+  opacity: 0.9;
+  font-size: 0.78rem;
+}
+@keyframes field-glow {
+  0%, 100% { border-color: rgba(217,119,6,0.40); box-shadow: 0 0 8px rgba(217,119,6,0.14), 0 0 18px rgba(180,83,9,0.08); }
+  50%      { border-color: rgba(251,191,36,0.85); box-shadow: 0 0 14px rgba(217,119,6,0.40), 0 0 30px rgba(180,83,9,0.22); }
+}
+
+/* Variante "idle": faixa discreta para ATIVAR (só quem pode marcar a vê) */
+.field-maintenance-banner--idle {
+  animation: none;
+  border-color: rgba(217,119,6,0.20);
+  background: rgba(69,39,4,0.14);
+  box-shadow: none;
+  padding: 6px 12px;
+}
+
+.fmb-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px;
+  margin-left: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(251,191,36,0.50);
+  background: rgba(217,119,6,0.18);
+  color: #fef3c7;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.fmb-action svg { width: 14px; height: 14px; flex: 0 0 auto; pointer-events: none; }
+.fmb-action:hover {
+  background: rgba(217,119,6,0.34);
+  border-color: #fbbf24;
+  transform: scale(1.04);
+}
+.fmb-action:disabled { opacity: 0.5; cursor: wait; }
+.field-maintenance-banner--idle .fmb-action { margin-left: 0; }
+
+@media (max-width: 640px) {
+  .field-maintenance-banner { font-size: 0.72rem; padding: 8px 10px; gap: 6px; }
+  .field-maintenance-banner .fmb-sub { display: block; width: 100%; }
+  .fmb-action { margin-left: 0; padding: 4px 12px; font-size: 0.7rem; }
+}
