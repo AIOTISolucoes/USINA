@@ -2698,8 +2698,13 @@ tbody tr:hover td {
 
 .plant-card:hover::before { opacity: 1; }
 
+/* As 4 severidades do catálogo. critical e low entraram em 05/08 junto com a
+   tela de edição do catálogo: sem regra própria a classe alarm-critical não
+   pintava nada e o cartão mais grave ficava com a borda neutra. */
+.plant-card.alarm-critical { border-color: rgba(213,0,0,0.55) !important; border-top-color: rgba(213,0,0,0.85) !important; }
 .plant-card.alarm-high   { border-color: rgba(255,79,79,0.38) !important; border-top-color: rgba(255,79,79,0.55) !important; }
 .plant-card.alarm-medium { border-color: rgba(255,170,0,0.38) !important; border-top-color: rgba(255,170,0,0.55) !important; }
+.plant-card.alarm-low    { border-color: rgba(76,175,80,0.32) !important; border-top-color: rgba(76,175,80,0.48) !important; }
 
 /* ── Offline / sem dados ── */
 .plant-card--offline {
@@ -2762,8 +2767,10 @@ tbody tr:hover td {
   box-shadow: 0 0 14px rgba(57,229,140,0.22), 0 0 4px rgba(57,229,140,0.10) inset;
 }
 
+.plant-card__icon.alarm-critical { border-color: rgba(213,0,0,0.7); color: #d50000; }
 .plant-card__icon.alarm-high { border-color: rgba(255,79,79,0.5); color: #ff4f4f; }
 .plant-card__icon.alarm-medium { border-color: rgba(255,170,0,0.5); color: #ffaa00; }
+.plant-card__icon.alarm-low { border-color: rgba(76,175,80,0.45); color: #4caf50; }
 
 .plant-card__name {
   font-family: 'Exo 2', sans-serif;

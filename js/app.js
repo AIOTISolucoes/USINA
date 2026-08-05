@@ -180,16 +180,24 @@ function valueOrDash(v) {
 
 function severityColor(sev) {
   const s = String(sev || "").toLowerCase();
+  if (s === "critical") return "#d50000";
   if (s === "high") return "#f44336";
   if (s === "medium") return "#ff9800";
   if (s === "low") return "#4caf50";
   return "#ccc";
 }
 
+// As 4 severidades do catálogo (tb_event_alarm_catalog.severity) precisam
+// existir aqui. Até 05/08 esta função só conhecia high e medium: qualquer
+// código marcado como "critical" virava null e o alarme era pintado de
+// cinza e jogado para o FIM da ordenação, ou seja, o mais grave aparecia
+// como o menos grave. Passou a importar quando a tela de catálogo deixou o
+// operador escolher a severidade.
 function normalizeAlarmSeverity(sev) {
   if (!sev) return null;
   const normalized = String(sev).toLowerCase();
-  if (normalized === "high" || normalized === "medium") return normalized;
+  if (normalized === "critical" || normalized === "high" ||
+      normalized === "medium" || normalized === "low") return normalized;
   return null;
 }
 
@@ -221,7 +229,7 @@ function buildEventsRenderKey(list, page, filters) {
 }
 
 function getHigherSeverity(a, b) {
-  const rank = { high: 2, medium: 1 };
+  const rank = { critical: 4, high: 3, medium: 2, low: 1 };
   if (!a) return b;
   if (!b) return a;
   return (rank[b] || 0) > (rank[a] || 0) ? b : a;
@@ -1887,9 +1895,11 @@ function sortPortfolioPlants(plants) {
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
       || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
       || null;
-    if (sev === "high") return 0;
-    if (sev === "medium") return 1;
-    return 2;
+    if (sev === "critical") return 0;
+    if (sev === "high") return 1;
+    if (sev === "medium") return 2;
+    if (sev === "low") return 3;
+    return 4;
   };
 
   validPlants.sort((a, b) => {
