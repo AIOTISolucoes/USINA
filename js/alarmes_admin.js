@@ -43,9 +43,12 @@
   function getUser() {
     try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; }
   }
+  // SOMENTE SUPERUSUÁRIO (equipe AIOTI). Ver e cadastrar código de alarme é
+  // trabalho nosso: a classificação decide o que a operação trata como
+  // urgente, e o catálogo é global por tipo de equipamento. O admin do
+  // cliente não entra aqui, nem para criar exceção da própria empresa.
   function isAdmin(u) {
-    return u.is_superuser === true || u.role_key === "admin_customer" ||
-      (u.permissions && u.permissions.admin_customer === true);
+    return u.is_superuser === true;
   }
   function esc(s) {
     return String(s == null ? "" : s)
