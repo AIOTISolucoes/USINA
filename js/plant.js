@@ -1,4 +1,64 @@
-﻿// ======================================================
+﻿// =============================================================================
+// 🔒 AUTH GUARD + SESSÃO EXPIRADA
+// =============================================================================
+// Esta página não tinha nem guard nem tratamento de 401. Passou despercebido
+// porque, navegando pelo site, ninguém chega aqui sem passar pelo resumo.html,
+// que tem os dois (app.js). Só que a notificação de alarme faz DEEP-LINK direto
+// no plant.html, pulando o resumo — e aí, com sessão ausente ou vencida (o
+// token dura 72 h desde 07/08), as ~25 chamadas desta tela voltavam 401, cada
+// uma logava "mantendo estado anterior" e, como não havia estado anterior
+// nenhum, a usina abria PERMANENTEMENTE EM BRANCO, sem dizer por quê.
+// É a mesma armadilha que o app.js já descreve na linha do apiFetch: 401 não
+// levanta exceção, então nada estoura, nada aparece no console como erro.
+const AFTER_LOGIN_KEY = "scada:after_login_redirect";
+
+// Guarda para onde o usuário QUERIA ir, para voltar aqui depois do login em vez
+// de largá-lo no resumo. Quem consome isto é o app.js, no resumo.html.
+function _rememberAndGoToLogin(expirou) {
+  try {
+    localStorage.setItem(AFTER_LOGIN_KEY, location.pathname + location.search);
+  } catch (e) {}
+  location.replace(expirou ? "index.html?expirou=1" : "index.html");
+}
+
+(function plantAuthGuard() {
+  if (!localStorage.getItem("user")) _rememberAndGoToLogin(false);
+})();
+
+// Sessão inválida: manda para o login UMA vez. Sem a trava, as várias chamadas
+// paralelas desta tela disparariam um redirect cada.
+function forcePlantReloginOnce() {
+  if (window.__aiotiRelogin) return;
+  window.__aiotiRelogin = true;
+  try { localStorage.removeItem("user"); } catch (e) {}
+  _rememberAndGoToLogin(true);
+}
+
+// 🔑 Intercepta no fetch, e não em cada chamada. O plant.js não tem um
+// apiFetch central: são ~25 fetch crus espalhados. Tratar 401 um a um é
+// exatamente o erro de 10/08 ("auditar por ARQUIVO/por chamada"), e qualquer
+// chamada nova nasceria descoberta de novo. Aqui só olhamos a resposta; nenhum
+// comportamento existente muda.
+(function interceptaSessaoExpirada() {
+  const _fetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    return _fetch(input, init).then((r) => {
+      if (r && r.status === 401) {
+        const alvo = typeof input === "string" ? input : (input && input.url) || "";
+        if (alvo.indexOf("execute-api") !== -1) {
+          r.clone().json().then((d) => {
+            if (d && (d.code === "token_required" || d.code === "token_invalid")) {
+              forcePlantReloginOnce();
+            }
+          }).catch(() => {});
+        }
+      }
+      return r;
+    });
+  };
+})();
+
+// ======================================================
 // CONTROLE DE ACESSO POR ROLE
 // ======================================================
 function _getUserRole() {
@@ -31,6 +91,17 @@ function _canEditPlant() {
   const hasPerm = (k) => p[k] === true || p[k] === "true";
   if (hasPerm("admin_customer") || hasPerm("plant_edit")) return true;
   return u.role_key === "admin_customer";
+}
+
+// Espelha o gate do backend em ?view=report-deep: `has_perm(ctx,"deep_report")`,
+// que ja deixa superusuario passar direto. Esconder o botao NAO e a seguranca --
+// a seguranca e o 403 da Lambda. Isto so evita oferecer um botao que vai falhar.
+function _canDeepReport() {
+  let u = {};
+  try { u = JSON.parse(localStorage.getItem("user") || "{}"); } catch { u = {}; }
+  if (u.is_superuser === true || u.is_superuser === "true") return true;
+  const p = (u && typeof u.permissions === "object" && u.permissions) ? u.permissions : {};
+  return p.deep_report === true || p.deep_report === "true";
 }
 
 function _dismissAppLoader() {
@@ -446,6 +517,9 @@ let PLANT_ALARMS_MENU_OPEN = false;
 let INVERTERS_REALTIME = [];
 let RELAY_REALTIME = null;
 let MULTIMETER_REALTIME = null;
+// Todos os medidores da usina (o principal + os adicionais, ex.: Medidor QGBT).
+// Vazio quando a usina só tem um: aí o bloco de extras não desenha nada.
+let MULTIMETER_ITEMS = [];
 let THERMALRELAY_REALTIME = [];
 window.INVERTERS_REALTIME = INVERTERS_REALTIME;
 window.RELAY_REALTIME = RELAY_REALTIME;
@@ -1338,17 +1412,24 @@ function getUserContext() {
       is_superuser: user?.is_superuser ?? false,
       username: user?.username ?? null,
       user_id: user?.id ?? user?.user_id ?? null,
+      token: user?.token ?? null,
     };
   } catch {
-    return { customer_id: null, is_superuser: false, username: null, user_id: null };
+    return { customer_id: null, is_superuser: false, username: null, user_id: null, token: null };
   }
 }
 
+// O token virou OBRIGATÓRIO em 07/08: a API passou a resolver a identidade
+// pelo Bearer, contra o banco, em vez de acreditar nos headers X-*. Esta
+// página tinha os headers mas não o token — todas as 25 chamadas dela caíam
+// em 401. Os X-* continuam sendo enviados só para compatibilidade.
 function buildAuthHeaders() {
   const ctx = getUserContext();
   const headers = { "Content-Type": "application/json" };
   if (ctx.customer_id) headers["X-Customer-Id"] = ctx.customer_id;
   if (ctx.is_superuser) headers["X-Is-Superuser"] = "true";
+  if (ctx.username) headers["X-Username"] = ctx.username;
+  if (ctx.token) headers["Authorization"] = `Bearer ${ctx.token}`;
   return headers;
 }
 
@@ -1359,6 +1440,7 @@ function buildWriteAuthHeaders() {
   if (ctx.is_superuser) headers["X-Is-Superuser"] = "true";
   if (ctx.username) headers["X-Username"] = ctx.username;
   if (ctx.user_id) headers["X-User-Id"] = String(ctx.user_id);
+  if (ctx.token) headers["Authorization"] = `Bearer ${ctx.token}`;
   return headers;
 }
 
@@ -1551,6 +1633,13 @@ async function safeFetchMultimeterIfSupported(plantId) {
 
   MULTIMETER_SUPPORTED = true;
   const payload = normalizeApiBody(await res.json());
+
+  // A API manda { item, items }: `item` é o medidor de entrada da usina e
+  // `items` traz TODOS os medidores dela, cada um com is_main. O `items` vinha
+  // sendo descartado aqui — por isso o Medidor QGBT existia no banco, era
+  // devolvido pela API e mesmo assim não aparecia para ninguém.
+  MULTIMETER_ITEMS = Array.isArray(payload?.items) ? payload.items : [];
+
   return payload?.item ?? payload ?? null;
 }
 
@@ -4987,6 +5076,104 @@ function formatMetricValue(value, unit, digits = 1) {
   return `${n.toFixed(digits)} ${unit}`;
 }
 
+// Ícones das proteções. SVG inline em currentColor, então cada estado herda a
+// cor da própria pílula e não precisa de arquivo nem de fonte de ícone.
+const _RELAY_ICON_ALERTA = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9.5" x2="12" y2="13.5"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+const _RELAY_ICON_RELOGIO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 6.8 12 12 15.6 14.2"/></svg>`;
+const _RELAY_ICON_OK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="8.2 12.4 11 15.2 15.8 9.6"/></svg>`;
+const _RELAY_ICON_SEMDADO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-dasharray="3.2 3.2"/><line x1="8.4" y1="12" x2="15.6" y2="12"/></svg>`;
+
+function _relayFlagAgoText(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 0) return "";
+  if (s < 60) return "há instantes";
+  const min = Math.floor(s / 60);
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h} h`;
+  return `há ${Math.floor(h / 24)} d`;
+}
+
+// Proteções do relé.
+//
+// Antes isto lia `raw(["flag_46"])`, que procurava a chave em `relayItem` e em
+// `relayItem.analog` — e as flags nunca estiveram em nenhum dos dois (chegam em
+// `event.raw`). Resultado: o painel inteiro vivia em "—". Além disso o
+// stg_relay_event só grava a chave que MUDOU, então mesmo lendo o lugar certo a
+// última linha quase sempre traz só {communication_fault}.
+//
+// Agora o backend manda `item.flags` já resolvido contra o catálogo de alarmes:
+// as 12 proteções com nome em português, valor atual e quando foi o último
+// disparo. O disparo fica visível mesmo depois de a flag cair — a sobretensão
+// da Várzea2 em 13/08 durou 4 minutos e ninguém que olhou depois viu.
+function buildRelayFlagsHTML(relayItem) {
+  const flags = Array.isArray(relayItem?.flags) ? relayItem.flags : null;
+
+  // Lambda antiga (ainda sem `flags`): mantém o comportamento anterior em vez
+  // de deixar o card vazio.
+  if (!flags || !flags.length) {
+    const analog = relayItem?.analog ?? {};
+    const eventRaw = relayItem?.event?.raw ?? {};
+    const legacy = [
+      ["46", "flag_46"], ["50", "flag_50"], ["51-1", "flag_51_1"],
+      ["50N", "flag_50N"], ["51GS", "flag_51GS"], ["51N", "flag_51N"],
+      ["27", "flag_27"], ["59", "flag_59"], ["47", "flag_47"],
+      ["81 O", "flag_81_O"], ["81 U", "flag_81_U"], ["51-2", "flag_51_2"]
+    ];
+    return legacy.map(([label, key]) => {
+      const v = eventRaw?.[key] ?? analog?.[key] ?? relayItem?.[key];
+      const txt = (v === null || v === undefined || v === "") ? "—" : String(v);
+      return `<div class="relay-flag-pill ${txt === "1" ? "is-on" : "is-off"}">
+          <span>${cabinMapEscape(label)}</span>
+          <strong>${cabinMapEscape(txt)}</strong>
+        </div>`;
+    }).join("");
+  }
+
+  // Com communication_fault 28 o CLP não está falando com o relé: o último
+  // valor conhecido das flags está congelado e não vale como "normal". Dizer
+  // "sem leitura" é o honesto — foi o que a Acopiara mostrou no teste, 12 flags
+  // em "normal" com o relé mudo há horas.
+  const semLeitura = Number(relayItem?.communication_fault) === 28;
+
+  return flags.map((f) => {
+    const nome = f?.description || f?.label || f?.code || "—";
+    const tag = f?.label || "";
+
+    let cls = "is-off";
+    let estado = "normal";
+    let icone = _RELAY_ICON_OK;
+
+    if (f?.is_on === true && !semLeitura) {
+      cls = "is-on";
+      estado = "ATUANDO";
+      icone = _RELAY_ICON_ALERTA;
+    } else if (f?.last_trip) {
+      // Disparo passado é fato registrado: continua valendo mesmo se o relé
+      // ficou mudo depois.
+      cls = "is-recent";
+      estado = `disparou ${_relayFlagAgoText(f?.last_trip_age_seconds)}`;
+      icone = _RELAY_ICON_RELOGIO;
+    } else if (semLeitura || f?.is_on === null || f?.is_on === undefined) {
+      cls = "is-unknown";
+      estado = "sem leitura";
+      icone = _RELAY_ICON_SEMDADO;
+    }
+
+    // O código (59, 51N...) sai da linha do nome e vira chip próprio à direita.
+    // Junto do texto ele empurrava o nome longo para uma segunda linha e era o
+    // que deixava as fileiras tortas.
+    return `<div class="relay-prot-pill ${cls}" title="${cabinMapEscape(nome)} (${cabinMapEscape(f?.code || "")})">
+        <span class="relay-prot-icon">${icone}</span>
+        <span class="relay-prot-text">
+          <span class="relay-prot-name">${cabinMapEscape(nome)}</span>
+          <strong class="relay-prot-state">${cabinMapEscape(estado)}</strong>
+        </span>
+        ${tag ? `<span class="relay-prot-code">${cabinMapEscape(tag)}</span>` : ""}
+      </div>`;
+  }).join("");
+}
+
 function renderRelayDetailsPanel(relayItem) {
   const panel = document.getElementById("relayDetailsPanel");
   if (!panel) return;
@@ -5013,13 +5200,6 @@ function renderRelayDetailsPanel(relayItem) {
     ["Status Relay", raw(["status_relay"])]
   ];
 
-  const flagItems = [
-    ["46", raw(["flag_46"])], ["50", raw(["flag_50"])], ["51-1", raw(["flag_51_1"])],
-    ["50N", raw(["flag_50N"])], ["51GS", raw(["flag_51GS"])], ["51N", raw(["flag_51N"])],
-    ["27", raw(["flag_27"])], ["59", raw(["flag_59"])], ["47", raw(["flag_47"])],
-    ["81 O", raw(["flag_81_O"])], ["81 U", raw(["flag_81_U"])], ["51-2", raw(["flag_51_2"])]
-  ];
-
   panel.innerHTML = `
     <div class="relay-details-card">
       <div class="relay-details-title">Leituras elétricas</div>
@@ -5033,14 +5213,9 @@ function renderRelayDetailsPanel(relayItem) {
       </div>
     </div>
     <div class="relay-details-card">
-      <div class="relay-details-title">Proteções</div>
-      <div class="relay-flag-grid">
-        ${flagItems.map(([label, value]) => `
-          <div class="relay-flag-pill ${String(value) === "1" ? "is-on" : "is-off"}">
-            <span>${label}</span>
-            <strong>${value}</strong>
-          </div>
-        `).join("")}
+      <div class="relay-details-title">Proteções${relayItem?.flags_lookback ? ` <span class="relay-details-hint">disparos das últimas ${cabinMapEscape(String(relayItem.flags_lookback).replace("hours", "h").replace("days", "d"))}</span>` : ""}</div>
+      <div class="${Array.isArray(relayItem?.flags) && relayItem.flags.length ? "relay-prot-grid" : "relay-flag-grid"}">
+        ${buildRelayFlagsHTML(relayItem)}
       </div>
     </div>
   `;
@@ -5257,10 +5432,15 @@ function renderRelayCard(relayItem) {
 function renderMultimeterDetailsPanel(item) {
   const panel = document.getElementById("multimeterDetailsPanel");
   if (!panel) return;
+  panel.innerHTML = buildMultimeterDetailsHTML(item);
+}
 
+// Extraído de renderMultimeterDetailsPanel para os medidores adicionais
+// (Medidor QGBT) abrirem exatamente o mesmo detalhamento do principal, sem
+// duplicar a lista de chaves. Mexeu aqui, mudou nos dois.
+function buildMultimeterDetailsHTML(item) {
   if (!item) {
-    panel.innerHTML = `<div class="relay-details-empty">Sem dados detalhados do multimedidor.</div>`;
-    return;
+    return `<div class="relay-details-empty">Sem dados detalhados do multimedidor.</div>`;
   }
 
   const analog = item?.analog ?? {};
@@ -5282,7 +5462,7 @@ function renderMultimeterDetailsPanel(item) {
     ["Energia Exportada", metric(["energy_export_kwh", "energy_exp_kwh", "exported_active_energy_kwh"], "kWh", 1)],
   ];
 
-  panel.innerHTML = `
+  return `
     <div class="relay-details-card">
       <div class="relay-details-title">Leituras eletricas</div>
       <div class="relay-details-grid">
@@ -5306,6 +5486,126 @@ function renderMultimeterDetailsPanel(item) {
       </div>
     </div>
   `;
+}
+
+// ======================================================
+// MEDIDORES ADICIONAIS (ex.: Medidor QGBT)
+// ======================================================
+// Desenha uma linha por medidor que NÃO é o principal, com a mesma marcação e
+// as mesmas classes da linha do medidor principal — de propósito, para as duas
+// ficarem visualmente idênticas e herdarem qualquer ajuste futuro de CSS.
+//
+// 🔑 Nada aqui é mockado: a lista vem do `items` da API, que por sua vez vem do
+// device cadastrado no banco. Usina sem medidor extra não desenha nada, e
+// medidor cadastrado que ainda não publicou aparece OFFLINE com "—", que é a
+// verdade — não um card inventado.
+
+// Quadro geral de baixa tensão: gabinete, barramento e disjuntores. Mesmo traço
+// e mesma paleta do ícone do multimedidor no plant.html.
+const QGBT_SVG_ICON = `
+<svg class="meter-extra-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect x="7" y="5" width="34" height="38" rx="4"
+        fill="none" stroke="rgba(57,229,140,0.85)" stroke-width="2"/>
+  <line x1="12" y1="13" x2="36" y2="13" stroke="rgba(57,229,140,0.7)" stroke-width="2" stroke-linecap="round"/>
+  <rect x="12" y="18" width="6" height="9" rx="1.5"
+        fill="rgba(57,229,140,0.10)" stroke="rgba(57,229,140,0.65)" stroke-width="1.3"/>
+  <rect x="21" y="18" width="6" height="9" rx="1.5"
+        fill="rgba(57,229,140,0.10)" stroke="rgba(57,229,140,0.65)" stroke-width="1.3"/>
+  <rect x="30" y="18" width="6" height="9" rx="1.5"
+        fill="rgba(57,229,140,0.10)" stroke="rgba(57,229,140,0.65)" stroke-width="1.3"/>
+  <line x1="15" y1="27" x2="15" y2="33" stroke="rgba(57,229,140,0.55)" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="24" y1="27" x2="24" y2="33" stroke="rgba(57,229,140,0.55)" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="33" y1="27" x2="33" y2="33" stroke="rgba(57,229,140,0.55)" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="12" y1="37" x2="36" y2="37" stroke="rgba(57,229,140,0.7)" stroke-width="2" stroke-linecap="round"/>
+</svg>`;
+
+function isMainMeterItem(it, principal) {
+  if (it?.is_main === true) return true;
+  const a = it?.device_id ?? it?.multimeter_id ?? null;
+  const b = principal?.device_id ?? principal?.multimeter_id ?? null;
+  return a != null && b != null && String(a) === String(b);
+}
+
+function renderMultimeterExtras(principal) {
+  const stack = document.getElementById("multimeterExtraStack");
+  if (!stack) return;
+
+  const extras = (Array.isArray(MULTIMETER_ITEMS) ? MULTIMETER_ITEMS : [])
+    .filter((it) => it && !isMainMeterItem(it, principal));
+
+  if (!extras.length) {
+    stack.innerHTML = "";
+    return;
+  }
+
+  // A tela se redesenha a cada 30 s. Como o innerHTML abaixo recria os nós, o
+  // painel que o usuário tivesse aberto fecharia sozinho no meio da leitura.
+  // Guardamos quais estavam abertos, por device_id (e não por posição, que
+  // muda se um medidor entrar ou sair da lista), e reabrimos no fim.
+  const abertosAntes = new Set(
+    Array.from(stack.querySelectorAll("[data-extra-meter].open"))
+      .map((el) => el.dataset.meterKey)
+      .filter(Boolean)
+  );
+
+  // Mesmas colunas da linha principal, incluindo a regra de esconder a coluna
+  // de potência aparente quando nenhum medidor publica esse campo.
+  const algumTemAparente = extras.some(
+    (it) => pickDeviceMetricValue(it, it?.analog ?? it?.data ?? {},
+      ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]) != null
+  );
+  const cols = algumTemAparente
+    ? "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px"
+    : "14px minmax(250px,1.45fr) minmax(150px,0.95fr) minmax(150px,0.95fr) minmax(190px,1fr) 88px";
+
+  stack.innerHTML = extras.map((it, i) => {
+    const analog = it?.analog ?? it?.data ?? {};
+    const online = multimeterOnlineFromPayload(it);
+    // a API já resolve o rótulo (COALESCE de display_name com name), então
+    // device_name aqui é "Medidor QGBT", não "Multimedidor2"
+    const nome = it?.device_name || "Medidor";
+    const ativa = pickDeviceMetricValue(it, analog, ["active_power_kw", "p_kw", "power_kw", "active_power"]);
+    const aparente = pickDeviceMetricValue(it, analog, ["apparent_power_kva", "power_apparent_kva", "apparent_power", "apparent_power_va"]);
+    const reativa = pickDeviceMetricValue(it, analog, ["reactive_power_kvar", "power_reactive_kvar", "reactive_power", "reactive_power_var"]);
+    const ts = it?.last_update ?? it?.timestamp ?? null;
+
+    let c = 3;
+    const celulaAparente = algumTemAparente
+      ? `<div class="device-metric-cell" data-label="APPARENT POWER" style="grid-column:${++c};grid-row:1">${aparente != null ? formatMetricValue(aparente, "kVA", 1) : "—"}</div>`
+      : "";
+
+    return `
+      <div class="relay-row relay-row--table meter-extra-row ${online ? "online" : "offline"}"
+           data-extra-meter="${i}" data-meter-key="${cabinMapEscape(it?.device_id ?? it?.multimeter_id ?? nome)}"
+           style="grid-template-columns:${cols}">
+        <span class="status-dot"${online ? "" : ' style="opacity:0.65"'}></span>
+        <div class="relay-left">
+          <div class="relay-title">${QGBT_SVG_ICON}<span>${cabinMapEscape(nome)}</span></div>
+          <span class="relay-state ${online ? "relay-state--on" : "relay-state--off"}" style="margin-left:8px">${online ? "ONLINE" : "OFFLINE"}</span>
+          <i class="fa-solid fa-chevron-down relay-expand-icon"></i>
+        </div>
+        <div class="device-metric-cell" data-label="ACTIVE POWER" style="grid-column:3;grid-row:1">${formatMetricValue(ativa, "kW", 1)}</div>
+        ${celulaAparente}
+        <div class="device-metric-cell" data-label="REACTIVE POWER" style="grid-column:${++c};grid-row:1">${formatMetricValue(reativa, "kvar", 1)}</div>
+        <div class="device-metric-cell relay-timestamp-cell" data-label="ÚLTIMA LEITURA" style="grid-column:${++c};grid-row:1">${fmtDatePtBR(ts)}</div>
+      </div>
+      <div class="relay-details-panel" data-extra-panel="${i}" style="max-height:0px">
+        ${buildMultimeterDetailsHTML(it)}
+      </div>`;
+  }).join("");
+
+  // Abre/fecha igual à linha principal. Religa a cada render porque o innerHTML
+  // acima recria os nós; sem isto o clique pararia de funcionar no 1º refresh.
+  stack.querySelectorAll("[data-extra-meter]").forEach((row) => {
+    const painel = stack.querySelector(`[data-extra-panel="${row.dataset.extraMeter}"]`);
+    const aplicar = (abrir) => {
+      row.classList.toggle("open", abrir);
+      painel?.classList.toggle("open", abrir);
+      if (painel) painel.style.maxHeight = abrir ? "1200px" : "0px";
+    };
+    if (abertosAntes.has(row.dataset.meterKey)) aplicar(true);
+    row.addEventListener("click", () => aplicar(!painel?.classList.contains("open")));
+  });
 }
 
 function renderMultimeterCard(item) {
@@ -7281,7 +7581,10 @@ async function refreshRealtimeEverything() {
       window.MULTIMETER_REALTIME = MULTIMETER_REALTIME;
       const showMeter = PLANT_CAPABILITIES.hasMultimeter === true;
       setMultimeterSectionVisible(showMeter);
-      if (showMeter) renderMultimeterCard(multimeterItem);
+      if (showMeter) {
+        renderMultimeterCard(multimeterItem);
+        renderMultimeterExtras(multimeterItem);
+      }
       updateCabineMeterNode(multimeterItem);
     } else {
       console.error("[refreshRealtimeEverything][multimeter] erro", multimeterRes.reason);
@@ -7353,7 +7656,14 @@ async function refreshRealtimeEverything() {
 }
 
 // ======================================================
-// TRACKERS (MOCK LOCAL) — MÓDULO INDEPENDENTE
+// TRACKERS — MÓDULO INDEPENDENTE
+//
+// 12/08/2026: o rótulo "(MOCK LOCAL)" e a função createMockTrackers saíram
+// daqui. Ela já não era chamada por ninguém, mas o vocabulário de estados
+// que ela inventava (manual_daytime, auto_tracking, auto_sleep, ...) tinha
+// vazado para o mapa de cores e para a legenda, e era o que a tela usava
+// para pintar dado REAL — que vem com outros nomes. Dado de tracker agora
+// vem só de /trackers/realtime.
 // ======================================================
 let TRACKER_VIEW_MODE = "state";
 let TRACKERS_DATA = [];
@@ -7367,60 +7677,44 @@ let TRACKERS_LAST_HAS_DATA = false;
 let TRACKERS_MAP = null;
 let TRACKERS_MARKERS_LAYER = null;
 
-function createMockTrackers(count = 220) {
-  const items = [];
-  const cols = 22;
-  const spacingX = 65;
-  const spacingY = 78;
-  const states = [
-    "off",
-    "manual_daytime",
-    "auto_daytime",
-    "manual_tracking",
-    "auto_tracking",
-    "manual_nighttime",
-    "auto_nighttime",
-    "manual_sleep",
-    "auto_sleep"
-  ];
+// 🔑 12/08/2026 — este vocabulário TEM que ser o mesmo que o
+// /trackers/realtime emite. Ele listava 10 estados copiados do gerador de
+// mock (manual_daytime, auto_tracking, auto_sleep...) que o backend NUNCA
+// produziu: a interseção com a API era só `off` e `no_comm`, então todo
+// tracker real caía no cinza de fallback e a legenda descrevia uma tela que
+// não existe. Ao mexer aqui, conferir a função state_code em
+// handle_get_trackers_realtime (api2.py) — as duas listas andam juntas.
+// Ordem = severidade, da pior para a melhor. A legenda sai nesta ordem.
+const TRACKER_STATE_COLORS = {
+  emergency: "#ff3b30",
+  fault: "#ff8a65",
+  warning: "#ffc857",
+  manual: "#b47dff",
+  off: "#707b86",
+  standby: "#7f8cff",
+  auto: "#2ad37f",
+  online: "#4f9dff",
+  no_comm: "#4a5057",
+  unknown: "#8a949d"
+};
 
-  for (let i = 0; i < count; i++) {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const offline = i % 17 === 0;
-    const stateCode = offline ? "no_comm" : states[i % states.length];
-    const angle = offline ? null : -60 + ((i * 7) % 131);
-    const error = offline ? null : Number(((i * 1.7) % 11).toFixed(1));
-
-    items.push({
-      id: `TRK-${String(i + 1).padStart(4, "0")}`,
-      name: `Tracker ${String(i + 1).padStart(3, "0")}`,
-      kind: i % 2 === 0 ? "tcu" : "rsu",
-      x: 50 + col * spacingX + (row % 2 ? 12 : 0),
-      y: 45 + row * spacingY,
-      state_code: stateCode,
-      angle_deg: angle,
-      error_value: error,
-      is_online: !offline
-    });
-  }
-  return items;
-}
+const TRACKER_STATE_LABELS = {
+  emergency: "botão de emergência",
+  fault: "falha (TCU/Zigbee/comunicação)",
+  warning: "bateria baixa ou fora de curso",
+  manual: "modo manual",
+  off: "desligado",
+  standby: "standby",
+  auto: "modo automático",
+  online: "online, sem alarme",
+  no_comm: "sem comunicação",
+  unknown: "estado desconhecido"
+};
 
 function getTrackersLegendItems(mode) {
   if (mode === "state") {
-    return [
-      ["tracker desligado", "#707b86"],
-      ["manual + daytime", "#f6bd60"],
-      ["automático + daytime", "#f2e85e"],
-      ["manual + tracking", "#4f9dff"],
-      ["automático + tracking", "#2ad37f"],
-      ["manual + nighttime", "#7f8cff"],
-      ["automático + nighttime", "#6375ff"],
-      ["manual sleep", "#b47dff"],
-      ["automático sleep", "#9255ff"],
-      ["sem comunicação", "#4a5057"]
-    ];
+    return Object.keys(TRACKER_STATE_COLORS)
+      .map((k) => [TRACKER_STATE_LABELS[k], TRACKER_STATE_COLORS[k]]);
   }
 
   if (mode === "angle") {
@@ -7453,19 +7747,7 @@ function getTrackerColorByMode(item, mode) {
   if (!item?.is_online) return "#4a5057";
 
   if (mode === "state") {
-    const map = {
-      off: "#707b86",
-      manual_daytime: "#f6bd60",
-      auto_daytime: "#f2e85e",
-      manual_tracking: "#4f9dff",
-      auto_tracking: "#2ad37f",
-      manual_nighttime: "#7f8cff",
-      auto_nighttime: "#6375ff",
-      manual_sleep: "#b47dff",
-      auto_sleep: "#9255ff",
-      no_comm: "#4a5057"
-    };
-    return map[item.state_code] || "#8a949d";
+    return TRACKER_STATE_COLORS[item.state_code] || TRACKER_STATE_COLORS.unknown;
   }
 
   if (mode === "angle") {
@@ -7486,6 +7768,51 @@ function getTrackerColorByMode(item, mode) {
   return err <= 5 ? "#2ad37f" : "#ff8a65";
 }
 
+// Nomes das flags como o operador fala, não como a chave do CLP.
+const TRACKER_FLAG_LABELS = {
+  button_emergency: "Botão de emergência",
+  fault_tcu: "Falha na TCU",
+  fault_zigbee: "Falha Zigbee",
+  communication_fault: "Falha de comunicação",
+  low_batt: "Bateria baixa",
+  tcu_fora_limite: "Fora do limite de curso",
+  tcu_auto: "Modo automático",
+  tcu_manual: "Modo manual",
+  tcu_off: "Desligado",
+  tcu_standbye: "Standby"
+};
+
+// 🔑 `null` é diferente de `false`: sem evento para o device a plataforma NÃO
+// SABE o estado da flag, e dizer "não" aí é o defeito que esta tela tinha —
+// ela afirmava "sem falha" para as 10 flags, incluindo botão de emergência,
+// sobre uma tabela que não tem coluna de flag nenhuma. Desconhecido mostra "—".
+function buildTrackerFlagsHTML(tracker) {
+  const flags = tracker?.flags;
+  if (!flags || typeof flags !== "object") return "";
+
+  if (!tracker.flags_known) {
+    return `<br><span style="opacity:.7">Alarmes: sem evento registrado para este equipamento</span>`;
+  }
+
+  const ligadas = Object.keys(TRACKER_FLAG_LABELS)
+    .filter((k) => flags[k] === true)
+    .map((k) => cabinMapEscape(TRACKER_FLAG_LABELS[k]));
+  const desconhecidas = Object.keys(TRACKER_FLAG_LABELS)
+    .filter((k) => flags[k] === null || flags[k] === undefined);
+
+  let html = ligadas.length
+    ? `<br><strong style="color:#ff8a65">Alarmes: ${ligadas.join(", ")}</strong>`
+    : `<br>Alarmes: nenhum ativo`;
+
+  if (desconhecidas.length) {
+    html += `<br><span style="opacity:.7">Não reportadas: ${desconhecidas.length} de ${Object.keys(TRACKER_FLAG_LABELS).length}</span>`;
+  }
+  if (tracker.flags_last_change) {
+    html += `<br><span style="opacity:.7">Última mudança: ${fmtDatePtBR(tracker.flags_last_change)}</span>`;
+  }
+  return html;
+}
+
 function renderTrackersLegend() {
   const legendEl = document.getElementById("trackersLegend");
   if (!legendEl) return;
@@ -7503,6 +7830,50 @@ function renderTrackersLegend() {
 function applyTrackersTransform() {
   if (!TRACKERS_MAP) return;
   TRACKERS_MAP.invalidateSize();
+}
+
+// O mapa tem tamanho de verdade? Enquanto o painel está colapsado
+// (.trackers-panel-body com max-height:0) ou a seção escondida
+// (.trackers-hidden = display:none), o Leaflet mede 0x0.
+function trackersMapIsSized() {
+  if (!TRACKERS_MAP) return false;
+  try {
+    const s = TRACKERS_MAP.getSize();
+    return !!s && s.x > 0 && s.y > 0;
+  } catch { return false; }
+}
+
+// Abrir o painel é uma TRANSIÇÃO de .28s (max-height em .trackers-panel-body).
+// Medir/desenhar antes dela terminar lê um container de altura 0: o mapa nasce
+// com tamanho errado e o enquadramento inicial trava. Por isso a abertura
+// espera o fim da transição — com timeout de segurança, porque transitionend
+// NÃO dispara quando o usuário tem prefers-reduced-motion ou quando o painel
+// já estava aberto (aí não há transição nenhuma para terminar).
+function afterTrackersReveal(fn) {
+  const body = document.querySelector("#trackersSection .trackers-panel-body");
+  if (!body) { requestAnimationFrame(fn); return; }
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    body.removeEventListener("transitionend", onEnd);
+    fn();
+  };
+  const onEnd = (e) => {
+    if (e.target === body && e.propertyName === "max-height") run();
+  };
+  body.addEventListener("transitionend", onEnd);
+  setTimeout(run, 360);
+}
+
+// Caminho ÚNICO de abertura do painel (aba, menu e âncora usavam três
+// variações diferentes — a da aba não desenhava nada, e era por isso que a
+// primeira abertura vinha em branco até trocar o modo de visualização).
+function revealTrackersPanel() {
+  afterTrackersReveal(() => {
+    applyTrackersTransform();
+    renderTrackersPanel();
+  });
 }
 
 function renderTrackersNodes() {
@@ -7544,14 +7915,17 @@ function renderTrackersNodes() {
     const m = L.marker([lat, lng], { icon: markerIcon(color) });
     const displayName = tracker.name || tracker.tracker_code || tracker.tracker_id || "Tracker";
     const displayType = String(tracker.tracker_type || tracker.kind || "—").toUpperCase();
+    const stateLabel = TRACKER_STATE_LABELS[tracker.state_code]
+      || tracker.state_code || "—";
     m.bindPopup(`
-      <strong>${displayName}</strong><br>
-      Tipo: ${displayType}<br>
-      Estado: ${tracker.state_code ?? "—"}<br>
+      <strong>${cabinMapEscape(displayName)}</strong><br>
+      Tipo: ${cabinMapEscape(displayType)}<br>
+      Estado: ${cabinMapEscape(stateLabel)}<br>
       Ângulo: ${tracker.angle_deg ?? "—"}<br>
       Erro: ${tracker.error_value ?? "—"}<br>
       Status: ${tracker.is_online ? "online" : "offline"}<br>
       Atualização: ${fmtDatePtBR(tracker.last_update)}
+      ${buildTrackerFlagsHTML(tracker)}
     `);
     m.addTo(TRACKERS_MARKERS_LAYER);
   });
@@ -7573,7 +7947,10 @@ function renderTrackersNodes() {
     } else if (bounds.length) {
       TRACKERS_MAP.fitBounds(bounds, { padding: [20, 20] });
     }
-    TRACKERS_HAS_FITTED_ONCE = true;
+    // Só trava o enquadramento se o mapa já tinha tamanho real. Um fitBounds
+    // calculado contra um container 0x0 escolhe o zoom errado — e, travado,
+    // deixaria os marcadores fora da tela até alguém apertar "resetar zoom".
+    if (trackersMapIsSized()) TRACKERS_HAS_FITTED_ONCE = true;
   }
 }
 
@@ -7608,7 +7985,7 @@ function initTrackersPanel() {
       const collapsed = !sectionEl.classList.contains("is-collapsed");
       setTrackersCollapsed(collapsed);
       const expanded = !collapsed;
-      if (expanded) applyTrackersTransform();
+      if (expanded) revealTrackersPanel();
     });
   }
 
@@ -7626,12 +8003,7 @@ function initTrackersPanel() {
         setTrackersSectionVisible(true);
         setTrackersCollapsed(false);
         TRACKERS_LAST_HAS_DATA = true;
-        requestAnimationFrame(() => {
-          applyTrackersTransform();
-          if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
-            renderTrackersPanel();
-          }
-        });
+        revealTrackersPanel();
       } else {
         setTrackersSectionVisible(false);
       }
@@ -7707,12 +8079,7 @@ function scrollPlantSectionTarget(target) {
       anchor.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
-    requestAnimationFrame(() => {
-      applyTrackersTransform();
-      if (Array.isArray(TRACKERS_DATA) && TRACKERS_DATA.length) {
-        renderTrackersPanel();
-      }
-    });
+    revealTrackersPanel();
 
     return;
   }
@@ -7863,6 +8230,34 @@ function handleInitialPlantAction() {
   if (action === "command") {
     setTimeout(openCommandDevicePicker, 120);
   }
+  // Notificação de alarme: abre o painel de alarmes já aberto, em vez de
+  // largar o usuário na usina e obrigá-lo a procurar o sino. No celular isso
+  // é a diferença entre ver o alarme e não achar por que o telefone apitou.
+  // O painel é preenchido pelo primeiro refresh; por isso esperamos ele
+  // chegar em vez de abrir num painel vazio.
+  if (action === "alarms") {
+    let tentativas = 0;
+    const abrir = () => {
+      const btn = document.getElementById("plantAlarmMenuButton");
+      // olha a LISTA JÁ RENDERIZADA, não uma variável de estado: o
+      // renderAlarms() preenche este container, então ter filho aqui é a
+      // prova de que o dado chegou e foi desenhado
+      const lista = document.getElementById("plantActiveAlarms");
+      const temAlarme = !!lista && lista.children.length > 0;
+      // até ~6 s esperando o dado; passou disso, abre assim mesmo (o painel
+      // tem estado vazio próprio e dizer "nenhum alarme ativo" é uma resposta
+      // honesta — o alarme pode ter fechado entre o push e o toque)
+      if (btn && (temAlarme || tentativas > 20)) {
+        setPlantAlarmMenuOpen(true);
+        document.getElementById("plantAlarmMenuPanel")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (tentativas++ < 30) setTimeout(abrir, 300);
+    };
+    setTimeout(abrir, 400);
+  }
+
   // Deep-link to specific device (from robot assistant diagnostics)
   const deviceId = params.get("device_id");
   if (deviceId) {
@@ -7955,6 +8350,7 @@ function _pRobotSaveNotifPrefs(prefs) {
     if (user.customer_id) hdrs["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) hdrs["X-Is-Superuser"] = "true";
     if (user.username) hdrs["X-Username"] = user.username;
+    if (user.token) hdrs["Authorization"] = `Bearer ${user.token}`;
     fetch(`${API_BASE}/users/notif-prefs`, {
       method: "POST", headers: hdrs,
       body: JSON.stringify({ prefs })
@@ -7979,6 +8375,8 @@ function _robotApiFetch(path) {
   const headers = {};
   if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
   if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+  if (user.username) headers["X-Username"] = user.username;
+  if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
   return fetch(`${API_BASE}${path}`, { headers, cache: "no-store" });
 }
 
@@ -8427,6 +8825,8 @@ async function _rondaFetchData(dateStr) {
   const headers = {};
   if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
   if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+  if (user.username) headers["X-Username"] = user.username;
+  if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
   let data = null;
   for (let tentativa = 0; tentativa < 2; tentativa++) {
     const res = await fetch(url, { headers, cache: "no-store" });
@@ -8834,6 +9234,7 @@ async function _plantReportFetch() {
     if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
     if (user.username) headers["X-Username"] = user.username;
+    if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
     const res = await fetch(url, { headers, cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     let data = await res.json();
@@ -8898,11 +9299,111 @@ function _plantReportRenderMini(data, el) {
   </div>`;
   html += `<div class="ronda-toolbar">
     <button class="ronda-btn" id="plantReportExpandBtn"><i class="fa-solid fa-expand"></i> Expandir</button>
-    <button class="ronda-btn report-btn-pdf" id="plantReportPdfBtn"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-  </div>`;
+    <button class="ronda-btn report-btn-pdf" id="plantReportPdfBtn"><i class="fa-solid fa-file-pdf"></i> PDF</button>` +
+    (_canDeepReport()
+      ? `<button class="ronda-btn" id="plantReportDeepBtn" title="Análise escrita por IA sobre os dados deste período"><i class="fa-solid fa-wand-magic-sparkles"></i> Análise IA</button>`
+      : "") +
+  `</div>
+  <div id="plantReportDeepBox" class="ronda-section" style="display:none;margin-top:8px;"></div>`;
   el.innerHTML = html;
   document.getElementById("plantReportExpandBtn")?.addEventListener("click", () => _plantReportOpenFull(data));
   document.getElementById("plantReportPdfBtn")?.addEventListener("click", () => _plantReportDownloadPdf(data));
+  document.getElementById("plantReportDeepBtn")?.addEventListener("click", _plantReportDeepRun);
+}
+
+// ---------------------------------------------------------------------------
+// Analise profunda (IA). O texto vem PRONTO da Lambda, ja passado pelo
+// verificador de numero e pelo filtro de palpite -- o frontend NAO reescreve
+// nada, so exibe. Se um dia a IA cair, a rota devolve erro e o relatorio
+// normal acima continua inteiro: a analise ACRESCENTA, nunca substitui.
+// ---------------------------------------------------------------------------
+let _PLANT_DEEP_LOADING = false;
+
+async function _plantReportDeepRun() {
+  if (_PLANT_DEEP_LOADING) return;
+  const box = document.getElementById("plantReportDeepBox");
+  const btn = document.getElementById("plantReportDeepBtn");
+  if (!box) return;
+  _PLANT_DEEP_LOADING = true;
+  if (btn) btn.disabled = true;
+  box.style.display = "";
+  box.innerHTML = `<div class="ronda-loading"><i class="fa-solid fa-spinner fa-spin"></i><br>
+    Analisando os dados do período…</div>`;
+  try {
+    const p = (_PLANT_REPORT_DATA && _PLANT_REPORT_DATA.period) || {};
+    let url = `${API_BASE}/plants/${PLANT_ID}/realtime?view=report-deep`;
+    if (p.start) url += `&start=${encodeURIComponent(p.start)}`;
+    if (p.end) url += `&end=${encodeURIComponent(p.end)}`;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const headers = {};
+    if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
+    const res = await fetch(url, { headers, cache: "no-store" });
+    if (res.status === 403) {
+      box.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-lock"></i>
+        Recurso restrito à equipe AIOTI.</div>`;
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let data = await res.json();
+    if (data && data.body) data = typeof data.body === "string" ? JSON.parse(data.body) : data.body;
+    _plantReportDeepRender(data, box);
+  } catch (e) {
+    console.error("[REPORT-DEEP]", e);
+    // Degradar dizendo O QUE falhou. Mensagem generica de "indisponivel" foi o
+    // defeito que deixou a camada de IA muda por semanas sem ninguem notar.
+    box.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-triangle-exclamation"></i>
+      Não foi possível gerar a análise agora (${cabinMapEscape(e.message)}).
+      O relatório acima continua válido.</div>`;
+  } finally {
+    _PLANT_DEEP_LOADING = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _plantReportDeepLista(valor) {
+  const frases = Array.isArray(valor) ? valor : String(valor || "").split(/\n+/);
+  return frases.map(t => String(t).trim()).filter(Boolean);
+}
+
+function _plantReportDeepRender(data, box) {
+  const meta = (data && data.meta) || {};
+  const analise = _plantReportDeepLista(data && data.analise);
+  // As recomendacoes sobem no topo da resposta desde 18/08, mas continuam
+  // tambem dentro de `meta` -- ler as duas posicoes evita depender de qual
+  // versao da Lambda esta no ar no momento.
+  const recs = _plantReportDeepLista(
+    (data && data.recomendacoes) || meta.recomendacoes);
+
+  if (!analise.length && !recs.length) {
+    box.innerHTML = `<div class="ronda-error"><i class="fa-solid fa-circle-info"></i>
+      A análise não retornou texto desta vez. Tente novamente em instantes.</div>`;
+    return;
+  }
+
+  const li = (t) => `<li style="margin-bottom:6px;line-height:1.45;">${cabinMapEscape(t)}</li>`;
+  let html = "";
+  if (analise.length) {
+    html += `<div class="ronda-section-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Análise IA</div>
+      <ul style="margin:6px 0 0 16px;padding:0;font-size:11.5px;">${analise.map(li).join("")}</ul>`;
+  }
+  // Bloco proprio, e nao uma frase perdida no meio da analise: recomendacao e
+  // o que faz alguem PEGAR A ESTRADA, entao precisa ser achavel de relance.
+  if (recs.length) {
+    html += `<div class="ronda-section-title" style="margin-top:12px;">
+        <i class="fa-solid fa-list-check"></i> O que fazer a seguir</div>
+      <ul style="margin:6px 0 0 16px;padding:0;font-size:11.5px;">${recs.map(li).join("")}</ul>`;
+  }
+  const descartadas = Number(meta.descartadas || meta.filtradas || 0);
+  html += `
+    <div style="margin-top:8px;font-size:9.5px;color:rgba(255,255,255,0.45);line-height:1.4;">
+      Texto redigido por IA a partir dos dados medidos. Todo número foi conferido
+      contra o banco, e toda afirmação de tendência foi conferida contra a série
+      medida${descartadas ? `; ${descartadas} trecho(s) foram descartados por não conferir` : ""}.
+      As ações sugeridas apontam o que verificar — nunca a causa, que é de quem
+      abre o painel.
+      ${meta.modelo ? "Modelo " + cabinMapEscape(String(meta.modelo)) + "." : ""}
+    </div>`;
+  box.innerHTML = html;
 }
 
 function _plantReportOpenFull(data) {
@@ -8996,10 +9497,15 @@ function _plantReportOpenFull(data) {
   let body = '<div class="ronda-full-grid" style="max-width:1400px;">';
 
   const prCls = (s.avg_pr_pct||0)>=75?'val-good':(s.avg_pr_pct||0)>=60?'val-warn':'val-bad';
-  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo do Período</div><div class="ronda-card-subtitle">${p.start||""} ~ ${p.end||""} (${p.days||0} dias)</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração Total</div><div class="ronda-full-kpi-value" style="animation:reportKpiGlow 3s ease-in-out infinite;">${_rpFmtP(s.total_generation_kwh,1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Médio</div><div class="ronda-full-kpi-value ${prCls}">${_rpFmtP(s.avg_pr_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">FC Médio</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_capacity_factor_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days||0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div></div></div></div>`;
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo do Período</div><div class="ronda-card-subtitle">${p.start||""} ~ ${p.end||""} (${p.days||0} dias)</div></div></div><div class="ronda-card-body"><div class="ronda-full-kpi-row"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração Total</div><div class="ronda-full-kpi-value" style="animation:reportKpiGlow 3s ease-in-out infinite;">${_rpFmtP(s.total_generation_kwh,1)}<span class="ronda-full-kpi-unit">kWh</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">PR Médio</div><div class="ronda-full-kpi-value ${prCls}">${_rpFmtP(s.avg_pr_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">FC Médio</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_capacity_factor_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div></div><div class="ronda-full-kpi-row" style="margin-top:8px;"><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Total</div><div class="ronda-full-kpi-value">${_rpFmtP(s.total_irradiation_kwh_m2,2)}<span class="ronda-full-kpi-unit">kWh/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmtP(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div><div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days||0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div></div></div></div>`;
 
-  const cL = mc.current_month ? mc.current_month.replace("-","/") : "Atual", pL = mc.previous_month ? mc.previous_month.replace("-","/") : "Anterior";
-  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal</div><div class="ronda-card-subtitle">${cL} vs ${pL}</div></div></div><div class="ronda-card-body">${compBar("Geração",mc.current_generation_kwh,mc.previous_generation_kwh,cL,pL,"kWh",mc.delta_generation_pct)}${compBar("PR",mc.current_pr_pct,mc.previous_pr_pct,cL,pL,"%",mc.delta_pr_pct)}${compBar("Fator Capac.",mc.current_fc_pct,mc.previous_fc_pct,cL,pL,"%",mc.delta_fc_pct)}</div></div>`;
+  // O mes corrente quase sempre esta pela metade. Sem o numero de dias no
+  // rotulo, a barra sugere queda de geracao/irradiacao que e so o mes nao ter
+  // acabado. Vale para a Geracao, que ja existia, e para a Irradiacao nova.
+  const _mLbl = (m, d) => (m ? m.replace("-", "/") : "") + (d ? ` (${d}d)` : "");
+  const cL = mc.current_month ? _mLbl(mc.current_month, mc.current_days) : "Atual",
+        pL = mc.previous_month ? _mLbl(mc.previous_month, mc.previous_days) : "Anterior";
+  body += `<div class="ronda-card" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal</div><div class="ronda-card-subtitle">${cL} vs ${pL}</div></div></div><div class="ronda-card-body">${compBar("Geração",mc.current_generation_kwh,mc.previous_generation_kwh,cL,pL,"kWh",mc.delta_generation_pct)}${compBar("Irradiação",mc.current_irradiation_kwh_m2,mc.previous_irradiation_kwh_m2,_mLbl(mc.current_month,mc.current_irradiation_days),_mLbl(mc.previous_month,mc.previous_irradiation_days),"kWh/m²",mc.delta_irradiation_pct)}${compBar("PR",mc.current_pr_pct,mc.previous_pr_pct,cL,pL,"%",mc.delta_pr_pct)}${compBar("Fator Capac.",mc.current_fc_pct,mc.previous_fc_pct,cL,pL,"%",mc.delta_fc_pct)}</div></div>`;
 
   if (trend.length > 1) body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária</div><div class="ronda-card-subtitle">Geração (kWh) e PR (%)</div></div></div><div class="ronda-card-body" style="padding:10px 12px;">${trendSVG()}</div></div>`;
 
