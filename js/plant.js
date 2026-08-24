@@ -5922,6 +5922,9 @@ function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
       current_a: rt?.current_a ?? null,
       is_online: rt?.is_online ?? false,
       last_ts: rt?.last_ts ?? null,
+      // Idade da ultima leitura DESTA string. E o que permite dizer
+      // "falha de comunicacao" em vez do generico "sem dado".
+      age_seconds: rt?.age_seconds ?? null,
       monitorable,
       alarm_active: rt?.alarm_active ?? cfg?.alarm_active ?? null,
       alarm_state: rt?.alarm_state ?? cfg?.alarm_state ?? null,
@@ -6152,9 +6155,28 @@ function renderStringsGrid(gridEl, payload) {
     el.className = "string-card";
     el.dataset.string = str.string_index;
     const inAlarm = isStringInAlarm(str, inverterOnline, inverterRealId);
+
+    // 🔑 FALHA DE COMUNICACAO DA STRING (pedido do Igor, 24/08).
+    //
+    // Antes, tudo que nao era alarme e nao tinha dado caia num "nodata" so —
+    // e isso misturava duas coisas MUITO diferentes:
+    //   - o INVERSOR parou: nenhuma string dele reporta, e a culpa nao e da
+    //     string. Marcar 40 strings como defeituosas mandaria o tecnico
+    //     procurar 40 problemas que nao existem.
+    //   - so ESTA string parou, com o inversor publicando normal: aí sim e
+    //     falha de comunicacao dela, e e um endereco para ir olhar.
+    //
+    // A distincao so e possivel porque a API ja devolve is_online e
+    // age_seconds POR STRING; nao precisou de nada novo no banco.
+    const semComunicacao = inverterOnline === true
+      && !inAlarm
+      && (str.has_data !== true || str.is_online === false);
+
     if (inAlarm) {
       el.classList.add("string-alarm");
       hasAlarmOnAnyMonitorable = true;
+    } else if (semComunicacao) {
+      el.classList.add("string-nocomm");
     } else if (!str.has_data || !inverterOnline) {
       el.classList.add("nodata");
     } else {
@@ -6163,9 +6185,19 @@ function renderStringsGrid(gridEl, payload) {
 
     const ampText = (str.has_data && inverterOnline !== false) ? fmtAmp(str.current_a) : "—";
 
+    // Ha quanto tempo ESTA string nao fala. Sem isso o icone diria "algo esta
+    // errado" sem dizer desde quando, que e a primeira pergunta de quem vai a
+    // campo.
+    if (semComunicacao) {
+      const idade = Number(str.age_seconds);
+      el.title = isFinite(idade) && idade > 0
+        ? `Falha de comunicação — sem leitura há ${_formatThermalAge(idade)}`
+        : "Falha de comunicação — sem leitura";
+    }
+
     el.innerHTML = `
       S${str.string_index}
-      <strong>${ampText}</strong>
+      <strong>${semComunicacao ? '<i class="fa-solid fa-plug-circle-xmark"></i>' : ampText}</strong>
     `;
 
     el.addEventListener("click", async (e) => {
