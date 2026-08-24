@@ -6471,6 +6471,37 @@ function ensureMonthlyPerdaToggle(temPerda) {
   btn.classList.toggle("is-on", MONTHLY_SHOW_PERDA);
 }
 
+/**
+ * Chip "Perda hoje" ao lado do titulo do grafico diario.
+ *
+ * O numero vem PRONTO do api2.py (_perda_hoje_da_usina), de proposito: e o
+ * mesmo calculo do cartao no painel, entao as duas telas mostram o mesmo
+ * valor. Se cada uma fizesse a sua conta, uma divergencia de centavos viraria
+ * discussao sobre qual esta certa.
+ *
+ * 🔑 Some quando nao da para calcular, em vez de mostrar traco: usina sem
+ * capacidade cadastrada ou sem irradiacao medida vem com null, e "R$ —" num
+ * campo de dinheiro parece defeito do sistema. Ausencia nao promete nada.
+ */
+function preencherPerdaDoDia(payload) {
+  const chip = document.getElementById("dailyPerdaChip");
+  if (!chip) return;
+
+  const brl = payload?.perda_hoje_brl;
+  if (brl == null) { chip.style.display = "none"; return; }
+
+  const kwh = Number(payload.perda_hoje_kwh || 0);
+  const pr = String(payload.perda_pr_referencia_pct ?? 80).replace(".", ",");
+  const tarifa = String(payload.perda_tarifa_kwh_brl ?? 0.49).replace(".", ",");
+
+  chip.style.display = "";
+  chip.classList.toggle("is-zero", Number(brl) <= 0);
+  chip.textContent = `Perda hoje: ${formatKwhPtBR(kwh)} · ${formatBrlPtBR(brl)}`;
+  // A procedencia vai no title: numero de dinheiro sem dizer de onde saiu
+  // vira discussao com o cliente.
+  chip.title = `Comparado com PR de referência de ${pr}% · tarifa R$ ${tarifa}/kWh`;
+}
+
 /** "R$ 1.234,56" — o pt-BR do resto da tela, sem depender de Intl por engano. */
 function formatBrlPtBR(v) {
   const n = Number(v);
@@ -6538,7 +6569,7 @@ function openDailyLimitsModal() {
   closeDailyLimitsModal();
 
   const capAc = asNumber(PLANT_STATE.capacity_ac, 0);
-  const autoPower = capAc > 0 ? `${capAc.toFixed(0)} kW (Capacity AC)` : "potência nominal";
+  const autoPower = capAc > 0 ? `${capAc.toFixed(0)} kW (Capacidade AC)` : "potência nominal";
   const curPower = PLANT_STATE.chart_power_max_kw;
   const curIrr = PLANT_STATE.chart_irr_max_wm2;
 
@@ -6686,7 +6717,9 @@ function renderDailyChart() {
   const expectedData = useCapacityExpected
     ? DAILY.labels.map(() => capacityAc)
     : (Array.isArray(DAILY.expectedPower) ? DAILY.expectedPower : []);
-  const expectedLabel = useCapacityExpected ? "Capacity AC" : "Esperado";
+  // ⚠️ Este rotulo e COMPARADO no tooltip abaixo (label === "Capacidade AC").
+  // Mudar aqui sem mudar la quebra o tooltip em silencio.
+  const expectedLabel = useCapacityExpected ? "Capacidade AC" : "Esperado";
 
   const greenGradient = ctx.createLinearGradient(0, 0, 0, 320);
   greenGradient.addColorStop(0, powerColorRgba[0]);
@@ -6769,7 +6802,7 @@ function renderDailyChart() {
               const label = item?.dataset?.label || "";
               const value = Number(item?.raw ?? 0);
               if (label === "Esperado") return `Esperado: ${formatKwPtBR(value)}`;
-              if (label === "Capacity AC") return `Capacity AC: ${formatKwPtBR(value)}`;
+              if (label === "Capacidade AC") return `Capacidade AC: ${formatKwPtBR(value)}`;
               if (label.includes("Potência") || label === "Multimedidor") return `${label}: ${formatKwPtBR(value)}`;
               if (label.includes("Irradiância")) return `${label}: ${formatWm2PtBR(value)}`;
               return `${label}: ${formatNumberPtBR(value)}`;
@@ -10084,6 +10117,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (dailyRaw) {
       DAILY = normalizeDailyPayload(dailyRaw);
       renderDailyChart();
+      preencherPerdaDoDia(dailyRaw);
     }
 
     if (monthlyRaw) {

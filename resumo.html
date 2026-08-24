@@ -261,14 +261,14 @@
                     <thead>
                       <tr>
                         <th>Usina</th>
-                        <th>Rated Power (kWp)</th>
-                        <th>Active Power (kW)</th>
-                        <th>Daily Energy (kWh)</th>
-                        <th>Irradiance (W/m²)</th>
-                        <th>Inverter Availability (%)</th>
-                        <th>Relays Availability (%)</th>
-                        <th>PR Daily (%)</th>
-                        <th>PR Acc. (%)</th>
+                        <th>Pot. Nominal (kWp)</th>
+                        <th>Pot. Ativa (kW)</th>
+                        <th>Energia Diária (kWh)</th>
+                        <th>Irradiância (W/m²)</th>
+                        <th>Disp. Inversores (%)</th>
+                        <th>Disp. Relés (%)</th>
+                        <th>PR Diário (%)</th>
+                        <th>PR Acum. (%)</th>
                         <th style="text-align:center;" title="Acoes da usina"><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i></th>
                       </tr>
                     </thead>
@@ -464,10 +464,14 @@
           <span class="ds-v2-ctrl-label">PERÍODO CONSOLIDADO</span>
           <select id="dsConsolidationSelect">
             <option value="5min">5 min</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
+            <!-- Só o TEXTO muda; o value é chave que o api2.py compara. -->
+            <option value="daily">Diário</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+            <option value="yearly">Anual</option>
+            <!-- Os H* ficaram em inglês de propósito: o api2.py trata "hdaily"
+                 igual a "daily", então não deu para descobrir o que o H
+                 distingue. Rótulo inventado seria pior que o inglês. -->
             <option value="hdaily">HDaily</option>
             <option value="hweekly">HWeekly</option>
             <option value="hmonthly">HMonthly</option>
@@ -835,7 +839,7 @@
         </div>
 
         <div class="plant-edit-section">
-          <label for="plantCreateDcInput">Rated Power DC (kWp)</label>
+          <label for="plantCreateDcInput">Pot. Nominal DC (kWp)</label>
           <input type="number" id="plantCreateDcInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
         </div>
 
@@ -908,7 +912,7 @@
             <div id="plantEditNameFeedback" class="plant-edit-feedback" aria-live="polite"></div>
           </div>
           <div class="plant-edit-section" id="plantEditRatedSection">
-            <label for="plantEditRatedInput">Rated Power (kWp)</label>
+            <label for="plantEditRatedInput">Pot. Nominal (kWp)</label>
             <div class="plant-edit-inline">
               <input type="number" id="plantEditRatedInput" placeholder="Ex: 1500.0" min="0" step="0.1" />
               <button type="button" onclick="savePlantRatedPower()" title="Salvar rated power">

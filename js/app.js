@@ -6730,7 +6730,7 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
     expLabel = "Esperado";
   } else if (capAc > 0 && labels.length) {
     expNums = labels.map(() => capAc);
-    expLabel = "Capacity AC";
+    expLabel = "Capacidade AC";
   }
 
   const maxE   = expNums ? seriesMax(expNums) : 0;
@@ -6738,7 +6738,7 @@ function _renderMiniChartOnCanvas(canvas, plantId, body) {
 
   const datasets = [];
 
-  const powerLabel = useMeter ? "Multimedidor" : "Active Power";
+  const powerLabel = useMeter ? "Multimedidor" : "Potência Ativa";
   const powerBorderColor = useMeter ? "rgba(77,163,255,0.9)" : "rgba(127,208,85,0.9)";
   const powerBgColor = useMeter ? "rgba(77,163,255,0.07)" : "rgba(127,208,85,0.07)";
   const powerHoverColor = useMeter ? "#4da3ff" : "#7fd055";

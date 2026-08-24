@@ -1435,6 +1435,32 @@ body::after{
   pointer-events:none;
 }
 
+/* Chip "Perda hoje" ao lado do título do gráfico diário (24/08).
+   Discreto de propósito: é informação de fechamento, não o assunto da tela.
+   Só ganha vermelho quando há perda — perda zerada em vermelho treinaria a
+   pessoa a ignorar a cor. */
+.daily-perda-chip{
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  vertical-align: middle;
+  color: #ff6b6b;
+  background: rgba(255,107,107,.08);
+  border: 1px solid rgba(255,107,107,.28);
+  cursor: help;
+}
+.daily-perda-chip.is-zero{
+  color: rgba(154,219,184,.8);
+  background: rgba(57,229,140,.06);
+  border-color: rgba(57,229,140,.22);
+}
+
 /* Falha de comunicação da string (pedido do Igor, 24/08).
    ÂMBAR de propósito, não vermelho: vermelho já é alarme elétrico (arco,
    corrente invertida), e é para onde o técnico corre. "Não estou recebendo

@@ -25,6 +25,10 @@
   <script defer src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <!-- personalização white-label por cliente (aplica antes do paint p/ não piscar) -->
   <script src="js/branding.js"></script>
+  <!-- i18n: antes de plant.js pelo mesmo motivo do resumo.html -->
+  <script src="js/i18n.js"></script>
+  <!-- avisa quem está com a aba aberta que saiu deploy novo (07/08) -->
+  <script src="js/version_watch.js" defer></script>
 </head>
 
 <body>
@@ -83,11 +87,11 @@
 
       <div class="plant-head-center">
         <div class="kpi">
-          <div class="kpi-label">Rated Power</div>
+          <div class="kpi-label">Potência Nominal</div>
           <strong id="headerRatedPower">—</strong>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Active Power</div>
+          <div class="kpi-label">Potência Ativa</div>
           <strong id="headerActivePower">—</strong>
         </div>
         <div class="kpi">
@@ -95,7 +99,7 @@
           <strong id="headerCapacity">—</strong>
         </div>
         <div class="kpi">
-          <div class="kpi-label">Capacity <span style="color:#4ade80;font-weight:700;">(AC)</span></div>
+          <div class="kpi-label">Capacidade <span style="color:#4ade80;font-weight:700;">(AC)</span></div>
           <strong id="headerCapacityAc">—</strong>
         </div>
       </div>
@@ -103,7 +107,7 @@
       <div class="plant-head-right">
         <div class="plant-weather-compact weather-station">
           <div class="weather-title-row">
-            <h3 class="weather-title">Weather Station</h3>
+            <h3 class="weather-title">Estação Solarimétrica</h3>
             <button id="weatherExpandBtn" class="weather-expand-btn" aria-label="Expandir dados meteorológicos"><i class="fa-solid fa-chevron-down"></i></button>
           </div>
           <div class="weather-items-row">
@@ -221,7 +225,12 @@
     <section class="card plant-chart-card">
       <div class="card-header">
         <div>
-          <h2>Produção diária</h2>
+          <h2>Produção diária
+            <!-- Perda de hoje. Fica ao lado do titulo e nao dentro do grafico
+                 porque e um numero de fechamento, nao uma serie. Some sozinho
+                 quando nao da para calcular (ver preencherPerdaDoDia). -->
+            <span id="dailyPerdaChip" class="daily-perda-chip" style="display:none"></span>
+          </h2>
 
           <div class="daily-chart-controls">
             <div id="dailyPowerToggleWrap" class="chart-toggle-group" style="display:none">
@@ -381,8 +390,8 @@
       <div class="inverter-header">
         <span></span>
         <span>Inversor</span>
-        <span>Power</span>
-        <span>Efficiency</span>
+        <span>Potência</span>
+        <span>Eficiência</span>
         <span>Temp</span>
         <span>Freq</span>
         <span>PR</span>
@@ -525,8 +534,8 @@
           <span></span>
           <span>Multimedidor</span>
           <span>Active Power</span>
-          <span>Apparent Power</span>
-          <span>Reactive Power</span>
+          <span>Potência Aparente</span>
+          <span>Potência Reativa</span>
           <span>Última leitura</span>
           <span>Comandos</span>
         </div>
@@ -548,6 +557,12 @@
       </div>
 
           <div class="relay-details-panel" id="multimeterDetailsPanel"></div>
+
+          <!-- Medidores adicionais da usina (ex.: Medidor QGBT). Preenchido pelo
+               plant.js a partir do `items` que a API manda em /multimeter/realtime.
+               Fica VAZIO quando a usina só tem o medidor principal: nada de
+               placeholder, o card só existe se o device existir no banco. -->
+          <div id="multimeterExtraStack"></div>
         </div>
       </div>
     </section>
@@ -599,8 +614,8 @@
           <span></span>
           <span>Relé</span>
           <span>Active Power</span>
-          <span>Apparent Power</span>
-          <span>Reactive Power</span>
+          <span>Potência Aparente</span>
+          <span>Potência Reativa</span>
           <span>Última leitura</span>
           <span>Comandos</span>
         </div>
@@ -797,8 +812,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/notify_sound.js"></script>
-<script src="js/i18n.js"></script>
-    <script src="js/plant.js"></script>
+<script src="js/plant.js"></script>
 <script src="js/help_tour.js"></script>
 <script src="js/pwa.js"></script>
 <script src="js/i18n_seletor.js"></script>
