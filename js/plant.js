@@ -6355,30 +6355,53 @@ function renderInverterExtras(inverterRealId, inv) {
     return Number.isFinite(n) ? `${n.toFixed(2)} MΩ` : "—";
   })()));
 
-  // ===== DC destrinchado por MPPT (pedido do Igor, 24/08) =====
+  // ===== DC destrinchado por ENTRADA (pedido do Igor, 24/08) =====
   // Vem pronto do api2.py (campo `mppts`), na ordem do indice.
   //
-  // 🔑 O bloco SOME quando a usina nao publica por MPPT — hoje so a Naturagua
-  // publica, e as outras 16 nao teriam o que mostrar. Linha vazia rotulada
-  // "MPPT" faria parecer que o dado sumiu, quando na verdade nunca existiu ali.
+  // ⚠️ NAO CHAMAR DE "MPPT". A primeira versao rotulava `MPPT 1/2/3`, o print
+  // foi mostrado ao Igor e ele recusou: o rotulo tem que ser o NOME DA TAG que
+  // o CLP publica — `Power DC N` e `V String N`. Nome de tela que o fornecedor
+  // nao reconhece vira discussao a cada print.
   //
-  // O "P DC" acima ja e a SOMA destes (corrigido no stg_inverter_analog em
-  // 24/08); aqui e o detalhe de cada entrada.
+  // 🔑 AS DUAS FAMILIAS NUMERAM DIFERENTE, e isso e do payload, nao escolha
+  // nossa. Chegam SEIS chaves por inversor:
+  //     power_dc  power_dc2  power_dc3      <- a 1a nao tem numero
+  //     voltage_dc  voltage_dc2  voltage_dc3
+  // A potencia sem numero JA esta somada no "P DC" acima (stg_inverter_analog,
+  // 24/08), entao repetir aqui como "Power DC 1" mostraria a mesma parcela duas
+  // vezes na mesma linha. Por isso potencia comeca em 2 e tensao comeca em 1 —
+  // foi assim que o Igor pediu, e bate com o que ele publica.
+  //
+  // 🔑 O bloco SOME quando a usina nao publica por entrada — hoje so a
+  // Naturagua publica, e as outras 16 nao teriam o que mostrar. Linha vazia
+  // faria parecer que o dado sumiu, quando nunca existiu ali.
   const mppts = Array.isArray(inv?.mppts) ? inv.mppts : [];
   if (mppts.length) {
     const rowMppt = document.createElement("div");
     rowMppt.className = "inverter-extra-row inverter-row-mppt";
 
+    // Potencia primeiro, depois tensao: agrupado por familia, a linha quebra
+    // nessa ordem e fica legivel. Chip sem valor nao entra — chip com "—"
+    // ocupa espaco e nao informa nada.
     mppts.forEach(m => {
-      const partes = [];
-      if (m.power_dc_kw != null)  partes.push(`${Number(m.power_dc_kw).toFixed(2)} kW`);
-      if (m.voltage_dc_v != null) partes.push(`${Number(m.voltage_dc_v).toFixed(0)} V`);
-      if (m.current_a != null)    partes.push(`${Number(m.current_a).toFixed(1)} A`);
-      // Sem nenhuma medida o chip nao entra: chip com "—" ocupa espaco e nao
-      // informa nada.
-      if (!partes.length) return;
-      rowMppt.appendChild(makeChip(`MPPT ${m.indice}`, partes.join(" · ")));
+      if (Number(m.indice) < 2 || m.power_dc_kw == null) return;
+      rowMppt.appendChild(
+        makeChip(`Power DC ${m.indice}`, `${Number(m.power_dc_kw).toFixed(2)} kW`)
+      );
     });
+
+    mppts.forEach(m => {
+      if (m.voltage_dc_v == null) return;
+      rowMppt.appendChild(
+        makeChip(`V String ${m.indice}`, `${Number(m.voltage_dc_v).toFixed(0)} V`)
+      );
+    });
+
+    // 📌 `current_a` (vinha de mppt_current_N) NAO ganha chip de proposito: o
+    // Igor nao deu rotulo para ela e inventar nome foi exatamente o erro que
+    // esta correcao desfaz. Medido em 24/08: a chave parou de ser publicada em
+    // 21/08 20:29 e nao aparece no raw ha 24h, entao hoje nao se perde nada na
+    // tela. Se voltar a chegar, PERGUNTAR o rotulo antes de exibir.
 
     if (rowMppt.children.length) rowDc.parentNode.insertBefore(rowMppt, rowDc.nextSibling);
   }
