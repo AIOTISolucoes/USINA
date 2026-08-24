@@ -2857,6 +2857,19 @@ tbody tr:hover td {
 }
 
 .plant-card__stat-value.active { color: var(--accent-green); }
+
+/* Perda de hoje em R$ no cartao da usina (24/08).
+   Vermelho so quando HA perda: perda zerada em vermelho treinaria a pessoa a
+   ignorar a cor, que e justamente o que a cor deveria evitar. */
+.plant-card__stat-value--perda { color: #ff6b6b; }
+.plant-card__stat-sub {
+  display: block;
+  font-size: 9px;
+  font-weight: 500;
+  opacity: .6;
+  margin-top: 2px;
+  letter-spacing: .02em;
+}
 .plant-card__stat-value.muted { color: var(--text-muted); }
 
 .plant-card__status {

@@ -6264,6 +6264,30 @@ function renderPortfolioCards(plants) {
     const relayAvail = plant.relay_availability_pct != null ? Number(plant.relay_availability_pct).toFixed(1) + "%" : "\u2014";
     const prAcc = plant.pr_accumulated_pct != null ? Number(plant.pr_accumulated_pct).toFixed(1) + "%" : "\u2014";
 
+    // Perda de hoje em R$ (pedido do cliente, 24/08). Quem calcula e o
+    // api2.py; aqui so se desenha.
+    //
+    // \ud83d\udd11 O indicador SOME quando nao da para calcular, em vez de mostrar
+    // traco. Usina sem capacidade cadastrada ou sem irradiacao medida entra
+    // com null de proposito \u2014 e "R$ \u2014" num campo de dinheiro parece defeito
+    // do sistema, enquanto a ausencia do campo nao promete nada.
+    const perdaHoje = (() => {
+      const brl = plant.perda_hoje_brl;
+      if (brl == null) return { html: "" };
+      const kwh = Number(plant.perda_hoje_kwh || 0);
+      const valor = Number(brl).toLocaleString("pt-BR", {
+        minimumFractionDigits: 2, maximumFractionDigits: 2
+      });
+      const zerado = Number(brl) <= 0;
+      return {
+        html: `
+        <div class="plant-card__stat" title="Quanto a usina deixou de gerar hoje, comparando com PR de refer\u00eancia de ${String(plant.perda_pr_referencia_pct ?? 80).replace(".", ",")}% \u00b7 tarifa R$ ${String(plant.perda_tarifa_kwh_brl ?? 0.49).replace(".", ",")}/kWh">
+          <div class="plant-card__stat-label"><i class="fa-solid fa-arrow-trend-down"></i> Perda hoje</div>
+          <div class="plant-card__stat-value${zerado ? "" : " plant-card__stat-value--perda"}">R$ ${valor}<span class="plant-card__stat-sub">${kwh.toFixed(1)} kWh</span></div>
+        </div>`
+      };
+    })();
+
     const isMaintenance = commStatus.badgeClass === 'badge--maintenance';
     const isFieldMaint = commStatus.badgeClass === 'badge--field-maint';
     const isOffline = plantState.isOffline || isCommOffline;
@@ -6369,6 +6393,7 @@ function renderPortfolioCards(plants) {
           <div class="plant-card__stat-label"><i class="fa-solid fa-chart-line"></i> PR Acum.</div>
           <div class="plant-card__stat-value">${prAcc}</div>
         </div>
+        ${perdaHoje.html}
       </div>
       <div class="plant-card__chart-area">
         <div class="plant-card__chart-wrap">
