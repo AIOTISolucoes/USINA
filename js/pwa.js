@@ -321,6 +321,10 @@
         "X-Is-Superuser": user.is_superuser ? "true" : "false",
         "X-User-Id": user.id || "",
         "X-Username": user.username || "",
+        // Obrigatório desde 07/08 (a identidade passou a vir do token). Sem
+        // isto o registro do push falhava calado — o .catch(() => {}) abaixo
+        // engole o erro — e o celular parava de receber alarme sem ninguém ver.
+        ...(user.token ? { Authorization: "Bearer " + user.token } : {}),
       },
       body: JSON.stringify({ subscription: sub.toJSON(), username: user.username }),
     }).catch(() => {});
