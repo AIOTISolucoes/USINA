@@ -5933,6 +5933,10 @@ function mergeStringsPayload(configPayload, realtimePayload, inverterRealId) {
   return {
     inverter_id: Number(inverterRealId),
     max_strings: maxStrings,
+    // Caixas vem do /devices/{id}/strings (config). Sem elas, a grade sai
+    // corrida como sempre foi — nunca inventar agrupamento no front.
+    string_boxes: configPayload?.string_boxes ?? [],
+    strings_por_caixa: configPayload?.strings_por_caixa ?? null,
     strings
   };
 }
@@ -6001,6 +6005,70 @@ function setInverterStringAlarmBadge(inverterRealId, show) {
 // ======================================================
 // RENDER — STRINGS (COM PERSISTÊNCIA LOCAL + VALOR REAL)
 // ======================================================
+/**
+ * Linha de titulo que separa a grade de strings por string box.
+ *
+ * Ocupa a largura toda com gridColumn "1 / -1", igual a linha "Strings
+ * atualizadas" ja fazia — assim nao mexe no layout das celulas.
+ *
+ * O nome e o display_name do device da CAIXA, e nao um rotulo derivado do
+ * indice: o Igor avisou que "existe uma parada la de enderecamento ser
+ * diferente", ou seja a etiqueta fisica nao bate com a ordem. Por isso e
+ * editavel, e por isso a edicao grava no device (PATCH .../devices/{id}/name),
+ * que ja existia — sem tabela nova e sem rota nova.
+ */
+function montarSeparadorStringBox(caixa, podeRenomear, aoRenomear) {
+  const linha = document.createElement("div");
+  linha.className = "string-box-sep";
+  linha.style.gridColumn = "1 / -1";
+  linha.dataset.i18nSkip = "";   // nome proprio: nao traduzir
+
+  const titulo = document.createElement("span");
+  titulo.className = "string-box-sep-nome";
+  titulo.textContent = caixa.nome || "String Box";
+  linha.appendChild(titulo);
+
+  if (!podeRenomear) return linha;
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "string-box-sep-edit";
+  btn.title = "Renomear esta string box";
+  btn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const novo = window.prompt("Nome desta string box:", caixa.nome || "");
+    // null = cancelou; string vazia tambem nao vale, senao a linha fica sem
+    // rotulo e ninguem sabe mais qual caixa e.
+    if (novo == null) return;
+    const limpo = String(novo).trim();
+    if (!limpo || limpo === caixa.nome) return;
+
+    btn.disabled = true;
+    try {
+      const res = await fetch(
+        `${API_BASE}/plants/${PLANT_ID}/devices/${caixa.device_id}/name`,
+        {
+          method: "PATCH",
+          headers: { ...buildAuthHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ display_name: limpo })
+        }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      caixa.nome = limpo;          // otimista, mas ja confirmado pelo 2xx
+      titulo.textContent = limpo;
+      if (typeof aoRenomear === "function") aoRenomear();
+    } catch (err) {
+      console.warn("[string-box] renomear falhou:", err);
+      alert("Nao consegui salvar o nome. Tente de novo.");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  linha.appendChild(btn);
+  return linha;
+}
+
 function renderStringsGrid(gridEl, payload) {
   if (!gridEl) return;
 
@@ -6053,7 +6121,33 @@ function renderStringsGrid(gridEl, payload) {
   const inverterOnline = getInverterOnlineStateById(inverterRealId);
   let hasAlarmOnAnyMonitorable = false;
 
+  // ---- separacao por STRING BOX (pedido do Igor, 24/08) ----
+  // A numeracao pula (S16 -> S25) porque so parte dos canais de cada caixa
+  // esta ligada, e isso parece defeito. A linha de titulo resolve o visual.
+  //
+  // 🔑 O vinculo string<->caixa e POSICIONAL: a telemetria nao carrega a
+  // caixa (o stg grava o inversor). Quem manda e o servidor: se ele nao
+  // devolveu caixa ou faixa, nao agrupa. Nunca deduzir a faixa aqui.
+  const caixas = Array.isArray(payload?.string_boxes) ? payload.string_boxes : [];
+  const porCaixa = Number(payload?.strings_por_caixa) || 0;
+  const agrupar = caixas.length > 0 && porCaixa > 0;
+  // Mesma permissao que ja governa editar usina e device — nao inventar
+  // regra nova para renomear caixa.
+  const podeRenomear = _canEditPlant();
+  let caixaAtual = -1;
+
   visibleStrings.forEach(str => {
+    if (agrupar) {
+      // Indice 1-based -> faixa 0-based. S1..S24 = caixa 0, S25..S48 = 1...
+      const idxCaixa = Math.floor((Number(str.string_index) - 1) / porCaixa);
+      if (idxCaixa !== caixaAtual && caixas[idxCaixa]) {
+        caixaAtual = idxCaixa;
+        gridEl.appendChild(
+          montarSeparadorStringBox(caixas[idxCaixa], podeRenomear, rerender)
+        );
+      }
+    }
+
     const el = document.createElement("div");
     el.className = "string-card";
     el.dataset.string = str.string_index;
