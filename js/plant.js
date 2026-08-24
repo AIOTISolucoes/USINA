@@ -2783,8 +2783,8 @@ function buildCabineCard(inv, idx = 0) {
       <div class="cabine-acdc-section">
         <span class="cabine-acdc-label">DC</span>
         <div class="cabine-acdc-chips">
-          ${buildAcdcChip("P DC",   inv?.power_dc_kw, 2, "kW")}
-          ${buildAcdcChip("V str",  inv?.string_voltage_v, 0, "V")}
+          ${buildAcdcChip(_rotuloDcAgregado(inv, "P DC", "total"),   inv?.power_dc_kw, 2, "kW")}
+          ${buildAcdcChip(_rotuloDcAgregado(inv, "V str", "méd"),    inv?.string_voltage_v, 0, "V")}
           ${buildAcdcChip("R isol", inv?.resistance_insulation_mohm, 1, "MΩ")}
         </div>
       </div>
@@ -4566,8 +4566,8 @@ function buildUnifInverterBody(inv) {
   <div class="unif-modal-section">
     <div class="unif-modal-section-hdr"><span>DC</span></div>
     <div class="unif-modal-chips">
-      <div class="unif-chip"><span class="unif-chip-lbl">P DC</span><span class="unif-chip-val">${f2(dcKw,"kW")}</span></div>
-      <div class="unif-chip"><span class="unif-chip-lbl">V string</span><span class="unif-chip-val">${f0(strV,"V")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">${_rotuloDcAgregado(inv, "P DC", "total")}</span><span class="unif-chip-val">${f2(dcKw,"kW")}</span></div>
+      <div class="unif-chip"><span class="unif-chip-lbl">${_rotuloDcAgregado(inv, "V string", "média")}</span><span class="unif-chip-val">${f0(strV,"V")}</span></div>
       <div class="unif-chip"><span class="unif-chip-lbl">R isol.</span><span class="unif-chip-val">${(()=>{const n=Number(typeof iso==="string"?iso.replace(",","."):iso);return Number.isFinite(n)?`${n.toFixed(2)} MΩ`:"—"})()}</span></div>
     </div>
   </div>
@@ -6072,6 +6072,29 @@ function montarSeparadorStringBox(caixa, podeRenomear, aoRenomear) {
   return linha;
 }
 
+// Rotulo dos chips DC do cabecalho: avisa que o numero e AGREGADO — e so
+// quando ele de fato agrega alguma coisa.
+//
+// 🔑 POR QUE ISTO EXISTE. Ate 24/08 o "P DC" era o `power_dc` cru. Desde o
+// commit 4970f80 ele e a SOMA de todos os MPPT (foi o que consertou a
+// Naturagua aparecer com um terco da potencia DC). Quem olhava a tela nao
+// tinha como saber que o significado mudou, e o proprio usuario pediu para
+// renomear o chip como "Power DC 1" acreditando que ainda fosse a parcela 1.
+// Medido no Inversor3: o chip mostra 16,60 kW e o `power_dc` vale 8,10 kW.
+// Rotulo que nao diz se e parte ou conjunto convida esse erro.
+//
+// ⚠️ POTENCIA SOMA, TENSAO NAO. Os MPPT sao paralelos: cada um fica em ~215 V
+// e somar os tres daria 645 V, que nao existe. Por isso o "V string" e MEDIA
+// (das entradas que estao medindo) e nao total — sufixos diferentes de
+// proposito, nao descuido.
+//
+// Inversor com uma entrada so (as outras 16 usinas) nao ganha sufixo: ali nao
+// ha o que somar nem do que tirar media, e o parenteses seria so ruido.
+function _rotuloDcAgregado(inv, base, sufixo) {
+  const entradas = Array.isArray(inv?.mppts) ? inv.mppts.length : 0;
+  return entradas > 1 ? `${base} (${sufixo})` : base;
+}
+
 function renderStringsGrid(gridEl, payload) {
   if (!gridEl) return;
 
@@ -6347,8 +6370,8 @@ function renderInverterExtras(inverterRealId, inv) {
   })()));
 
   // ===== DC: Energia / DC / Isolação =====
-  rowDc.appendChild(makeChip("P DC", f(get("power_dc_kw"), 2, "kW")));
-  rowDc.appendChild(makeChip("V string", f0(get("string_voltage_v"), "V")));
+  rowDc.appendChild(makeChip(_rotuloDcAgregado(inv, "P DC", "total"), f(get("power_dc_kw"), 2, "kW")));
+  rowDc.appendChild(makeChip(_rotuloDcAgregado(inv, "V string", "média"), f0(get("string_voltage_v"), "V")));
   rowDc.appendChild(makeChip("R isol.", (() => {
     const v = get("resistance_insulation_mohm");
     const n = Number(typeof v === "string" ? v.replace(",", ".") : v);
@@ -6367,22 +6390,14 @@ function renderInverterExtras(inverterRealId, inv) {
   // nossa. Chegam SEIS chaves por inversor:
   //     power_dc  power_dc2  power_dc3      <- a 1a nao tem numero
   //     voltage_dc  voltage_dc2  voltage_dc3
-  // 🔑 AS DUAS FAMILIAS COMECAM EM 2 AQUI, e o motivo e o mesmo nas duas: a
-  // chave SEM NUMERO ja esta no cabecalho. `power_dc` entra somada no "P DC" e
-  // `voltage_dc` entra no "V string". Repetir o indice 1 nesta linha mostraria
-  // o mesmo numero duas vezes na mesma tela.
-  //
-  // ⚠️ Medido na Naturagua em 24/08: as tensoes dos tres MPPT andam juntas
-  // (Inversor10 = 217,2 / 214,5 / 213,7 V) porque os MPPT sao paralelos, e o
-  // "V string" do cabecalho marcava 216,8 — um chip "V String 1" seria copia
-  // do cabecalho. Consequencia aceita: se um dia a tensao do MPPT 1 divergir
-  // das outras, ela aparece so diluida na media do cabecalho.
-  //
-  // 🔑 O bloco SOME quando a usina nao publica por entrada — hoje so a
-  // Naturagua publica, e as outras 16 nao teriam o que mostrar. Linha vazia
-  // faria parecer que o dado sumiu, quando nunca existiu ali.
+  // `> 1`, nao `> 0`: com UMA entrada o detalhe seria copia do cabecalho, e as
+  // outras 16 usinas so publicam a chave sem numero. Desde 24/08 elas TAMBEM
+  // aparecem aqui como entrada 1 (o model passou a capturar `power_dc`), entao
+  // sem esta guarda a redundancia voltaria justo onde nao ha o que detalhar.
+  // Mesma condicao do `_rotuloDcAgregado`, de proposito: ou o cabecalho vira
+  // agregado E o detalhe aparece, ou nenhum dos dois.
   const mppts = Array.isArray(inv?.mppts) ? inv.mppts : [];
-  if (mppts.length) {
+  if (mppts.length > 1) {
     const rowMppt = document.createElement("div");
     rowMppt.className = "inverter-extra-row inverter-row-mppt";
 
@@ -6390,14 +6405,14 @@ function renderInverterExtras(inverterRealId, inv) {
     // nessa ordem e fica legivel. Chip sem valor nao entra — chip com "—"
     // ocupa espaco e nao informa nada.
     mppts.forEach(m => {
-      if (Number(m.indice) < 2 || m.power_dc_kw == null) return;
+      if (m.power_dc_kw == null) return;
       rowMppt.appendChild(
         makeChip(`Power DC ${m.indice}`, `${Number(m.power_dc_kw).toFixed(2)} kW`)
       );
     });
 
     mppts.forEach(m => {
-      if (Number(m.indice) < 2 || m.voltage_dc_v == null) return;
+      if (m.voltage_dc_v == null) return;
       rowMppt.appendChild(
         makeChip(`V String ${m.indice}`, `${Number(m.voltage_dc_v).toFixed(0)} V`)
       );
