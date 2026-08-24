@@ -4323,6 +4323,63 @@ body.plant-edit-modal-open {
   display: inline-flex;
 }
 
+/* ── Modo COMPARAR: todas as usinas na mesma tela (24/08) ──────────────
+   Pedido do cliente: com 2+ usinas escolhidas, poder ver os graficos lado a
+   lado para comparar, cada um identificado.
+
+   Some o catalogo e o painel de series de TODOS os blocos — em comparacao o
+   que interessa e a curva, e sem isso nao cabem duas usinas na largura. O
+   cabecalho de cada bloco fica, porque e ele que diz de qual usina e o
+   grafico; sem ele a tela vira um monte de linha anonima. */
+.ds-plant-blocks--comparar {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  overflow: auto;
+  padding: 14px;
+  gap: 14px;
+  background: var(--bg-main, #08120d);
+
+  display: grid;
+  /* auto-fit + minmax: 2 colunas no monitor, 1 no celular, sem media query
+     e sem precisar saber quantas usinas sao. */
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  align-content: start;
+}
+.ds-plant-blocks--comparar .ds-v2-catalog,
+.ds-plant-blocks--comparar .ds-v2-series-panel,
+.ds-plant-blocks--comparar .ds-empty-state {
+  display: none;
+}
+.ds-plant-blocks--comparar .ds-v2-body {
+  grid-template-columns: 1fr;
+  max-height: none;
+}
+.ds-plant-blocks--comparar .ds-plant-block {
+  margin: 0;
+  min-width: 0;          /* sem isto o canvas estoura a coluna do grid */
+}
+.ds-plant-blocks--comparar .ds-chart-wrap {
+  height: 300px;
+}
+/* Nome da usina sempre visivel ao rolar: em comparacao, perder de vista de
+   quem e a curva anula o proposito da tela. */
+.ds-plant-blocks--comparar .ds-plant-block__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-card, #0d1a13);
+}
+.ds-btn-comparar.is-on {
+  color: #39e58c;
+  border-color: rgba(57,229,140,0.45);
+}
+/* Trava a rolagem do fundo enquanto compara, senao rolar dentro da grade
+   arrasta a pagina atras dela. */
+body.ds-comparando {
+  overflow: hidden;
+}
+
 /* Bigger canvas when expanded */
 .ds-plant-block--expanded .ds-plant-canvas {
   height: 70vh;

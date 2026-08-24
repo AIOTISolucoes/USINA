@@ -2568,6 +2568,9 @@ function _plantBlockHTML(plantId, plantName, plantColor, plantIdx) {
             <button class="ds-chart-toolbar__btn" data-action="zoomOut" data-plant="${pid}" type="button" title="Zoom −"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
             <button class="ds-chart-toolbar__btn" data-action="zoomReset" data-plant="${pid}" type="button" title="Resetar zoom"><i class="fa-solid fa-arrows-rotate"></i></button>
             <button class="ds-chart-toolbar__btn" data-action="fullscreen" data-plant="${pid}" type="button" title="Tela cheia"><i class="fa-solid fa-expand"></i></button>
+            <!-- so aparece com 2+ usinas: comparar uma usina consigo mesma nao existe.
+                 Quem liga/desliga a visibilidade e _atualizarBotaoComparar(). -->
+            <button class="ds-chart-toolbar__btn ds-btn-comparar" data-action="compararUsinas" data-plant="${pid}" type="button" title="Comparar usinas lado a lado" style="display:none"><i class="fa-solid fa-table-columns"></i></button>
           </div>
 
           <div class="ds-v2-stats-section">
@@ -2940,6 +2943,10 @@ function updateStageUIForPlant(plantId) {
   if (emptyState) emptyState.classList.toggle("hidden", showWorkspace);
   if (workspace) workspace.classList.toggle("hidden", !showWorkspace);
   if (catalogSection) catalogSection.classList.toggle("ds-v2-catalog--collapsed", ps.catalogOpen === false);
+
+  // Este e o unico ponto que liga/desliga grafico de usina, entao e daqui que
+  // o botao de comparar sabe quantas usinas estao desenhadas.
+  _atualizarBotaoComparar();
 
   renderSelectedTagsListForPlant(plantId);
   updateSelectedTagsCounterForPlant(plantId);
@@ -4519,7 +4526,76 @@ function _togglePlantChartFullscreen(plantId) {
   _setPlantChartFullscreen(plantId, !block?.classList.contains("ds-plant-block--expanded"));
 }
 
+/**
+ * Modo COMPARAR: todas as usinas selecionadas na mesma tela, lado a lado.
+ *
+ * Pedido do cliente (24/08): com mais de uma usina escolhida, hoje so da para
+ * ver um grafico de cada vez, entao comparar exige ir e voltar e confiar na
+ * memoria. Aqui os graficos ficam na mesma tela cheia, cada um com o nome da
+ * usina em cima.
+ *
+ * 🔑 Reusa a estrutura que ja existia em vez de montar tela nova: cada usina
+ * ja tem seu proprio bloco (`dsPlantBlock_<id>`) com cabecalho e canvas
+ * proprios. O modo e so uma CLASSE no container — nenhum grafico e
+ * redesenhado, nenhum dado e buscado de novo, e sair do modo devolve o layout
+ * anterior sem estado nenhum para restaurar.
+ *
+ * O `resize` no fim e obrigatorio: o Chart.js so recalcula a area de desenho
+ * quando mandam, entao sem isso os graficos ficariam do tamanho antigo dentro
+ * da grade nova.
+ */
+/**
+ * Mostra o botao de comparar so quando ha 2+ usinas com grafico desenhado.
+ *
+ * Com uma usina so o botao nao teria o que fazer, e botao que nao faz nada
+ * ensina a pessoa a nao confiar na barra. Conta BLOCOS COM GRAFICO VISIVEL,
+ * nao usinas selecionadas no catalogo: quem ainda nao confirmou a selecao nao
+ * tem grafico e nao entra na comparacao.
+ */
+function _atualizarBotaoComparar() {
+  const comGrafico = document.querySelectorAll(
+    ".ds-plant-block .ds-workspace:not(.hidden)"
+  ).length;
+  const mostrar = comGrafico >= 2;
+  document.querySelectorAll(".ds-btn-comparar").forEach(btn => {
+    btn.style.display = mostrar ? "" : "none";
+  });
+  if (!mostrar) _exitAllFullscreen();   // caiu para 1 usina: sai do modo
+}
+
+function _toggleCompararUsinas() {
+  const container = document.getElementById("dsPlantBlocks");
+  if (!container) return;
+
+  // Sair de qualquer tela cheia individual antes: os dois modos mexem no
+  // mesmo layout e ficariam brigando.
+  _exitAllFullscreen();
+
+  const ligando = !container.classList.contains("ds-plant-blocks--comparar");
+  container.classList.toggle("ds-plant-blocks--comparar", ligando);
+  document.body.classList.toggle("ds-comparando", ligando);
+
+  document.querySelectorAll('[data-action="compararUsinas"]').forEach(btn => {
+    btn.classList.toggle("is-on", ligando);
+    btn.title = ligando ? "Sair da comparação" : "Comparar usinas lado a lado";
+  });
+
+  resizeDataStudioChartSoon();
+  window.setTimeout(resizeDataStudioChartSoon, 220);
+}
+
 function _exitAllFullscreen() {
+  // Comparar tambem e um "modo cheio": Esc tem que sair dos dois, senao a
+  // pessoa aperta Esc, nada acontece e a tela parece travada.
+  const container = document.getElementById("dsPlantBlocks");
+  if (container?.classList.contains("ds-plant-blocks--comparar")) {
+    container.classList.remove("ds-plant-blocks--comparar");
+    document.body.classList.remove("ds-comparando");
+    document.querySelectorAll('[data-action="compararUsinas"]').forEach(btn => {
+      btn.classList.remove("is-on");
+      btn.title = "Comparar usinas lado a lado";
+    });
+  }
   document.querySelectorAll(".ds-plant-block--expanded").forEach(el => {
     el.classList.remove("ds-plant-block--expanded");
   });
@@ -4593,6 +4669,9 @@ function _wireDataStudioPlantBlocksDelegation() {
       }
       case "fullscreen":
         _togglePlantChartFullscreen(plantId);
+        break;
+      case "compararUsinas":
+        _toggleCompararUsinas();
         break;
       case "exitFullscreen":
         _setPlantChartFullscreen(plantId, false);
