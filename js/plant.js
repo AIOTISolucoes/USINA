@@ -6367,10 +6367,16 @@ function renderInverterExtras(inverterRealId, inv) {
   // nossa. Chegam SEIS chaves por inversor:
   //     power_dc  power_dc2  power_dc3      <- a 1a nao tem numero
   //     voltage_dc  voltage_dc2  voltage_dc3
-  // A potencia sem numero JA esta somada no "P DC" acima (stg_inverter_analog,
-  // 24/08), entao repetir aqui como "Power DC 1" mostraria a mesma parcela duas
-  // vezes na mesma linha. Por isso potencia comeca em 2 e tensao comeca em 1 —
-  // foi assim que o Igor pediu, e bate com o que ele publica.
+  // 🔑 AS DUAS FAMILIAS COMECAM EM 2 AQUI, e o motivo e o mesmo nas duas: a
+  // chave SEM NUMERO ja esta no cabecalho. `power_dc` entra somada no "P DC" e
+  // `voltage_dc` entra no "V string". Repetir o indice 1 nesta linha mostraria
+  // o mesmo numero duas vezes na mesma tela.
+  //
+  // ⚠️ Medido na Naturagua em 24/08: as tensoes dos tres MPPT andam juntas
+  // (Inversor10 = 217,2 / 214,5 / 213,7 V) porque os MPPT sao paralelos, e o
+  // "V string" do cabecalho marcava 216,8 — um chip "V String 1" seria copia
+  // do cabecalho. Consequencia aceita: se um dia a tensao do MPPT 1 divergir
+  // das outras, ela aparece so diluida na media do cabecalho.
   //
   // 🔑 O bloco SOME quando a usina nao publica por entrada — hoje so a
   // Naturagua publica, e as outras 16 nao teriam o que mostrar. Linha vazia
@@ -6391,7 +6397,7 @@ function renderInverterExtras(inverterRealId, inv) {
     });
 
     mppts.forEach(m => {
-      if (m.voltage_dc_v == null) return;
+      if (Number(m.indice) < 2 || m.voltage_dc_v == null) return;
       rowMppt.appendChild(
         makeChip(`V String ${m.indice}`, `${Number(m.voltage_dc_v).toFixed(0)} V`)
       );
