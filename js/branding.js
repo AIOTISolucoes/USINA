@@ -34,6 +34,10 @@
     if (u.is_superuser === true) h["X-Is-Superuser"] = "true";
     if (u.username) h["X-Username"] = u.username;
     if (u.id) h["X-User-Id"] = u.id;
+    // Obrigatório desde 07/08: a API resolve a identidade pelo Bearer, contra
+    // o banco. Sem isto o /branding voltava 401 e a plataforma caía no tema
+    // AIOTI padrão — o cliente perdia logo e cores, sem nenhum aviso.
+    if (u.token) h["Authorization"] = "Bearer " + u.token;
     return h;
   }
   const keyCompany = () => CACHE_COMPANY + ":" + (getUser().customer_id || "anon");
@@ -82,10 +86,11 @@
 
   // alvos do remap (recalculados a cada applyBranding)
   let TGT = null; // {accH,accS, bgH,bgS} ou null (sem remap)
+  let SURF = null; // escala de superfície reancorada no fundo escolhido
 
   function computeTargets(colors) {
     const p = parseHex(colors && colors.primary || "");
-    if (!p) { TGT = null; return; }
+    if (!p) { TGT = null; SURF = null; return; }
     const [ph, ps] = rgbToHsl(p[0], p[1], p[2]);
     let bh = ph, bs = ps;
     const bg = parseHex(colors.bg || "");
@@ -96,19 +101,105 @@
     const ac = parseHex(colors.accent || "");
     if (ac) { const hs = rgbToHsl(ac[0], ac[1], ac[2]); sh = hs[0]; ss = hs[1]; }
     TGT = { accH: ph, accS: ps, bgH: bh, bgS: bs, sacH: sh, sacS: ss };
+    computeSurface(colors, bg, bh, bs);
   }
+
+  /* ---------------------------------------------------------
+     SUPERFÍCIE — o fundo é PARÂMETRO LIVRE, não uma constante
+     ---------------------------------------------------------
+     Até 13/08 o motor só girava a MATIZ e preservava a luminosidade
+     (hslToRgb(nh, ns, l)), então nenhuma escolha de cor produzia uma
+     interface clara: os 1.241 fundos das folhas de estilo continuavam
+     escuros e cobriam o body. Agora a luminosidade de cada cor é
+     reancorada na escala do fundo escolhido.
+     🔑 Com fundo escuro e intensidade cheia o mapa é a IDENTIDADE
+     (SURF.active = false) — tema escuro existente não muda um pixel.
+  --------------------------------------------------------- */
+  const SURF_L0 = 0.0373;   // luminosidade do fundo AIOTI original (#050e07)
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+  function computeSurface(colors, bg, bh, bs) {
+    // intensidade 0-100: "deixar a cor mais apagada" (0 = quase cinza)
+    const raw = colors.intensity;
+    const k = clamp01((raw === undefined || raw === null || isNaN(+raw) ? 100 : +raw) / 100);
+    const L1 = bg ? rgbToHsl(bg[0], bg[1], bg[2])[2] : SURF_L0;
+    const dir = L1 >= 0.5 ? -1 : 1;              // fundo claro inverte o contraste
+    SURF = {
+      L1, dir, k, h: bh, s: bs,
+      room: dir > 0 ? 1 - L1 : L1,
+      // só entra em ação se o fundo saiu da âncora ou o usuário apagou a cor
+      active: Math.abs(L1 - SURF_L0) > 0.02 || k < 1,
+      light: dir < 0,
+    };
+  }
+
+  // Reancora a luminosidade de UMA cor na escala do fundo escolhido.
+  // t = "elevação" da cor sobre o fundo ORIGINAL do desenho (0 = fundo, 1 = topo).
+  // t pode passar de [0,1]: preto puro de scrim fica ABAIXO do fundo e, num tema
+  // claro, precisa virar clareamento — por isso não se corta a faixa aqui.
+  function remapSurfaceL(l) {
+    let t = (l - SURF_L0) / (1 - SURF_L0);
+    if (SURF.light && t > 0 && t < 1) t = Math.pow(t, 0.85); // separa elevações baixas
+    return clamp01(SURF.L1 + SURF.dir * t * SURF.room);
+  }
+
+  // quando false, a cor só gira de matiz (sombras: reancorar vira brilho branco)
+  let _reanchor = true;
+  // papel da cor na declaração: "texto" | "fundo" | "outro".
+  // Só o remapRule sabe disso (ele lê o nome da propriedade), e é o que
+  // permite escurecer texto sem escurecer superfície.
+  let _papel = "outro";
+
+  // Teto de luminosidade para TEXTO sobre fundo claro. Sem isto, cor
+  // semântica saturada (âmbar de aviso, verde de ok) fica ilegível: medido
+  // no navegador, `wei-value` em rgb(245,200,66) sobre branco dá contraste
+  // 1,59 — o mínimo legível é 4,5.
+  const TETO_TEXTO_CLARO = 0.42;
 
   // remapeia UMA cor (r,g,b,a) se pertencer à família da marca:
   // escuras -> matiz do fundo | médias -> cor principal | claras -> destaque
+  // Neutros (cinzas/pretos/brancos) só entram quando a superfície foi reancorada.
   function remapRgb(r, g, b, a) {
     if (!TGT) return null;
     const [h, s, l] = rgbToHsl(r, g, b);
-    if (h < BRAND_HUE_MIN || h > BRAND_HUE_MAX || s < BRAND_SAT_MIN) return null;
-    let nh, ns;
-    if (l < 0.30) { nh = TGT.bgH; ns = Math.min(1, s * 0.55 + TGT.bgS * 0.45); }
-    else if (l >= 0.62) { nh = TGT.sacH; ns = Math.min(1, s * 0.35 + TGT.sacS * 0.65); }
-    else { nh = TGT.accH; ns = Math.min(1, s * 0.35 + TGT.accS * 0.65); }
-    const [nr, ng, nb] = hslToRgb(nh, ns, l);
+    const brand = h >= BRAND_HUE_MIN && h <= BRAND_HUE_MAX && s >= BRAND_SAT_MIN;
+    const surf = _reanchor && SURF && SURF.active;
+
+    // 🔑 CROMA, não saturação. Em HSL, um quase-branco como #f4f6ff tem
+    // saturação 0,98 (num tom extremo, 11 pontos de diferença entre canais já
+    // saturam a conta) — pelo teste antigo ele era "cor viva" e ficava
+    // intocado, virando texto branco sobre fundo branco (contraste medido:
+    // 1,08). O croma mede a distância bruta entre canais e trata tinta clara
+    // como o que ela é: uma superfície, não uma cor semântica.
+    const croma = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+    const tinta = croma < 0.25;
+
+    // Cor semântica de TEXTO (vermelho de alarme, âmbar de aviso) não pode ser
+    // reancorada — perderia o significado — mas sobre fundo claro precisa
+    // escurecer para ser lida.
+    const textoSemantico = surf && SURF.light && _papel === "texto" && !tinta && !brand;
+
+    if (!brand && !(surf && tinta) && !textoSemantico) return null;
+
+    let nh = h, ns = s, nl = l;
+    if (brand) {
+      if (l < 0.30) { nh = TGT.bgH; ns = Math.min(1, s * 0.55 + TGT.bgS * 0.45); }
+      else if (l >= 0.62) { nh = TGT.sacH; ns = Math.min(1, s * 0.35 + TGT.sacS * 0.65); }
+      else { nh = TGT.accH; ns = Math.min(1, s * 0.35 + TGT.accS * 0.65); }
+    }
+    if (surf && (brand || tinta)) {
+      nl = remapSurfaceL(l);
+      ns = ns * (0.25 + 0.75 * SURF.k);          // intensidade: apaga a cor
+      // cinza puro sobre fundo colorido ganha um toque da matiz do fundo
+      if (tinta && SURF.s > 0.15 && ns < 0.05) { nh = SURF.h; ns = 0.04 * SURF.k; }
+    }
+    // Texto sobre fundo claro: só baixa o teto de luminosidade. Matiz e
+    // saturação ficam intactas, então vermelho continua vermelho.
+    if (surf && SURF.light && _papel === "texto" && nl > TETO_TEXTO_CLARO) {
+      nl = TETO_TEXTO_CLARO;
+    }
+    if (nh === h && ns === s && nl === l) return null;
+    const [nr, ng, nb] = hslToRgb(nh, ns, nl);
     return [nr, ng, nb, a];
   }
 
@@ -163,9 +254,18 @@
   const HEX_RE = /#[0-9a-fA-F]{3,8}\b/g;
   const RGB_RE = /rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)/g;
 
-  // remapeia todas as cores da marca dentro de um texto CSS/valor
-  function remapText(text) {
+  // remapeia todas as cores da marca dentro de um texto CSS/valor.
+  // reanchor=false: só gira a matiz, preserva a luminosidade (sombras).
+  function remapText(text, reanchor, papel) {
     if (!TGT || !text) return text;
+    const prevR = _reanchor, prevP = _papel;
+    _reanchor = reanchor !== false;
+    _papel = papel || "outro";
+    try {
+      return remapTextInner(text);
+    } finally { _reanchor = prevR; _papel = prevP; }
+  }
+  function remapTextInner(text) {
     let changed = false;
     let out = text.replace(RGB_RE, (mm, r, g, b, a) => {
       const nv = remapRgb(+r, +g, +b, a === undefined ? 1 : +a);
@@ -191,6 +291,53 @@
   /* =========================================================
      MOTOR DE REMAP DAS STYLESHEETS
   ========================================================= */
+  // Propriedades onde a luminosidade NÃO pode ser reancorada: sombra escura
+  // continua escura num tema claro. Reancorar transformaria box-shadow preto
+  // em brilho BRANCO em volta de cada card.
+  const NO_REANCHOR_RE = /shadow|^filter$|^backdrop-filter$/;
+  // Propriedades que pintam TEXTO/ícone (levam teto de luminosidade no tema
+  // claro) e as que pintam SUPERFÍCIE (levam a reancoragem). Borda, contorno
+  // e o resto ficam em "outro": mudam de matiz, sem teto.
+  const PROP_TEXTO_RE = /^(color|text-fill-color|caret-color|text-decoration-color|fill|stroke|stop-color)$/;
+  const PROP_FUNDO_RE = /^background(-color|-image)?$/;
+
+  // Separa "seletor{decls}" e remapeia declaração a declaração, respeitando
+  // parênteses e aspas — url(data:image/svg+xml;base64,...) tem ';' dentro e
+  // um split ingênuo cortaria a imagem no meio.
+  function splitDecls(src) {
+    const out = [];
+    let depth = 0, q = null, start = 0;
+    for (let i = 0; i < src.length; i++) {
+      const c = src[i];
+      if (q) { if (c === q && src[i - 1] !== "\\") q = null; continue; }
+      if (c === '"' || c === "'") { q = c; continue; }
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+      else if (c === ";" && depth === 0) { out.push(src.slice(start, i)); start = i + 1; }
+    }
+    out.push(src.slice(start));
+    return out;
+  }
+
+  function remapRule(cssText) {
+    const i = cssText.indexOf("{"), j = cssText.lastIndexOf("}");
+    if (i < 0 || j <= i) return remapText(cssText);
+    const head = cssText.slice(0, i + 1);
+    let changed = false;
+    const decls = splitDecls(cssText.slice(i + 1, j)).map((d) => {
+      const c = d.indexOf(":");
+      if (c < 0) return d;
+      const prop = d.slice(0, c).trim().toLowerCase().replace(/^-webkit-|^-moz-/, "");
+      const val = d.slice(c + 1);
+      const papel = PROP_TEXTO_RE.test(prop) ? "texto"
+                  : PROP_FUNDO_RE.test(prop) ? "fundo" : "outro";
+      const mapped = remapText(val, !NO_REANCHOR_RE.test(prop), papel);
+      if (mapped !== val) changed = true;
+      return d.slice(0, c + 1) + mapped;
+    });
+    return changed ? head + decls.join(";") + "}" : cssText;
+  }
+
   function collectRules(rules, out) {
     for (const rule of rules) {
       try {
@@ -203,7 +350,7 @@
             out.push(head + "{" + inner.join("\n") + "}");
           }
         } else if (rule.cssText) {
-          const mapped = remapText(rule.cssText);
+          const mapped = remapRule(rule.cssText);
           if (mapped !== rule.cssText) out.push(mapped);
         }
       } catch { /* regra exótica: ignora */ }
@@ -260,6 +407,109 @@
     });
   }
 
+  /* =========================================================
+     CONTRASTE — rede de segurança MEDIDA no DOM
+     ---------------------------------------------------------
+     Remapear cor olhando só a cor não fecha o problema: a legibilidade
+     depende da SUPERFÍCIE em que o texto está, e o CSS não consegue
+     perguntar "qual é o fundo do meu pai". Texto branco sobre botão verde
+     tem que continuar branco; o mesmo branco sobre a página tem que virar
+     escuro. Sem contexto, qualquer regra global erra um dos dois — foi o
+     que aconteceu: medido no navegador, o botão "Instalar" caiu de 3,30
+     para 1,91 quando a regra global escureceu o branco dele.
+     Aqui a conta é feita com o valor COMPUTADO, que já sabe a superfície.
+     Só corrige o que está abaixo do mínimo legível, e só no tema claro.
+  ========================================================= */
+  const CONTRASTE_MIN = 4.5;   // WCAG AA para texto normal
+
+  function _lum(r, g, b) {
+    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  }
+  function _contraste(a, b) {
+    const x = _lum(a[0], a[1], a[2]), y = _lum(b[0], b[1], b[2]);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  }
+  function _rgbDe(txt) {
+    const m = /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,/\s]+([\d.]+))?/.exec(txt || "");
+    return m ? [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]] : null;
+  }
+  // sobe a árvore até achar superfície opaca — é o que o olho enxerga atrás
+  function _fundoEfetivo(el) {
+    let n = el;
+    while (n && n !== document.documentElement) {
+      const c = _rgbDe(getComputedStyle(n).backgroundColor);
+      if (c && c[3] > 0.5) return c;
+      n = n.parentElement;
+    }
+    const b = _rgbDe(getComputedStyle(document.body).backgroundColor);
+    return (b && b[3] > 0.5) ? b : [255, 255, 255];
+  }
+  // mantém matiz e saturação (vermelho continua vermelho); move só a
+  // luminosidade, para o lado que afasta do fundo, até passar do mínimo
+  function _corLegivel(fg, bg) {
+    const [h, s] = rgbToHsl(fg[0], fg[1], fg[2]);
+    const alvoEscuro = _lum(bg[0], bg[1], bg[2]) > 0.35;
+    for (let i = 1; i <= 20; i++) {
+      const l = alvoEscuro ? Math.max(0, 0.50 - i * 0.025)
+                           : Math.min(1, 0.55 + i * 0.025);
+      const [r, g, b] = hslToRgb(h, s, l);
+      if (_contraste([r, g, b], bg) >= CONTRASTE_MIN) return toHex(r, g, b);
+    }
+    return alvoEscuro ? "#111111" : "#ffffff";
+  }
+
+  // Debounce de CAUDA, não de frente. A tela monta em rajadas assíncronas
+  // (o painel do tempo, os cards de inversor, os gráficos chegam depois do
+  // fetch); com requestAnimationFrame a passada rodava antes de metade dos
+  // elementos existir e o resultado oscilava entre 1 e 9 falhas na medição.
+  // Esperar a rajada assentar mede o que o usuário realmente vê.
+  let _contrasteTimer = null;
+  let _contrastePassadas = 0;
+  function corrigirContraste() {
+    if (!SURF || !SURF.active || !document.body) return;
+    // THROTTLE, não debounce. Com debounce de cauda (clearTimeout a cada
+    // mutação) a passada NUNCA rodava: a tela muta o tempo todo (gráficos,
+    // refresh de 30 s) e o timer era reagendado para sempre — medido, ficava
+    // travado em 10 falhas. Aqui a primeira chamada agenda e as seguintes
+    // são ignoradas até ela executar.
+    if (_contrasteTimer) return;
+    _contrasteTimer = setTimeout(() => {
+      _contrasteTimer = null;
+      _contrastePassadas++;
+      document.querySelectorAll("body *").forEach((el) => {
+        if (el.closest(".brd-dock")) return;
+        // só elementos que pintam texto PRÓPRIO
+        let temTexto = false;
+        for (const n of el.childNodes) {
+          if (n.nodeType === 3 && n.textContent.trim()) { temTexto = true; break; }
+        }
+        if (!temTexto) return;
+        const cs = getComputedStyle(el);
+        if (cs.visibility === "hidden" || cs.display === "none" || +cs.opacity < 0.1) return;
+        const fg = _rgbDe(cs.color);
+        if (!fg || fg[3] < 0.3) return;
+        const bg = _fundoEfetivo(el);
+        if (_contraste(fg, bg) >= CONTRASTE_MIN) {
+          // voltou a ficar legível sozinho: solta a correção anterior
+          if (el.dataset.brdFix) { el.style.color = ""; delete el.dataset.brdFix; }
+          return;
+        }
+        const nova = _corLegivel(fg, bg);
+        // com "important": varias regras da folha usam !important na cor, e
+        // sem isto a correcao inline perde a disputa e o texto segue ilegivel
+        // (foi o caso do .inv-view-btn.is-active, medido a 3,27)
+        if (el.style.color !== nova) {
+          el.style.setProperty("color", nova, "important");
+          el.dataset.brdFix = "1";
+        }
+      });
+    }, 300);
+  }
+  // exposto só para medição no navegador (harness de contraste)
+  window.__brdContraste = () => ({ passadas: _contrastePassadas,
+                                   corrigidos: document.querySelectorAll("[data-brd-fix]").length });
+
   let _remapScheduled = false;
   function applyRemap(persist) {
     const el = document.getElementById("brandingRemap") || (() => {
@@ -271,6 +521,13 @@
     if (!TGT) {
       el.textContent = "";
       try { localStorage.removeItem(CACHE_REMAP); } catch { }
+      // solta as correções de contraste (senão a cor forçada fica presa
+      // depois de "Restaurar padrão" — foi o bug v2.3 dos ticks roxos)
+      document.querySelectorAll("[data-brd-fix]").forEach((n) => {
+        n.style.color = "";
+        delete n.dataset.brdFix;
+      });
+      delete document.documentElement.dataset.brdMode;
       // devolve estilos inline e atributos SVG originais (volta ao padrão)
       document.querySelectorAll("[data-brd-style0]").forEach((n) => {
         n.setAttribute("style", n.dataset.brdStyle0);
@@ -290,7 +547,11 @@
     const rot = Math.round(TGT.accH - 149);
     css += `\nimg[src*="gen.svg"], img[src*="logo-plant"]{filter:hue-rotate(${rot}deg);}`;
     el.textContent = css;
+    // rótulo de modo: serve de gancho para CSS curado e para depuração
+    document.documentElement.dataset.brdMode =
+      (SURF && SURF.active && SURF.light) ? "light" : "dark";
     remapInlineStyles();
+    corrigirContraste();
     // garante que fica DEPOIS de qualquer stylesheet (cascata vence por ordem)
     if (el !== document.head.lastElementChild) document.head.appendChild(el);
     if (persist) {
@@ -427,7 +688,9 @@
       swap();
       remapInlineStyles();
       if (!_logoObserver) {
-        _logoObserver = new MutationObserver(() => { swap(); remapInlineStyles(); });
+        _logoObserver = new MutationObserver(() => {
+          swap(); remapInlineStyles(); corrigirContraste();
+        });
         _logoObserver.observe(document.body, { childList: true, subtree: true });
       }
     };
@@ -603,6 +866,14 @@
     { name: "Tropical",   primary: "#a3e635", accent: "#2dd4bf", bg: "#0a1204", bg2: "#03181a", alarm: "#ff5252" },
     { name: "Dourado",    primary: "#f5b93d", accent: "#4da3ff", bg: "#120c03", bg2: "#0a1020", alarm: "#ff5252" },
     { name: "Meia-noite", primary: "#7dd3fc", accent: "#c4b5fd", bg: "#05070d", bg2: "#0b0a18", alarm: "#ff6363" },
+    // ── CLAROS ────────────────────────────────────────────────────────────
+    // Só passaram a ser possíveis com a reancoragem de luminosidade: antes o
+    // motor preservava o `l` de cada cor e nenhuma escolha produzia interface
+    // clara. A cor principal aqui é escura de propósito — no fundo claro ela
+    // vira texto e traço, e precisa de contraste contra o branco.
+    { name: "Papel",      primary: "#2f7d5a", accent: "#7a6a3c", bg: "#ffffff", bg2: "#eef1ee", alarm: "#c62828" },
+    { name: "Névoa",      primary: "#3a6ea5", accent: "#4a8577", bg: "#f4f6f8", bg2: "#e6ebf0", alarm: "#b3261e" },
+    { name: "Areia",      primary: "#8a6a2f", accent: "#5f7a4a", bg: "#faf7f0", bg2: "#efe7d8", alarm: "#b3401e" },
   ];
 
   // cada controle sabe QUAIS partes da tela ele muda (flash de destaque)
@@ -852,6 +1123,11 @@
           <div class="brd-row"><div class="brd-meta"><b>Alarme</b><span>Estados críticos e avisos vermelhos</span></div>
             <input class="brd-hex" id="brdAlarmHex" value="${c.alarm || "#ff4f4f"}" maxlength="7" spellcheck="false">
             <span class="brd-swatch"><input type="color" id="brdAlarm" value="${c.alarm || "#ff4f4f"}"></span></div>
+          <div class="brd-row"><div class="brd-meta"><b>Intensidade</b><span>Cores vivas ou mais apagadas</span></div>
+            <input type="range" id="brdIntensity" min="0" max="100" step="5"
+                   value="${c.intensity === undefined ? 100 : c.intensity}"
+                   style="flex:1;min-width:80px;accent-color:currentColor">
+            <span class="brd-hex" id="brdIntensityVal" style="text-align:center">${c.intensity === undefined ? 100 : c.intensity}%</span></div>
         </div>
         <div class="brd-sec">
           <h4>Layout</h4>
@@ -898,6 +1174,7 @@
         colors: {
           primary: $("brdPrimary").value, accent: $("brdAccent").value,
           bg: $("brdBg").value, bg2: $("brdBg2").value, alarm: $("brdAlarm").value,
+          intensity: +$("brdIntensity").value,
           layout: draftLayout,
         },
         texts: $("brdPdf").value.trim() ? { pdf_footer: $("brdPdf").value.trim() } : {},
@@ -915,6 +1192,11 @@
       [["Primary", c.primary], ["Accent", c.accent], ["Bg", c.bg], ["Bg2", c.bg2], ["Alarm", c.alarm]].forEach(([id, val]) => {
         if (val) { $("brd" + id).value = val; $("brd" + id + "Hex").value = val; }
       });
+      // sem isto o Desfazer/Restaurar deixava o slider no valor antigo — foi
+      // o mesmo defeito do v2.3 (painel nao espelhava o restore)
+      const inten = c.intensity === undefined ? 100 : c.intensity;
+      $("brdIntensity").value = inten;
+      $("brdIntensityVal").textContent = inten + "%";
       draftLogo = d.logo_data || null;
       $("brdLogoPrev").src = draftLogo || "assets/logo-aioti.png";
       draftLayout = c.layout || "default";
@@ -960,6 +1242,10 @@
         if (/^#[0-9a-fA-F]{6}$/.test(hx.value.trim())) { sw.value = hx.value.trim(); preview(kind); }
         else hx.value = sw.value;
       });
+    });
+    $("brdIntensity").addEventListener("input", () => {
+      $("brdIntensityVal").textContent = $("brdIntensity").value + "%";
+      preview("bg");
     });
     $("brdName").addEventListener("input", () => preview("name"));
     $("brdPdf").addEventListener("input", () => preview());

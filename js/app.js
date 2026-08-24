@@ -7,6 +7,25 @@
     window.location.href = "index.html";
     return;
   }
+
+  // Volta para onde o usuário QUERIA ir antes de ser mandado para o login.
+  // Quem grava isto é o plant.js, quando a notificação de alarme faz deep-link
+  // com a sessão vencida. Fica aqui, e não no login.js, de propósito: o login
+  // tem QUATRO caminhos de sucesso (senha, Google, troca de senha, sessão já
+  // válida) e todos terminam em resumo.html. Tratando no destino, um lugar só
+  // cobre os quatro — e cobre também qualquer caminho novo que apareça.
+  try {
+    const destino = localStorage.getItem("scada:after_login_redirect");
+    if (destino) {
+      localStorage.removeItem("scada:after_login_redirect");
+      // só caminho interno, para o valor no localStorage nunca virar
+      // redirecionamento para fora do site
+      if (/^\/?[A-Za-z0-9_\-]+\.html(\?[^#]*)?$/.test(destino)) {
+        window.location.replace(destino.replace(/^\//, ""));
+        return;
+      }
+    }
+  } catch (e) {}
 })();
 
 /**
@@ -47,6 +66,15 @@ window.__refreshDsPalette = () => {
 window.__refreshDsPalette();
 const EVENTS_REFRESH_INTERVAL_MS = 10000;
 
+// Sessão inválida: manda para o login UMA vez. Sem a trava, cada chamada da
+// tela (são várias em paralelo) dispararia o próprio redirect.
+function forceReloginOnce() {
+  if (window.__aiotiRelogin) return;
+  window.__aiotiRelogin = true;
+  try { localStorage.removeItem("user"); } catch (e) {}
+  window.location.replace("index.html?expirou=1");
+}
+
 function apiFetch(path, options = {}) {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -54,6 +82,11 @@ function apiFetch(path, options = {}) {
     ...(options.headers || {})
   };
 
+  // X-Is-Superuser continua sendo enviado DE PROPÓSITO, mesmo tendo virado
+  // inócuo: a API de 07/08 ignora esse header (era falsificável) e lê
+  // is_superuser do banco, pelo token. Mantê-lo deixa este arquivo compatível
+  // com a Lambda antiga também — assim o push do site e o deploy da Lambda
+  // não precisam ser simultâneos, em qualquer ordem nada quebra.
   if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
   if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
   if (user.username) headers["X-Username"] = user.username;
@@ -63,6 +96,19 @@ function apiFetch(path, options = {}) {
     ...options,
     headers,
     cache: "no-store"
+  }).then(r => {
+    // Desde 07/08 toda rota de dado exige o token assinado. Quem estava com
+    // sessão antiga no localStorage (salva antes de o token existir) passa a
+    // receber 401 aqui. Sem este tratamento a tela ficava vazia e sem dizer
+    // por quê — o usuário via "erro" onde a ação certa é relogar.
+    if (r.status === 401) {
+      r.clone().json().then(d => {
+        if (d && (d.code === "token_required" || d.code === "token_invalid")) {
+          forceReloginOnce();
+        }
+      }).catch(() => {});
+    }
+    return r;
   });
 }
 
@@ -2213,6 +2259,75 @@ function dsNormalizeApiBody(data) {
   return data;
 }
 
+// --- Resolução e agregação REAIS (17/08/2026) -------------------------------
+// Quem decide a resolução é o backend (datastudio_choose_hist_table), pelo
+// tamanho da janela: até 2 dias vira 5 min, até 7 vira 15 min, até 15 vira
+// horário, acima disso vira diário. O usuário não escolhe e, até hoje, não
+// via. O cliente da Pedra Branca pediu julho inteiro, recebeu balde diário e
+// concluiu que a plataforma estava "resumindo" o dado dele.
+//
+// O backend também já dizia, em `aggregation_resolved`, quando a agregação
+// pedida não pôde ser aplicada (ex.: "avg(fallback:integral)"). Esse campo
+// existia desde sempre e o front NUNCA o leu — degradação silenciosa, a mesma
+// família do bug do assistente de IA em 15/08.
+const DS_ROTA_LABEL = {
+  hist_5min:   "5 min",
+  hist_15min:  "15 min",
+  hist_hourly: "Horário",
+  hist_daily:  "Diário",
+  hist_string: "5 min",
+  timeseries:  "Bruto",
+};
+
+function dsRotuloResolucao(rota) {
+  if (!rota) return null;
+  return DS_ROTA_LABEL[rota] || String(rota).replace(/_/g, " ");
+}
+
+function dsAplicarResolucaoMedida(payloads) {
+  const chip = document.getElementById("dsInfoResolution");
+  if (!chip) return;
+
+  const series = [];
+  for (const p of payloads) {
+    const lista = Array.isArray(p?.series) ? p.series : [];
+    for (const s of lista) series.push(s);
+  }
+  if (!series.length) return;
+
+  const rotas = [...new Set(series.map(s => dsRotuloResolucao(s?.resolved_route)).filter(Boolean))];
+  // Rotas diferentes na mesma tela são possíveis (uma série consolidada e
+  // outra histórica). Mostrar as duas é mais honesto que escolher uma.
+  chip.textContent = rotas.length ? rotas.join(" + ") : "—";
+  chip.dataset.medido = "1";
+
+  // Agregação que REALMENTE foi aplicada. `aggregation_resolved` começando com
+  // "avg(" significa que o pedido não pôde ser atendido e virou média.
+  const degradadas = series.filter(s => {
+    const r = String(s?.aggregation_resolved || "");
+    return r.startsWith("avg(") && String(s?.aggregation || "") !== "avg";
+  });
+
+  let nota = document.getElementById("dsInfoAggNote");
+  if (!nota) {
+    nota = document.createElement("span");
+    nota.id = "dsInfoAggNote";
+    nota.style.cssText = "color:#f5b93d;margin-left:8px;font-size:0.85em;";
+    chip.parentElement?.appendChild(nota);
+  }
+
+  if (degradadas.length) {
+    const pedida = degradadas[0].aggregation;
+    nota.textContent = `⚠ ${degradadas.length} série(s) sem "${pedida}"; usando média`;
+    nota.title = degradadas
+      .map(s => `${s.pathname}: ${s.aggregation_resolved}`)
+      .join("\n");
+  } else {
+    nota.textContent = "";
+    nota.title = "";
+  }
+}
+
 function dsNormalizeContextText(value) {
   return dsSafeTrim(value)
     .toLowerCase()
@@ -3299,6 +3414,10 @@ async function exportDataStudioSelection() {
     const headers = {};
     if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+    // Sem isto a API responde 401 desde 07/08. Este fetch e cru (precisa do
+    // corpo bruto do CSV), entao nao passa pelo apiFetch e o token tem que
+    // ser posto na mao - foi assim que este export ficou quebrado.
+    if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
 
     // Fetch CSV from each plant and merge into a single file
     const csvParts = [];
@@ -3791,6 +3910,8 @@ async function exportDataStudioSelectionForPlant(plantId) {
     const headers = {};
     if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
+    // ver comentario no export de varias usinas: fetch cru precisa do token
+    if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
     const res = await fetch(url, { headers, cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
@@ -4088,6 +4209,12 @@ async function loadFavoriteSelections(favs) {
       }
       renderChartForPlant(pid, mergedPayload);
     }
+
+    // Mesmo motivo do caminho principal: o favorito tambem passa pelo
+    // /datastudio/series e tambem pode cair em balde diario ou ter a
+    // agregacao degradada. Corrigir so um dos dois deixaria metade da tela
+    // mentindo -- foi exatamente o que aconteceu com o alarme.py em 14/08.
+    dsAplicarResolucaoMedida(Object.values(DATASTUDIO_STATE.seriesByPlant));
   } catch (err) {
     console.error("[DataStudio] erro ao carregar favoritos:", err);
     window.alert(`Não foi possível carregar favoritos: ${err.message || err}`);
@@ -4158,6 +4285,10 @@ async function fetchDataStudioSeriesBySelection() {
       }
       renderChartForPlant(plantId, seriesPayload);
     }
+
+    // Só aqui a resolução real é conhecida: ela vem na resposta, não da
+    // escolha do usuário. Antes disso o chip mostra apenas um palpite.
+    dsAplicarResolucaoMedida(Object.values(DATASTUDIO_STATE.seriesByPlant));
   } catch (err) {
     console.error("[DataStudio] erro ao carregar séries:", err);
     window.alert(`Não foi possível carregar séries: ${err.message || err}`);
@@ -8488,6 +8619,8 @@ async function _appReportFetch() {
     if (user.customer_id) headers["X-Customer-Id"] = user.customer_id;
     if (user.is_superuser === true) headers["X-Is-Superuser"] = "true";
     if (user.username) headers["X-Username"] = user.username;
+    // ver comentario no export do datastudio: fetch cru precisa do token
+    if (user.token) headers["Authorization"] = `Bearer ${user.token}`;
     const res = await fetch(url, { headers, cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     let data = await res.json();
@@ -8790,6 +8923,7 @@ function _appReportOpenFullPanel(data) {
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">FC Médio ${infoFC}</div><div class="ronda-full-kpi-value">${_rpFmt(s.avg_capacity_factor_pct,1)}<span class="ronda-full-kpi-unit">%</span></div></div>
       </div>
       <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Total</div><div class="ronda-full-kpi-value">${_rpFmt(s.total_irradiation_kwh_m2,2)}<span class="ronda-full-kpi-unit">kWh/m²</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmt(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days || 0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div>
       </div>
@@ -10317,6 +10451,14 @@ function _infraDur(s) {
   return `${(h / 24).toFixed(1).replace(".", ",")} dias`;
 }
 
+// Nome da usina quando existe UMA só naquele estado. Antes a faixa pegava
+// sempre `incidents[0]`, que é o cartão de maior duração e pode ser de outro
+// estado que não o anunciado.
+function _infraNomeAberto(st, escopo) {
+  const g = (st?.incidents || []).filter(x => (x.scope || "silent") === escopo);
+  return g.length === 1 ? g[0].plant_name : "";
+}
+
 function _infraWhen(iso) {
   if (!iso) return "";
   const d = _tkDate(iso);
@@ -10339,17 +10481,33 @@ function _infraRenderStrip() {
   }
 
   const down = st.summary?.plants_down || 0;
+  const parcial = st.summary?.plants_partial || 0;
+  const atraso = st.summary?.plants_lagging || 0;
   const stale = st.watch?.stale === true;
   strip.style.display = "";
-  strip.className = "notif-infra-strip " + (down ? "down" : (stale ? "unknown" : "ok"));
+  strip.className = "notif-infra-strip " +
+    (down ? "down" : ((parcial || atraso) ? "unknown" : (stale ? "unknown" : "ok")));
+  // Sino vermelho só quando a usina inteira calou. Equipamento isolado fora do
+  // ar é aviso, não emergência — pintar tudo de vermelho foi o que fez o
+  // cliente achar que a Acopiara tinha parado enquanto ela gerava normal.
   bell?.classList.toggle("infra-alert", down > 0);
 
   let icone, texto;
   if (down) {
     icone = "fa-plug-circle-xmark";
     texto = down === 1
-      ? `${_notifEsc(st.incidents[0]?.plant_name || "1 usina")} sem comunicação`
+      ? `${_notifEsc(_infraNomeAberto(st, "silent") || "1 usina")} sem comunicação`
       : `${down} usinas sem comunicação`;
+  } else if (parcial) {
+    icone = "fa-triangle-exclamation";
+    texto = parcial === 1
+      ? `${_notifEsc(_infraNomeAberto(st, "partial") || "1 usina")} com equipamentos sem comunicação`
+      : `${parcial} usinas com equipamentos sem comunicação`;
+  } else if (atraso) {
+    icone = "fa-clock";
+    texto = atraso === 1
+      ? `${_notifEsc(_infraNomeAberto(st, "lag") || "1 usina")} publicando com atraso`
+      : `${atraso} usinas publicando com atraso`;
   } else if (stale) {
     // Vigia calado não é "tudo bem": é "não sei". A diferença entre as duas
     // coisas é justamente o que faz um painel de monitoramento valer algo.
@@ -10377,16 +10535,229 @@ async function openInfraHealth() {
       </div>
       <div class="infra-body" id="infraHealthBody">
         <p class="notif-center-loading">Consultando…</p>
-      </div>
-    </div>`;
+      </div>` +
+      (_pwCanSee()
+        ? `<div style="padding:10px 14px 12px;border-top:1px solid rgba(255,255,255,0.08);">
+             <button type="button" id="infraOpenPipelineBtn"
+               style="width:100%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);
+                      color:#e8ecf5;border-radius:8px;padding:9px 12px;font-size:12px;cursor:pointer;
+                      display:flex;align-items:center;justify-content:center;gap:8px;">
+               <i class="fa-solid fa-diagram-project"></i> Processamento e servidor
+             </button>
+           </div>`
+        : "") +
+    `</div>`;
 
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   overlay.querySelector(".notif-center-close")?.addEventListener("click", close);
+  document.getElementById("infraOpenPipelineBtn")?.addEventListener("click", openPipelineWatch);
 
   await _infraFetch();
   _infraRenderModal();
+}
+
+// ===========================================================================
+// PAINEL DO PIPELINE E DA MAQUINA (elos 5-6) -- o que foi pedido como "Airflow"
+//
+// 🔑 Nao existe Airflow neste pipeline: quem agenda sao linhas de crontab.
+// Este painel entrega a CAPACIDADE pedida (ver o que rodou, o que falhou e se
+// a maquina aguenta) lendo o que o pipeline_watch.py grava a cada 5 min.
+//
+// Restrito a admin no BACKEND (403). O gate aqui so evita oferecer um botao
+// que iria falhar -- esconder botao nunca foi seguranca.
+// ===========================================================================
+function _pwCanSee() {
+  let u = {};
+  try { u = JSON.parse(localStorage.getItem("user") || "{}"); } catch { u = {}; }
+  if (u.is_superuser === true || u.is_superuser === "true") return true;
+  const p = (u && typeof u.permissions === "object" && u.permissions) ? u.permissions : {};
+  return p.infra_alerts === true || p.infra_alerts === "true";
+}
+
+function _pwNum(v, dec) {
+  if (v === null || v === undefined || isNaN(Number(v))) return "—";
+  return Number(v).toLocaleString("pt-BR", { minimumFractionDigits: dec || 0,
+                                             maximumFractionDigits: dec || 0 });
+}
+
+function _pwBytes(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n <= 0) return "—";
+  const gb = n / 1073741824;
+  if (gb >= 1) return `${gb.toFixed(1).replace(".", ",")} GB`;
+  return `${(n / 1048576).toFixed(0)} MB`;
+}
+
+async function openPipelineWatch() {
+  document.getElementById("pipelineWatchOverlay")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "pipelineWatchOverlay";
+  overlay.className = "notif-center-overlay";
+  overlay.innerHTML = `
+    <div class="notif-center-box infra-box" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+      <div class="notif-center-head">
+        <h3 id="pwTitle"><i class="fa-solid fa-diagram-project"></i> Processamento e servidor</h3>
+        <button type="button" class="notif-center-close" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="infra-body" id="pwBody">
+        <p class="notif-center-loading">Consultando…</p>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector(".notif-center-close")?.addEventListener("click", close);
+
+  let st = null;
+  try {
+    const r = await apiFetch("/infra/health?view=pipeline&hours=24");
+    if (r.status === 403) { _pwRender({ _forbidden: true }); return; }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    st = _infraUnwrap(await r.json());
+  } catch (e) {
+    console.warn("[pipeline-watch] indisponível:", e);
+    st = null;
+  }
+  _pwRender(st);
+}
+
+function _pwRender(st) {
+  const body = document.getElementById("pwBody");
+  if (!body) return;
+
+  if (st && st._forbidden) {
+    body.innerHTML = `<p class="notif-center-loading">Painel restrito a administradores.</p>`;
+    return;
+  }
+  if (!st) {
+    body.innerHTML = `<p class="notif-center-loading">Não foi possível consultar o
+      processamento agora.</p>`;
+    return;
+  }
+  // "Ainda nao instalado" e diferente de "esta tudo bem". Dizer qual dos dois
+  // e a razao de existir de um painel de monitoramento.
+  if (st.available === false) {
+    body.innerHTML = `<p class="notif-center-loading">O vigia do processamento ainda
+      não está instalado.<br><small>${_notifEsc(st.hint || "")}</small></p>`;
+    return;
+  }
+
+  const w = st.watcher || {};
+  const s = st.summary || {};
+  const m = st.metrics || {};
+  const val = (k) => (m[k] && m[k].value !== undefined) ? m[k].value : null;
+
+  let html = "";
+
+  // 1. O vigia esta vivo? Se ele parar, TODO o resto desta tela vira retrato
+  // velho -- e retrato velho parece "tudo bem". Por isso vem primeiro.
+  html += `<div class="notif-infra-strip ${w.alive ? "ok" : "unknown"}" style="margin-bottom:10px;">
+    <i class="fa-solid ${w.alive ? "fa-circle-check" : "fa-triangle-exclamation"}"></i>
+    <span>${w.alive
+      ? `Vigia ativo, última verificação há ${_infraDur(w.age_s)}`
+      : `Vigia sem sinal${w.age_s != null ? " há " + _infraDur(w.age_s) : ""} — os números abaixo podem estar velhos`}</span>
+  </div>`;
+
+  // 2. Placar dos achados abertos.
+  const crit = s.critical || 0, warn = s.warning || 0, info = s.info || 0;
+  html += `<div style="display:flex;gap:14px;font-size:11.5px;margin-bottom:12px;">
+    <span style="color:${crit ? "#ef4444" : "rgba(255,255,255,0.45)"};">● ${crit} crítico(s)</span>
+    <span style="color:${warn ? "#eab308" : "rgba(255,255,255,0.45)"};">● ${warn} atenção</span>
+    <span style="color:${info ? "#3b82f6" : "rgba(255,255,255,0.45)"};">● ${info} informativo</span>
+    ${s.resolved ? `<span style="color:rgba(255,255,255,0.45);margin-left:auto;">${s.resolved} resolvido(s)</span>` : ""}
+  </div>`;
+
+  // 3. Os pipelines, um cartao cada. E aqui que se ve "o que rodou e o que
+  // falhou", que era o pedido.
+  const pls = st.pipelines || [];
+  if (pls.length) {
+    html += `<div class="ronda-section-title" style="font-size:10px;letter-spacing:.06em;
+      text-transform:uppercase;color:rgba(255,255,255,0.5);margin-bottom:6px;">Processamento (dbt)</div>`;
+    pls.forEach(p => {
+      const falhas = Number(p.seq_falhas || 0);
+      const skip = Number(p.skip_pct || 0);
+      const ruim = falhas > 0 || skip > 50;
+      const cor = falhas > 0 ? "#ef4444" : (skip > 50 ? "#eab308" : "#39e58c");
+      html += `<div style="display:flex;align-items:center;gap:10px;padding:7px 9px;margin-bottom:5px;
+        border-radius:8px;background:rgba(255,255,255,0.04);border-left:3px solid ${cor};">
+        <span style="flex:1;font-size:12px;font-weight:600;">${_notifEsc(p.name || "")}</span>
+        <span style="font-size:10.5px;color:rgba(255,255,255,0.6);font-family:'Space Mono',monospace;">
+          ${p.duracao_s != null ? _pwNum(p.duracao_s, 0) + "s" : "—"}
+        </span>
+        <span style="font-size:10.5px;color:rgba(255,255,255,0.6);">
+          ${p.idade_ultimo_ok_s != null ? "há " + _infraDur(p.idade_ultimo_ok_s) : "sem registro"}
+        </span>
+        <span style="font-size:10.5px;color:${ruim ? cor : "rgba(255,255,255,0.45)"};font-weight:${ruim ? 700 : 400};">
+          ${falhas > 0 ? falhas + " falha(s) seguidas" : (skip > 0 ? _pwNum(skip, 0) + "% pulado" : "ok")}
+        </span>
+      </div>`;
+    });
+  }
+
+  // 4. A maquina. Percentuais so; o numero cru de bytes vai nas tabelas.
+  const host = [
+    ["CPU", val("host:cpu_pct"), "%", 80],
+    ["Espera de disco", val("host:iowait_pct"), "%", 40],
+    ["Disco usado", val("host:disk_pct"), "%", 85],
+    ["Memória usada", val("host:mem_used_pct"), "%", 90],
+    ["Carga por núcleo", val("host:load_por_nucleo"), "", 1.5],
+  ].filter(x => x[1] !== null);
+  if (host.length) {
+    html += `<div class="ronda-section-title" style="font-size:10px;letter-spacing:.06em;
+      text-transform:uppercase;color:rgba(255,255,255,0.5);margin:12px 0 6px;">Servidor</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">`;
+    host.forEach(([nome, v, un, teto]) => {
+      const alto = Number(v) >= teto;
+      html += `<div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:7px 9px;">
+        <div style="font-size:9.5px;color:rgba(255,255,255,0.5);">${nome}</div>
+        <div style="font-size:14px;font-weight:700;font-family:'Space Mono',monospace;
+                    color:${alto ? "#ef4444" : "#e8ecf5"};">${_pwNum(v, un ? 1 : 2)}${un}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // 5. Tabelas que mais ocupam. Serve para responder "esta crescendo?", que e
+  // a pergunta que um retrato do instante nunca responde.
+  const rels = Object.keys(m).filter(k => k.indexOf("relacao:") === 0)
+    .map(k => [k.replace("relacao:", "").replace(":bytes", ""), val(k)])
+    .filter(x => x[1] != null).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  if (rels.length) {
+    html += `<div class="ronda-section-title" style="font-size:10px;letter-spacing:.06em;
+      text-transform:uppercase;color:rgba(255,255,255,0.5);margin:12px 0 6px;">Maiores tabelas</div>`;
+    rels.forEach(([nome, v]) => {
+      html += `<div style="display:flex;justify-content:space-between;font-size:11px;
+        padding:4px 2px;border-bottom:1px solid rgba(255,255,255,0.05);">
+        <span style="color:rgba(255,255,255,0.7);">${_notifEsc(nome)}</span>
+        <span style="font-family:'Space Mono',monospace;">${_pwBytes(v)}</span>
+      </div>`;
+    });
+  }
+
+  // 6. Achados abertos, por ultimo e por extenso.
+  const abertos = (st.findings || []).filter(f => f.open);
+  if (abertos.length) {
+    html += `<div class="ronda-section-title" style="font-size:10px;letter-spacing:.06em;
+      text-transform:uppercase;color:rgba(255,255,255,0.5);margin:12px 0 6px;">O que precisa de atenção</div>`;
+    abertos.forEach(f => {
+      const cor = f.severity === "critical" ? "#ef4444"
+                : f.severity === "warning" ? "#eab308" : "#3b82f6";
+      html += `<div style="padding:7px 9px;margin-bottom:5px;border-radius:8px;
+        background:rgba(255,255,255,0.04);border-left:3px solid ${cor};">
+        <div style="font-size:11.5px;line-height:1.4;">${_notifEsc(f.summary || f.key || "")}</div>
+        <div style="font-size:9.5px;color:rgba(255,255,255,0.45);margin-top:3px;">
+          ${_notifEsc(f.family || "")}${f.duration_s != null ? " · há " + _infraDur(f.duration_s) : ""}
+        </div>
+      </div>`;
+    });
+  } else {
+    html += `<p style="font-size:11.5px;color:rgba(255,255,255,0.5);margin-top:12px;">
+      Nenhum problema aberto no processamento nem no servidor.</p>`;
+  }
+
+  body.innerHTML = html;
 }
 
 function _infraRenderModal() {
@@ -10406,15 +10777,37 @@ function _infraRenderModal() {
   }
 
   const down = st.summary?.plants_down || 0;
+  const parcial = st.summary?.plants_partial || 0;
+  const atraso = st.summary?.plants_lagging || 0;
   const partes = [];
 
-  partes.push(`<div class="infra-hero ${down ? "down" : "ok"}">
-      <i class="fa-solid ${down ? "fa-plug-circle-xmark" : "fa-plug-circle-check"}"></i>
+  // O título tem que dizer o que de fato está acontecendo. "Usina sem
+  // comunicação" com a usina gerando gera chamado e desconfiança na tela.
+  let heroCls = "ok", heroIco = "fa-plug-circle-check";
+  let heroTit = "Todas as usinas comunicando";
+  let heroSub = "Nenhum problema aberto no caminho do dado.";
+  if (down) {
+    heroCls = "down"; heroIco = "fa-plug-circle-xmark";
+    heroTit = down === 1 ? "1 usina sem comunicação" : `${down} usinas sem comunicação`;
+    heroSub = "A equipe AIOTI já foi avisada.";
+  } else if (parcial) {
+    heroCls = "warn"; heroIco = "fa-triangle-exclamation";
+    heroTit = parcial === 1 ? "1 usina com equipamentos sem comunicação"
+                            : `${parcial} usinas com equipamentos sem comunicação`;
+    heroSub = "As usinas continuam gerando e enviando dados. " +
+              "Parte dos equipamentos parou de responder e a equipe AIOTI já foi avisada.";
+  } else if (atraso) {
+    heroCls = "warn"; heroIco = "fa-clock";
+    heroTit = atraso === 1 ? "1 usina publicando com atraso"
+                           : `${atraso} usinas publicando com atraso`;
+    heroSub = "Os dados estão chegando, só que mais devagar que o normal dela.";
+  }
+
+  partes.push(`<div class="infra-hero ${heroCls}">
+      <i class="fa-solid ${heroIco}"></i>
       <div>
-        <strong>${down ? (down === 1 ? "1 usina sem comunicação" : `${down} usinas sem comunicação`)
-                       : "Todas as usinas comunicando"}</strong>
-        <span>${down ? "A equipe AIOTI já foi avisada."
-                     : "Nenhum problema aberto no caminho do dado."}</span>
+        <strong>${heroTit}</strong>
+        <span>${heroSub}</span>
       </div>
     </div>`);
 
@@ -10424,7 +10817,7 @@ function _infraRenderModal() {
       Ou a frota inteira parou, ou a própria vigilância parou — vale conferir.</span></div>`);
   }
 
-  if (down) {
+  if (down || parcial || atraso) {
     partes.push(`<div class="infra-sec-title">Agora</div>`);
     partes.push(st.incidents.map(_infraCard).join(""));
   }
@@ -10443,13 +10836,23 @@ function _infraRenderModal() {
   body.innerHTML = partes.join("");
 }
 
+const _INFRA_ESCOPO = {
+  silent:  { txt: "Usina sem comunicação",              cls: "crit" },
+  partial: { txt: "Parte dos equipamentos calou",       cls: "warn" },
+  lag:     { txt: "Publicando com atraso",              cls: "warn" },
+};
+
 function _infraCard(g) {
   const aberto = g.open === true;
-  const sev = aberto ? (g.severity === "critical" ? "crit" : "warn") : "done";
+  const esc = _INFRA_ESCOPO[g.scope] || _INFRA_ESCOPO.silent;
+  const sev = aberto ? esc.cls : "done";
   // started_at é quando a usina calou, não quando o detector percebeu — a
   // Acopiara caiu 26 h antes do detector existir e apareceria como "10 min".
+  // O verbo muda com o escopo: "a usina parou" e "um tracker parou" não são a
+  // mesma frase, e era exatamente essa confusão que chegava ao cliente.
+  const verbo = g.scope === "lag" ? "atrasou desde" : "parou";
   const quando = aberto
-    ? `parou ${_infraWhen(g.started_at)} · há ${_infraDur(g.duration_s)}`
+    ? `${verbo} ${_infraWhen(g.started_at)} · há ${_infraDur(g.duration_s)}`
     : `${_infraWhen(g.started_at)} → ${_infraWhen(g.closed_at)} · ${_infraDur(g.duration_s)} fora`;
 
   // Detector que ainda não estava de pé é informação de operação: sem esta
@@ -10475,11 +10878,16 @@ function _infraCard(g) {
          Abrir usina <i class="fa-solid fa-arrow-right"></i></a>`
     : "";
 
+  const escopo = aberto
+    ? `<div class="infra-scope ${esc.cls}">${esc.txt}</div>`
+    : "";
+
   return `<div class="infra-card ${sev}">
       <div class="infra-card-top">
         <span class="infra-plant">${_notifEsc(g.plant_name || `Usina ${g.plant_id}`)}</span>
         <span class="infra-when">${quando}</span>
       </div>
+      ${escopo}
       ${fontes}
       ${atraso}
       ${link}
