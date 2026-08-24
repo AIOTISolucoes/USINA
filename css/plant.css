@@ -2720,6 +2720,22 @@ body.plant-enter #relaySection{
   border-top: 1px solid rgba(57,229,140,0.08);
 }
 
+/* Linha do DC destrinchado por MPPT (pedido do Igor, 24/08).
+   Sem borda no topo e com recuo: ela é DETALHE da linha DC logo acima, não
+   uma seção nova. A borda faria parecer outro assunto, e o operador leria
+   como se fossem medidas independentes do bloco DC. */
+.inverter-row-mppt {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+  padding-left: 22px;
+  opacity: .92;
+}
+.inverter-row-mppt .inv-chip__label {
+  color: rgba(154, 219, 184, .7);
+  letter-spacing: .03em;
+}
+
 .inverter-extra-row .inv-chip__label svg {
   vertical-align: -2px;
   margin-right: 2px;

@@ -6355,6 +6355,34 @@ function renderInverterExtras(inverterRealId, inv) {
     return Number.isFinite(n) ? `${n.toFixed(2)} MΩ` : "—";
   })()));
 
+  // ===== DC destrinchado por MPPT (pedido do Igor, 24/08) =====
+  // Vem pronto do api2.py (campo `mppts`), na ordem do indice.
+  //
+  // 🔑 O bloco SOME quando a usina nao publica por MPPT — hoje so a Naturagua
+  // publica, e as outras 16 nao teriam o que mostrar. Linha vazia rotulada
+  // "MPPT" faria parecer que o dado sumiu, quando na verdade nunca existiu ali.
+  //
+  // O "P DC" acima ja e a SOMA destes (corrigido no stg_inverter_analog em
+  // 24/08); aqui e o detalhe de cada entrada.
+  const mppts = Array.isArray(inv?.mppts) ? inv.mppts : [];
+  if (mppts.length) {
+    const rowMppt = document.createElement("div");
+    rowMppt.className = "inverter-extra-row inverter-row-mppt";
+
+    mppts.forEach(m => {
+      const partes = [];
+      if (m.power_dc_kw != null)  partes.push(`${Number(m.power_dc_kw).toFixed(2)} kW`);
+      if (m.voltage_dc_v != null) partes.push(`${Number(m.voltage_dc_v).toFixed(0)} V`);
+      if (m.current_a != null)    partes.push(`${Number(m.current_a).toFixed(1)} A`);
+      // Sem nenhuma medida o chip nao entra: chip com "—" ocupa espaco e nao
+      // informa nada.
+      if (!partes.length) return;
+      rowMppt.appendChild(makeChip(`MPPT ${m.indice}`, partes.join(" · ")));
+    });
+
+    if (rowMppt.children.length) rowDc.parentNode.insertBefore(rowMppt, rowDc.nextSibling);
+  }
+
   // ── Inv Status / Work Status chips ──
   const stInfo = getInverterStatusInfo(inv);
   const wkStatus = getWorkingStatus(inv);
