@@ -2103,7 +2103,7 @@ function renderPortfolioTable(plants) {
             <span class="${plantIconClass}" title="${alarmSeverity || "ok"}">
               <i class="fa-solid fa-seedling"></i>
             </span>
-            <span class="plant-name-text">${valueOrDash(plantName)}</span>
+            <span class="plant-name-text" data-i18n-skip>${valueOrDash(plantName)}</span>
             ${commBadgeHtml}
           </span>
         </button>
@@ -6193,7 +6193,8 @@ function renderPortfolioCards(plants) {
     card.innerHTML = `
       <div class="plant-card__top">
         <div class="${iconClass}"><i class="fa-solid fa-seedling"></i></div>
-        <div class="plant-card__name">${plantName}</div>
+        <!-- data-i18n-skip: nome proprio vindo do banco. Ver NOMES_PROPRIOS_I18N.md -->
+        <div class="plant-card__name" data-i18n-skip>${plantName}</div>
         <button
           class="plant-card__field-btn"
           data-field-plant-id="${plantId}"
@@ -6206,11 +6207,11 @@ function renderPortfolioCards(plants) {
       </div>
       <div class="plant-card__stats">
         <div class="plant-card__stat">
-          <div class="plant-card__stat-label"><i class="fa-solid fa-bolt"></i> Active Power</div>
+          <div class="plant-card__stat-label"><i class="fa-solid fa-bolt"></i> Potência Ativa</div>
           <div class="plant-card__stat-value active">${activePowerDisplay}</div>
         </div>
         <div class="plant-card__stat">
-          <div class="plant-card__stat-label"><i class="fa-solid fa-layer-group"></i> Rated</div>
+          <div class="plant-card__stat-label"><i class="fa-solid fa-layer-group"></i> Pot. Nominal</div>
           <div class="plant-card__stat-value muted">${ratedPower.toFixed(1)} kWp</div>
         </div>
         <div class="plant-card__stat">
@@ -6230,11 +6231,11 @@ function renderPortfolioCards(plants) {
           <div class="plant-card__stat-value">${invAvail}</div>
         </div>
         <div class="plant-card__stat">
-          <div class="plant-card__stat-label"><i class="fa-solid fa-tower-broadcast"></i> Relay Disp.</div>
+          <div class="plant-card__stat-label"><i class="fa-solid fa-tower-broadcast"></i> Relé Disp.</div>
           <div class="plant-card__stat-value">${relayAvail}</div>
         </div>
         <div class="plant-card__stat">
-          <div class="plant-card__stat-label"><i class="fa-solid fa-chart-line"></i> PR Acc.</div>
+          <div class="plant-card__stat-label"><i class="fa-solid fa-chart-line"></i> PR Acum.</div>
           <div class="plant-card__stat-value">${prAcc}</div>
         </div>
       </div>
@@ -6243,7 +6244,7 @@ function renderPortfolioCards(plants) {
           <canvas id="${canvasId}"></canvas>
         </div>
         <div class="plant-card__chart-legend">
-          <span class="pcc-leg pcc-leg--power">Active Power</span>
+          <span class="pcc-leg pcc-leg--power">Potência Ativa</span>
           <span class="pcc-leg pcc-leg--irr">Irrad. POA</span>
           <span class="pcc-leg pcc-leg--pr">PR</span>
         </div>

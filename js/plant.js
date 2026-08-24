@@ -3791,6 +3791,29 @@ function initInvViewToggle() {
   switchView(false);
 }
 
+/**
+ * Seta de voltar do topo da usina.
+ *
+ * POR QUE NAO E MAIS `history.back()` (pedido do cliente, 24/08):
+ * o unifilar e um MODO dentro da pagina da usina, nao uma entrada de
+ * historico. Entao, para o navegador, "voltar" de dentro do unifilar era
+ * voltar para o DASHBOARD — a pessoa perdia a usina inteira quando so queria
+ * sair do diagrama. Agora a seta desce um nivel de cada vez: primeiro toque
+ * volta para a lista, segundo toque sai da usina.
+ *
+ * Global de proposito: e chamada pelo onclick do plant.html.
+ */
+function plantVoltar() {
+  // Estado do unifilar e a classe no body, posta por switchView().
+  if (document.body.classList.contains("plant-map-mode")) {
+    const btnList = document.getElementById("invBtnList");
+    if (btnList) { btnList.click(); return; }
+    // Sem o botao (marcacao mudou?), nao prender a pessoa na tela:
+    // cai para o comportamento antigo em vez de nao fazer nada.
+  }
+  history.back();
+}
+
 let _unifPdfLoaded = false;
 async function _loadUnifilarPdfBtn() {
   if (_unifPdfLoaded) return;
@@ -4990,9 +5013,9 @@ function ensureRelayUiScaffold() {
   const reactivePowerEl = ensureMetricCell("relayReactivePowerValue", 5);
   const tsEl = ensureMetricCell("relayTsText", 6);
   tsEl.classList.add("relay-timestamp-cell");
-  activePowerEl.dataset.label = "ACTIVE POWER";
-  apparentPowerEl.dataset.label = "APPARENT POWER";
-  reactivePowerEl.dataset.label = "REACTIVE POWER";
+  activePowerEl.dataset.label = "POTÊNCIA ATIVA";
+  apparentPowerEl.dataset.label = "POTÊNCIA APARENTE";
+  reactivePowerEl.dataset.label = "POTÊNCIA REATIVA";
   tsEl.dataset.label = "ÚLTIMA LEITURA";
 
   if (commandBarWrap) {
@@ -5048,9 +5071,9 @@ function ensureDeviceMiniHeaders() {
     headerEl.innerHTML = `
       <span></span>
       <span></span>
-      <span data-col="active">ACTIVE POWER</span>
-      <span data-col="apparent">APPARENT POWER</span>
-      <span data-col="reactive">REACTIVE POWER</span>
+      <span data-col="active">POTÊNCIA ATIVA</span>
+      <span data-col="apparent">POTÊNCIA APARENTE</span>
+      <span data-col="reactive">POTÊNCIA REATIVA</span>
       <span data-col="timestamp">ÚLTIMA LEITURA</span>
       <span data-col="commands">${_canSendCommand() ? "COMANDOS" : ""}</span>
     `;
@@ -5274,9 +5297,9 @@ function ensureMultimeterUiScaffold() {
   const reactivePowerEl = ensureMetricCell("multimeterReactivePowerValue", 5);
   const tsEl = ensureMetricCell("multimeterLastReadingValue", 6);
   tsEl.classList.add("relay-timestamp-cell");
-  activePowerEl.dataset.label = "ACTIVE POWER";
-  apparentPowerEl.dataset.label = "APPARENT POWER";
-  reactivePowerEl.dataset.label = "REACTIVE POWER";
+  activePowerEl.dataset.label = "POTÊNCIA ATIVA";
+  apparentPowerEl.dataset.label = "POTÊNCIA APARENTE";
+  reactivePowerEl.dataset.label = "POTÊNCIA REATIVA";
   tsEl.dataset.label = "ÚLTIMA LEITURA";
 
   if (commandBarWrap) {
@@ -6276,6 +6299,59 @@ function ensureMonthlyIrrToggle(hasIrrData) {
   }
   btn.classList.toggle("is-on", MONTHLY_SHOW_IRR);
 }
+
+// ---------------------------------------------------------------------------
+// PERDA (kWh e R$) no grafico mensal — pedido do cliente em 24/08.
+//
+// O cliente quer ver o CUSTO, ou seja o que deixou de ganhar, e nao o ganho.
+// Por isso a serie e sempre "perda" e nunca "excedente": dia que rendeu acima
+// do esperado aparece como zero, nao como barra positiva.
+//
+// Quem calcula e o api2.py (calcular_perda_mensal), NAO esta tela. A regra da
+// casa vale aqui igual: o codigo do servidor escreve o numero, o front so
+// desenha. Assim o mesmo numero serve grafico, relatorio e e-mail sem
+// divergir entre eles.
+//
+// DESLIGADA por padrao: e informacao de cobranca, quem quiser liga.
+let MONTHLY_SHOW_PERDA = (() => {
+  try { return localStorage.getItem("plant_monthly_perda") === "1"; } catch (e) { return false; }
+})();
+
+function ensureMonthlyPerdaToggle(temPerda) {
+  const row = document.querySelector(".plant-chart-card--monthly .monthly-legend-row");
+  if (!row) return;
+  let btn = document.getElementById("monthlyPerdaToggle");
+  if (!temPerda) {
+    // Sem base de comparacao (usina sem PVsyst e sem capacidade cadastrada)
+    // o botao SOME, em vez de ficar ligavel e nao mostrar nada. Botao que
+    // nao faz nada ensina a pessoa a nao confiar na tela.
+    if (btn) btn.remove();
+    return;
+  }
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "monthlyPerdaToggle";
+    btn.className = "monthly-leg monthly-perda-toggle";
+    btn.innerHTML = '<span class="monthly-leg-sq monthly-leg-sq--perda"></span> Perda (R$)';
+    btn.title = "Mostrar/ocultar quanto a usina deixou de gerar em cada dia, em energia e em dinheiro";
+    btn.addEventListener("click", () => {
+      MONTHLY_SHOW_PERDA = !MONTHLY_SHOW_PERDA;
+      try { localStorage.setItem("plant_monthly_perda", MONTHLY_SHOW_PERDA ? "1" : "0"); } catch (e) {}
+      renderMonthlyChart();
+    });
+    row.appendChild(btn);
+  }
+  btn.classList.toggle("is-on", MONTHLY_SHOW_PERDA);
+}
+
+/** "R$ 1.234,56" — o pt-BR do resto da tela, sem depender de Intl por engano. */
+function formatBrlPtBR(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return "—";
+  return "R$ " + n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 let LAST_INVERTER_ROWS_SIGNATURE = "";
 let DAILY_CHART_ZOOM_WIRED = false;
 
@@ -6928,6 +7004,21 @@ function renderMonthlyChart() {
   ensureMonthlyIrrToggle(hasIrrData);
   const showIrr = hasIrrData && MONTHLY_SHOW_IRR;
 
+  // ---- PERDA: series vindas prontas do api2.py ----
+  // null e "nao sei" (dia futuro, ou sem irradiacao medida) e tem que
+  // CONTINUAR null ate o Chart.js, que ja sabe nao desenhar ponto nulo.
+  // Trocar por 0 aqui afirmaria "nao houve perda", que e outra coisa.
+  const perdaKwh = Array.isArray(MONTHLY?.perda_diaria_kwh)
+    ? MONTHLY.perda_diaria_kwh.slice(0, daily.length).map(v => (v == null ? null : Number(v)))
+    : [];
+  const perdaBrl = Array.isArray(MONTHLY?.perda_diaria_brl)
+    ? MONTHLY.perda_diaria_brl.slice(0, daily.length).map(v => (v == null ? null : Number(v)))
+    : [];
+  const perdaMeta = MONTHLY?.perda_meta || {};
+  const temPerda = perdaKwh.some(v => v != null);
+  ensureMonthlyPerdaToggle(temPerda);
+  const showPerda = temPerda && MONTHLY_SHOW_PERDA;
+
   const kpiRealEl = document.getElementById("monthlyKpiReal");
   const kpiExpectedMtdEl = document.getElementById("monthlyKpiExpectedMtd");
   const kpiExpEl = document.getElementById("monthlyKpiExp");
@@ -6945,7 +7036,23 @@ function renderMonthlyChart() {
   }
   if (progressEl) progressEl.style.width = `${((elapsedDays / daily.length) * 100).toFixed(1)}%`;
   if (bottomLeftEl) bottomLeftEl.textContent = `Ate ${currentLabel}: real produzido x esperado acumulado`;
-  if (bottomRightEl) bottomRightEl.textContent = `Expectativa mensal: ${formatKwhPtBR(totalExpectedMonth)}`;
+  if (bottomRightEl) {
+    // Com a perda ligada o rodape passa a falar de dinheiro, e diz de onde o
+    // numero saiu. Valor financeiro sem procedencia vira discussao com o
+    // cliente — a tarifa e a base da expectativa tem que estar visiveis.
+    if (showPerda) {
+      const base = perdaMeta.base_esperado === "pvsyst"
+        ? "PVsyst"
+        : `PR ref. ${String(perdaMeta.pr_referencia_pct ?? "").replace(".", ",")}%`;
+      const tarifa = formatBrlPtBR(perdaMeta.tarifa_kwh_brl ?? 0);
+      bottomRightEl.textContent =
+        `Perda no mês: ${formatKwhPtBR(MONTHLY?.perda_total_kwh ?? 0)} · ` +
+        `${formatBrlPtBR(MONTHLY?.perda_total_brl ?? 0)} ` +
+        `(base ${base}, ${tarifa}/kWh)`;
+    } else {
+      bottomRightEl.textContent = `Expectativa mensal: ${formatKwhPtBR(totalExpectedMonth)}`;
+    }
+  }
 
   const ctx = canvas.getContext("2d");
 
@@ -7030,6 +7137,29 @@ function renderMonthlyChart() {
     });
   }
 
+  if (showPerda) {
+    // Desenhada em kWh, no MESMO eixo da geracao, de proposito: perda e
+    // geracao sao a mesma grandeza e ficam comparaveis a olho. O dinheiro
+    // aparece no tooltip e no rodape — juntar R$ e kWh num eixo so seria
+    // bonito e errado.
+    datasets.push({
+      label: "Perda",
+      type: "line",
+      data: perdaKwh,
+      borderColor: "rgba(255,107,107,.85)",
+      backgroundColor: "rgba(255,107,107,.18)",
+      pointBackgroundColor: "rgba(255,107,107,.9)",
+      pointBorderColor: "rgba(255,107,107,1)",
+      pointRadius: isMobile ? 2 : 3,
+      pointHoverRadius: 5,
+      borderWidth: 1.8,
+      tension: 0.25,
+      spanGaps: false,   // buraco e "nao sei"; ligar os pontos mentiria
+      fill: true,
+      order: 3
+    });
+  }
+
   monthlyChartInstance = new Chart(ctx, {
     type: "bar",
     data: {
@@ -7061,6 +7191,13 @@ function renderMonthlyChart() {
               if (item?.dataset?.label === "Irradiância") {
                 const v = item?.parsed?.y;
                 return v == null ? "" : `Irradiância: ${Number(v).toFixed(2).replace(".", ",")} kWh/m²`;
+              }
+              if (item?.dataset?.label === "Perda") {
+                const kwh = perdaKwh[idx];
+                if (kwh == null) return "";
+                const brl = perdaBrl[idx];
+                return `Perda: ${formatKwhPtBR(kwh)}` +
+                       (brl == null ? "" : ` (${formatBrlPtBR(brl)})`);
               }
               return "";
             },

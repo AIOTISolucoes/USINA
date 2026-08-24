@@ -43,7 +43,8 @@
   <section class="card plant-header-card">
     <div class="plant-header-compact">
       <div class="plant-head-left">
-        <button class="back-btn back-btn--modern" onclick="history.back()" aria-label="Voltar">
+        <!-- plantVoltar(): dentro do unifilar volta para a LISTA; so o 2o toque sai da usina -->
+        <button class="back-btn back-btn--modern" onclick="plantVoltar()" aria-label="Voltar">
           <svg class="back-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M14.5 5L8.5 12L14.5 19"
                   stroke="currentColor" stroke-width="2.2"
@@ -55,7 +56,8 @@
             <i class="fa-solid fa-seedling"></i>
           </span>
           <div class="plant-title-text">
-            <h2 class="plant-name" id="plantName">—</h2>
+            <!-- data-i18n-skip: nome proprio vindo do banco. Ver NOMES_PROPRIOS_I18N.md -->
+            <h2 class="plant-name" id="plantName" data-i18n-skip>—</h2>
             <span class="plant-subline" id="plantSubline">Nenhum alarme ativo</span>
             <div class="plant-header-actions plant-header-actions--inline-left">
               <button id="plantAlarmMenuButton" class="plant-alarm-menu-btn is-clean" aria-expanded="false" aria-label="Abrir alarmes da usina">
@@ -795,8 +797,10 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/notify_sound.js"></script>
-<script src="js/plant.js"></script>
+<script src="js/i18n.js"></script>
+    <script src="js/plant.js"></script>
 <script src="js/help_tour.js"></script>
 <script src="js/pwa.js"></script>
+<script src="js/i18n_seletor.js"></script>
 </body>
 </html>
