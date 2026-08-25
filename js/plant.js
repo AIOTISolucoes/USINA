@@ -6571,7 +6571,30 @@ function preencherPerdaDoDia(payload) {
   chip.textContent = `Perda hoje: ${formatKwhPtBR(kwh)} · ${formatBrlPtBR(brl)}`;
   // A procedencia vai no title: numero de dinheiro sem dizer de onde saiu
   // vira discussao com o cliente.
-  chip.title = `Comparado com PR de referência de ${pr}% · tarifa R$ ${tarifa}/kWh`;
+  chip.title =
+    `Comparado com PR de referência de ${pr}% · tarifa R$ ${tarifa}/kWh` +
+    _procedenciaTarifa(payload?.perda_tarifa_vigencia, payload?.perda_tarifa_escopo);
+}
+
+/**
+ * Sufixo que diz DE ONDE veio a tarifa: " (cliente, vigente desde 01/09/2026)".
+ *
+ * 🔑 Devolve string vazia quando nao ha vigencia — que e o caso do escopo
+ * "fallback", quando a API nao conseguiu resolver no banco e usou o default do
+ * codigo. Nesse caso o numero ainda aparece, mas SEM afirmar procedencia que
+ * ele nao tem. Inventar uma data ali seria pior que omitir.
+ *
+ * O escopo "global" nao vira rotulo de cliente porque nao e negociado com
+ * ninguem: e o padrao da plataforma ate alguem cadastrar a tarifa de verdade.
+ */
+function _procedenciaTarifa(vigencia, escopo) {
+  if (!vigencia) return "";
+  const [a, m, d] = String(vigencia).split("-");
+  if (!a || !m || !d) return "";
+  const rotulo = escopo === "usina" ? "usina"
+               : escopo === "cliente" ? "cliente"
+               : "padrão";
+  return ` (${rotulo}, vigente desde ${d}/${m}/${a})`;
 }
 
 /** "R$ 1.234,56" — o pt-BR do resto da tela, sem depender de Intl por engano. */
@@ -7280,6 +7303,11 @@ function renderMonthlyChart() {
         `Perda no mês: ${formatKwhPtBR(MONTHLY?.perda_total_kwh ?? 0)} · ` +
         `${formatBrlPtBR(MONTHLY?.perda_total_brl ?? 0)} ` +
         `(base ${base}, ${tarifa}/kWh)`;
+      // A vigência vai no title e não no texto: a linha já é longa, e a data
+      // interessa a quem contesta o valor, não a quem só está olhando.
+      bottomRightEl.title =
+        `Tarifa ${tarifa}/kWh` +
+        _procedenciaTarifa(perdaMeta.tarifa_vigencia, perdaMeta.tarifa_escopo);
     } else {
       bottomRightEl.textContent = `Expectativa mensal: ${formatKwhPtBR(totalExpectedMonth)}`;
     }
