@@ -10312,7 +10312,41 @@ function _notifCenterPrefs() {
     push_infra_muted: p.push_infra_muted === true,
     push_min_severity: p.push_min_severity || "all",
     push_disabled_codes: Array.isArray(p.push_disabled_codes) ? p.push_disabled_codes.map(String) : [],
+    // 🔑 RELATÓRIO POR E-MAIL É OPT-IN, e a polaridade aqui é o OPOSTO das
+    // chaves acima. As outras são "pausar" (marcado = desligado); esta é
+    // "receber" (marcado = ligado). Por isso o padrão é `=== true` e não
+    // `!== false`: conta que nunca mexeu tem `{}` e fica de FORA.
+    //
+    // Opt-in e não opt-out porque e-mail não pedido vira marcação de spam, e
+    // isso derruba a entrega de TODO o e-mail do domínio — inclusive o que já
+    // funciona hoje pelo Titan. O custo de começar devagar é menor que o de
+    // queimar o domínio.
+    report_daily: p.report_daily === true,
   };
+}
+
+/**
+ * " · para fulano@empresa.com" — o endereço que vai receber, quando dá para
+ * saber qual é.
+ *
+ * 🔑 Mostrar o destino evita a pergunta óbvia ("vai para onde?") e, mais
+ * importante, deixa o erro visível: se a pessoa vir um e-mail antigo ali, ela
+ * avisa antes de o relatório começar a sair para o lugar errado. O endereço é
+ * o `app_user.email`, que é NOT NULL e está preenchido nas 27 contas.
+ *
+ * Devolve string vazia se não souber — nunca um placeholder. Escrever
+ * "seu e-mail" quando não se sabe qual é não informa nada e ainda parece bug.
+ */
+function _reportDailyDestino() {
+  try {
+    const u = JSON.parse(localStorage.getItem("user") || "{}");
+    const email = String(u.email || "").trim();
+    if (!email || email.indexOf("@") < 1) return "";
+    const esc = email.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return ` · para <strong>${esc}</strong>`;
+  } catch (_) {
+    return "";
+  }
 }
 
 // Escreve as preferências salvas nos controles. Roda duas vezes de propósito:
@@ -10323,9 +10357,11 @@ function _notifCenterApplyPrefs() {
   const mutedEl = document.getElementById("notifCenterMuted");
   const infraEl = document.getElementById("notifCenterInfraMuted");
   const sevEl = document.getElementById("notifCenterSeverity");
+  const relEl = document.getElementById("notifCenterReportDaily");
   if (mutedEl) mutedEl.checked = cur.push_muted;
   if (infraEl) infraEl.checked = cur.push_infra_muted;
   if (sevEl) sevEl.value = cur.push_min_severity;
+  if (relEl) relEl.checked = cur.report_daily;
 }
 
 async function openNotifCenter() {
@@ -10354,6 +10390,18 @@ async function openNotifCenter() {
         <input type="checkbox" id="notifCenterInfraMuted">
         <span>Pausar avisos de usina sem comunicação
           <small>(infraestrutura — separado dos alarmes de equipamento)</small></span>
+      </label>
+
+      <!-- ⚠️ POLARIDADE INVERTIDA em relação aos dois de cima: aqueles são
+           "pausar" (marcado = desliga), este é "receber" (marcado = liga).
+           O texto diz "Receber" justamente para o usuário não marcar achando
+           que está silenciando algo. -->
+      <label class="notif-center-switch">
+        <input type="checkbox" id="notifCenterReportDaily">
+        <span>Receber o relatório diário por e-mail
+          <small>enviado de manhã, com o resumo do dia anterior das suas usinas${
+            _reportDailyDestino()
+          }</small></span>
       </label>
 
       <div class="notif-center-field">
@@ -10487,6 +10535,9 @@ async function _notifCenterSave() {
     ..._robotGetNotifPrefs(),
     push_muted: document.getElementById("notifCenterMuted")?.checked === true,
     push_infra_muted: document.getElementById("notifCenterInfraMuted")?.checked === true,
+    // O POST /users/notif-prefs faz merge com `||` no jsonb, então mandar esta
+    // chave NÃO apaga language/disabled_types/push_* — conferido no api2.py.
+    report_daily: document.getElementById("notifCenterReportDaily")?.checked === true,
     push_min_severity: document.getElementById("notifCenterSeverity")?.value || "all",
     push_disabled_codes: Array.from(disabled),
   };
