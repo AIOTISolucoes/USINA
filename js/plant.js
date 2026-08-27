@@ -9654,6 +9654,26 @@ function _rpSparkP(values, color, w, h) {
   return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" style="display:block;"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 
+function _rpInvTempSparkP(series, w = 180, h = 46, fallbackAvg = null, fallbackMax = null) {
+  const valid = value => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value));
+  const rows = (Array.isArray(series) ? series : []).filter(r => r && (valid(r.avg_temp_c) || valid(r.max_temp_c)));
+  if (rows.length < 2) {
+    if (!valid(fallbackAvg)) return `<span style="color:rgba(255,255,255,.35);font-size:9px;">sem temperatura medida</span>`;
+    const avg = Number(fallbackAvg), max = valid(fallbackMax) ? Number(fallbackMax) : null;
+    const pct = Math.max(2, Math.min(100, ((avg - 20) / 60) * 100));
+    const maxPct = max === null ? null : Math.max(2, Math.min(100, ((max - 20) / 60) * 100));
+    return `<div title="Média interna do período: ${avg.toFixed(1)} °C${max===null?'':` · máxima: ${max.toFixed(1)} °C`}" style="position:relative;width:100%;max-width:${w}px;height:9px;margin:7px 0;background:rgba(255,255,255,.07);border-radius:9px;overflow:visible;"><div style="height:100%;width:${pct}%;background:#60a5fa;border-radius:9px;"></div>${maxPct===null?'':`<span style="position:absolute;left:${maxPct}%;top:-2px;width:3px;height:13px;background:#f97316;border-radius:2px;"></span>`}</div>`;
+  }
+  const vals = rows.flatMap(r => [r.avg_temp_c, r.max_temp_c]).filter(valid).map(Number);
+  let min = Math.min(...vals) - 1, max = Math.max(...vals) + 1;
+  if (max <= min) max = min + 1;
+  const x = i => 3 + i / Math.max(rows.length - 1, 1) * (w - 6);
+  const y = v => 3 + (max - Number(v)) / (max - min) * (h - 6);
+  const pts = key => rows.map((r, i) => valid(r[key]) ? `${x(i).toFixed(1)},${y(r[key]).toFixed(1)}` : null).filter(Boolean).join(" ");
+  const dots = rows.map((r, i) => { const d = String(r.date || "").split("-").reverse().join("/"); return `${valid(r.avg_temp_c) ? `<circle cx="${x(i)}" cy="${y(r.avg_temp_c)}" r="2.4" fill="#60a5fa"><title>${d} — média interna ${Number(r.avg_temp_c).toFixed(1)} °C</title></circle>` : ""}${valid(r.max_temp_c) ? `<circle cx="${x(i)}" cy="${y(r.max_temp_c)}" r="2.4" fill="#f97316"><title>${d} — máxima interna ${Number(r.max_temp_c).toFixed(1)} °C</title></circle>` : ""}`; }).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" style="display:block;width:100%;max-width:${w}px;height:${h}px;"><line x1="3" y1="${h-3}" x2="${w-3}" y2="${h-3}" stroke="rgba(255,255,255,.08)"/><polyline points="${pts("avg_temp_c")}" fill="none" stroke="#60a5fa" stroke-width="2"/><polyline points="${pts("max_temp_c")}" fill="none" stroke="#f97316" stroke-width="1.5"/>${dots}</svg>`;
+}
+
 function _plantReportRenderMini(data, el) {
   const p = data.period || {};
   const s = data.summary || {};
@@ -9680,6 +9700,19 @@ function _plantReportRenderMini(data, el) {
     html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-bolt"></i> Inversores — Destaque</div>`;
     if (worst && worst.vs_fleet === "abaixo") html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#ef4444;font-weight:700;">▼</span> ${worst.inverter_name} <span style="font-family:'Space Mono',monospace;color:#ef4444;">PR ${_rpFmtP(worst.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-abaixo">abaixo</span></div>`;
     if (best && best.vs_fleet === "acima") html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:2px 0;"><span style="color:#39e58c;font-weight:700;">▲</span> ${best.inverter_name} <span style="font-family:'Space Mono',monospace;color:#39e58c;">PR ${_rpFmtP(best.avg_pr_pct,1)}%</span> <span class="ronda-perf-badge ronda-perf-acima">acima</span></div>`;
+    html += `</div>`;
+  }
+  const tempInvs = invs.filter(inv => inv.avg_temp_c !== null && inv.avg_temp_c !== undefined)
+    .sort((a, b) => Number(b.avg_temp_c) - Number(a.avg_temp_c));
+  if (tempInvs.length) {
+    const ordered = tempInvs.map(inv => Number(inv.avg_temp_c)).sort((a, b) => a - b);
+    const mid = Math.floor(ordered.length / 2);
+    const median = ordered.length % 2 ? ordered[mid] : (ordered[mid - 1] + ordered[mid]) / 2;
+    html += `<div class="ronda-section"><div class="ronda-section-title"><i class="fa-solid fa-temperature-half"></i> Temperatura interna por inversor</div><div style="font-size:9px;color:rgba(255,255,255,.48);margin-bottom:7px;">Mediana da frota: <b style="color:#e2e8f0;">${_rpFmtP(median,1)} °C</b> · <span style="color:#60a5fa;">azul média</span> · <span style="color:#f97316;">laranja máxima</span></div>`;
+    tempInvs.forEach(inv => {
+      const delta = Number(inv.avg_temp_c) - median, hot = delta >= 5;
+      html += `<div style="padding:6px 0;border-top:1px solid rgba(255,255,255,.06);"><div style="display:flex;justify-content:space-between;gap:8px;font-size:10px;"><span style="font-weight:650;color:${hot?'#f97316':'rgba(255,255,255,.82)'};">${inv.inverter_name||"Inv"+inv.device_id}</span><span style="font-family:'Space Mono',monospace;color:rgba(255,255,255,.68);">méd. <b style="color:#60a5fa;">${_rpFmtP(inv.avg_temp_c,1)}°</b> · máx. <b style="color:#f97316;">${_rpFmtP(inv.max_temp_c,1)}°</b> · Δ ${delta>=0?'+':''}${_rpFmtP(delta,1)}°</span></div>${_rpInvTempSparkP(inv.daily_temperature||[],270,42,inv.avg_temp_c,inv.max_temp_c)}</div>`;
+    });
     html += `</div>`;
   }
   const totalAlarms = data.total_alarms || 0;
@@ -9906,12 +9939,26 @@ function _plantReportOpenFull(data) {
   if (trend.length > 1) body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária</div><div class="ronda-card-subtitle">Geração (kWh) e PR (%)</div></div></div><div class="ronda-card-body" style="padding:10px 12px;">${trendSVG()}</div></div>`;
 
   if (invs.length) {
-    body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Performance por Inversor</div><div class="ronda-card-subtitle">${invs.length} unidades</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th><th>PR Méd</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead><tbody>`;
+    body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Performance por Inversor</div><div class="ronda-card-subtitle">${invs.length} unidades</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th><th>PR Méd</th><th>Temp. média</th><th>Temp. máxima</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead><tbody>`;
     invs.forEach(inv => {
       const vc = inv.vs_fleet && inv.vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.vs_fleet}` : "";
       const ar = inv.vs_fleet==="acima"?"▲":inv.vs_fleet==="abaixo"?"▼":"";
       const sc = inv.vs_fleet==="abaixo"?"#ef4444":inv.vs_fleet==="acima"?"#39e58c":"#60a5fa";
-      body += `<tr><td style="font-weight:600;">${inv.inverter_name||"Inv"+inv.device_id}</td><td>${_rpFmtP(inv.avg_power_kw,1)} kW</td><td>${_rpFmtP(inv.total_energy_kwh,0)} kWh</td><td style="font-weight:700;">${_rpFmtP(inv.avg_pr_pct,1)}%</td><td><span class="ronda-full-perf-badge ${vc}">${ar} ${inv.vs_fleet==="sem_dados"?"—":inv.vs_fleet}</span></td><td>${_rpFmtP(inv.availability_pct,1)}%</td><td>${miniSpark(inv.daily_energy||[],sc)}</td></tr>`;
+      body += `<tr><td style="font-weight:600;">${inv.inverter_name||"Inv"+inv.device_id}</td><td>${_rpFmtP(inv.avg_power_kw,1)} kW</td><td>${_rpFmtP(inv.total_energy_kwh,0)} kWh</td><td style="font-weight:700;">${_rpFmtP(inv.avg_pr_pct,1)}%</td><td style="color:#60a5fa;font-weight:700;">${_rpFmtP(inv.avg_temp_c,1)} °C</td><td style="color:#f97316;font-weight:700;">${_rpFmtP(inv.max_temp_c,1)} °C</td><td><span class="ronda-full-perf-badge ${vc}">${ar} ${inv.vs_fleet==="sem_dados"?"—":inv.vs_fleet}</span></td><td>${_rpFmtP(inv.availability_pct,1)}%</td><td>${miniSpark(inv.daily_energy||[],sc)}</td></tr>`;
+    });
+    body += `</tbody></table></div></div></div>`;
+  }
+
+  const _tempInvs = invs.filter(inv => inv.avg_temp_c !== null && inv.avg_temp_c !== undefined)
+    .sort((a,b) => Number(b.avg_temp_c) - Number(a.avg_temp_c));
+  if (_tempInvs.length) {
+    const _ordered = _tempInvs.map(inv => Number(inv.avg_temp_c)).sort((a,b) => a-b);
+    const _mid = Math.floor(_ordered.length / 2);
+    const _median = _ordered.length % 2 ? _ordered[_mid] : (_ordered[_mid-1] + _ordered[_mid]) / 2;
+    body += `<div class="ronda-card span-full" style="${cd()}"><div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgWeather}</div><div><div class="ronda-card-title">Temperatura Interna dos Inversores</div><div class="ronda-card-subtitle">Mediana da frota ${_rpFmtP(_median,1)} °C · azul = média diária · laranja = máxima diária</div></div></div><div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;"><table class="ronda-full-inv-table"><thead><tr><th>Inversor</th><th>Média</th><th>Máxima</th><th>vs mediana</th><th>Evolução diária</th></tr></thead><tbody>`;
+    _tempInvs.forEach(inv => {
+      const delta = Number(inv.avg_temp_c) - _median, hot = delta >= 5;
+      body += `<tr><td style="font-weight:650;color:${hot?'#f97316':'inherit'};">${inv.inverter_name||"Inv"+inv.device_id}</td><td style="color:#60a5fa;font-weight:700;">${_rpFmtP(inv.avg_temp_c,1)} °C</td><td style="color:#f97316;font-weight:700;">${_rpFmtP(inv.max_temp_c,1)} °C</td><td style="color:${hot?'#f97316':'rgba(255,255,255,.65)'};font-weight:${hot?'700':'500'};">${delta>=0?'+':''}${_rpFmtP(delta,1)} °C${hot?' · atenção':''}</td><td style="min-width:210px;">${_rpInvTempSparkP(inv.daily_temperature||[],260,48,inv.avg_temp_c,inv.max_temp_c)}</td></tr>`;
     });
     body += `</tbody></table></div></div></div>`;
   }
