@@ -20,7 +20,20 @@
     ["plant_edit", "Editar usinas (cadastro, capacidade, manutenção)"],
     ["device_edit", "Editar dispositivos/equipamentos"],
     ["remote_command", "Enviar comandos remotos"],
-    ["string_config_edit", "Configurar strings"]
+    ["string_config_edit", "Configurar strings"],
+    // ---- Ordens de serviço (27/08/2026) --------------------------------
+    // Até aqui isso só existia por migration no banco, usuário a usuário.
+    // Os rótulos dizem o efeito REAL, medido no código — não o nome da chave:
+    //   os_view   -> resumo.html:1129 mostra o botão da aba, e só
+    //   os_open   -> mostra o botão E deixa criar/editar (os.js:1946)
+    //   os_delete -> mostra o excluir (os.js:386/681) E é a única que o
+    //                servidor confere de verdade (os.py:2284)
+    ["os_view", "Ver a aba de OS (somente leitura)"],
+    ["os_open", "Abrir e editar OS (já inclui ver)"],
+    ["os_delete", "Excluir OS — de toda a empresa, não só as próprias"]
+    // Ficam de fora os_edit, os_edit_own e os_approve: estão gravados no
+    // banco de alguns usuários e nenhum arquivo os lê. Checkbox que não
+    // controla nada é pior do que controle nenhum.
   ];
 
   function getUser() {
