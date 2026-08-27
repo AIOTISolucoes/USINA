@@ -575,11 +575,17 @@ function bindStatusPopover() {
     const button = event.target.closest(".sp-btn")
     if (!button || !KB._statusTarget) return
 
+    // hideStatusPopover() zera KB._statusTarget. Guardar a OS ANTES de fechar:
+    // sem isto as tres linhas abaixo liam null e o clique morria calado
+    // (getWorkOrderId(null) -> null, e changeStatus retorna no !id sem avisar).
+    // Por isso concluir pelo menu do cartao / pelo botao de dentro da OS nunca
+    // funcionou desde 13/05 — so arrastar o cartao funcionava.
+    const target = KB._statusTarget
     hideStatusPopover()
-    await changeStatus(getWorkOrderId(KB._statusTarget), button.dataset.status, {
-      fromStatus: KB._statusTarget.status,
-      workOrder: KB._statusTarget,
-      reloadStatuses: [KB._statusTarget.status, button.dataset.status]
+    await changeStatus(getWorkOrderId(target), button.dataset.status, {
+      fromStatus: target.status,
+      workOrder: target,
+      reloadStatuses: [target.status, button.dataset.status]
     })
   })
 }
