@@ -1478,6 +1478,42 @@ body::after{
   color: rgba(245,158,11,.95);
 }
 
+/* Aviso acima do gráfico: âmbar é a convenção existente para comunicação;
+   vermelho continua reservado aos alarmes elétricos. */
+.daily-inv-note{
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: rgba(245,158,11,.95);
+  background: rgba(245,158,11,.07);
+  border: 1px solid rgba(245,158,11,.30);
+}
+.daily-inv-note i{
+  flex: 0 0 auto;
+  font-size: 13px;
+  opacity: .9;
+}
+.daily-inv-note b{
+  color: #fbbf24;
+  font-weight: 700;
+}
+.daily-inv-note .daily-inv-note-why{
+  color: rgba(245,158,11,.72);
+}
+@media (max-width: 560px){
+  .daily-inv-note{
+    align-items: flex-start;
+    font-size: 12px;
+    padding: 8px 11px;
+  }
+  .daily-inv-note i{ margin-top: 2px; }
+}
+
 .string-card:hover{
   transform: translateY(-1px);
   border-color: rgba(57,229,140,.42);

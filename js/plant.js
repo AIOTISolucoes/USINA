@@ -348,6 +348,13 @@ function normalizeDailyPayload(payload) {
     Array.isArray(payload.expected_power) ? payload.expected_power.slice() :
     [];
 
+  // A API antiga não manda estes arrays; nesse caso, a sinalização apenas fica
+  // inativa e o gráfico mantém o comportamento anterior.
+  const invOkRaw =
+    Array.isArray(payload.invertersOk) ? payload.invertersOk.slice() : [];
+  const invFaultRaw =
+    Array.isArray(payload.invertersFault) ? payload.invertersFault.slice() : [];
+
   if (!labelsRaw.length) return payload;
 
   // timestamp por ponto (se existir), para filtrar estritamente o DIA ATUAL
@@ -396,7 +403,9 @@ function normalizeDailyPayload(payload) {
       irr: irrRaw[i] != null ? asNumber(irrRaw[i], 0) : null,
       irrGhi: irrGhiRaw[i] != null ? asNumber(irrGhiRaw[i], 0) : null,
       meter: meterRaw[i] != null ? asNumber(meterRaw[i], 0) : null,
-      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : null
+      expected: expectedRaw[i] != null ? asNumber(expectedRaw[i], 0) : null,
+      invOk: invOkRaw[i] != null ? asNumber(invOkRaw[i], 0) : null,
+      invFault: invFaultRaw[i] != null ? asNumber(invFaultRaw[i], 0) : null
     });
   }
 
@@ -428,12 +437,16 @@ function normalizeDailyPayload(payload) {
   const mapIG = new Map();
   const mapM = new Map();
   const mapE = new Map();
+  const mapIOk = new Map();
+  const mapIFault = new Map();
   points.forEach(p => {
     mapP.set(p.minute, p.power);
     mapI.set(p.minute, p.irr);
     if (p.irrGhi != null) mapIG.set(p.minute, p.irrGhi);
     if (p.meter != null) mapM.set(p.minute, p.meter);
     mapE.set(p.minute, p.expected);
+    if (p.invOk != null) mapIOk.set(p.minute, p.invOk);
+    if (p.invFault != null) mapIFault.set(p.minute, p.invFault);
   });
 
   // Começa SEMPRE em 00:00. Vai até o último dado recebido e, quando a usina
@@ -465,6 +478,8 @@ function normalizeDailyPayload(payload) {
   const irradianceGhi = [];
   const meterPower = [];
   const expectedPower = [];
+  const invertersOk = [];
+  const invertersFault = [];
 
   const minuteLabel = (m) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -480,10 +495,28 @@ function normalizeDailyPayload(payload) {
     irradianceGhi.push(unknown || !mapIG.has(m) ? null : mapIG.get(m));
     meterPower.push(unknown || !mapM.has(m) ? null : mapM.get(m));
     expectedPower.push(unknown || !mapE.has(m) ? null : mapE.get(m));
+    invertersOk.push(unknown || !mapIOk.has(m) ? null : mapIOk.get(m));
+    invertersFault.push(unknown || !mapIFault.has(m) ? null : mapIFault.get(m));
   }
 
   const hasMeter = meterPower.some(v => v != null);
   const hasGhi = irradianceGhi.some(v => v != null);
+
+  // O pior momento e o início do período explicam a curva sem poluir os dias
+  // normais. Ausência de dado não conta como falha de comunicação.
+  let faultMax = 0;
+  let faultTotalAtMax = 0;
+  let faultFirstLabel = null;
+  for (let i = 0; i < labels.length; i++) {
+    const fault = invertersFault[i];
+    const ok = invertersOk[i];
+    if (fault == null || ok == null || fault <= 0) continue;
+    if (faultFirstLabel == null) faultFirstLabel = labels[i];
+    if (fault > faultMax) {
+      faultMax = fault;
+      faultTotalAtMax = ok + fault;
+    }
+  }
 
   return {
     ...payload,
@@ -495,6 +528,11 @@ function normalizeDailyPayload(payload) {
     expectedPower,
     hasMeter,
     hasGhi,
+    invertersOk,
+    invertersFault,
+    invFaultMax: faultMax,
+    invTotalAtFaultMax: faultTotalAtMax,
+    invFaultFromLabel: faultFirstLabel,
     // Faixa de "sem comunicação" desenhada pelo gráfico (plugin noCommBand).
     // null = usina reportando em dia, nenhuma faixa.
     noCommFromLabel: isStale ? minuteLabel(lastMin) : null,
@@ -6544,6 +6582,43 @@ function ensureMonthlyPerdaToggle(temPerda) {
 }
 
 /**
+ * Explica a diferença entre a curva do inversor e a geração real quando a
+ * consulta exclui leituras em falha de comunicação. Não aparece no modo
+ * Multimedidor: essa curva não depende dos inversores descartados.
+ */
+function preencherAvisoInversorFora() {
+  const box = document.getElementById("dailyInvFaultNote");
+  const txt = document.getElementById("dailyInvFaultText");
+  if (!box || !txt) return;
+
+  const fora = Number(DAILY?.invFaultMax || 0);
+  const total = Number(DAILY?.invTotalAtFaultMax || 0);
+  const usandoMedidor = DAILY_CHART_POWER_SOURCE === "meter" && DAILY?.hasMeter;
+
+  if (!(fora > 0) || !(total > 0) || usandoMedidor) {
+    box.style.display = "none";
+    return;
+  }
+
+  const desde = DAILY.invFaultFromLabel;
+  const desdeTxt = desde ? ` (desde as ${desde})` : "";
+
+  if (fora >= total) {
+    txt.innerHTML =
+      `<b>Nenhum dos ${total} inversores</b> respondeu em parte do dia${desdeTxt}. ` +
+      `<span class="daily-inv-note-why">Onde a curva está zerada, a plataforma não recebeu leitura — ` +
+      `não significa que a usina parou.</span>`;
+  } else {
+    txt.innerHTML =
+      `<b>${fora} de ${total} inversores</b> ficaram sem comunicação em parte do dia${desdeTxt}. ` +
+      `<span class="daily-inv-note-why">A curva soma só os que responderam, então a geração real foi ` +
+      `maior que a mostrada. Os pontos afetados estão marcados em âmbar.</span>`;
+  }
+
+  box.style.display = "";
+}
+
+/**
  * Chip "Perda hoje" ao lado do titulo do grafico diario.
  *
  * O numero vem PRONTO do api2.py (_perda_hoje_da_usina), de proposito: e o
@@ -6787,6 +6862,7 @@ function renderDailyChart() {
   }
 
   _updateDailyChartToggles();
+  preencherAvisoInversorFora();
 
   const useMeter = DAILY_CHART_POWER_SOURCE === "meter" && DAILY.hasMeter;
   const useGhi = DAILY_CHART_IRR_SOURCE === "ghi" && DAILY.hasGhi;
@@ -6801,6 +6877,20 @@ function renderDailyChart() {
 
   const irrData = useGhi ? DAILY.irradianceGhi : DAILY.irradiance;
   const irrLabel = useGhi ? "Irradiância GHI" : "Irradiância POA";
+
+  // Os pontos âmbar indicam precisamente quando a soma excluiu inversores sem
+  // comunicação. A curva do multimedidor não é afetada, portanto não recebe a
+  // marcação nem a explicação no tooltip.
+  const invFaultArr = Array.isArray(DAILY.invertersFault) ? DAILY.invertersFault : [];
+  const invOkArr = Array.isArray(DAILY.invertersOk) ? DAILY.invertersOk : [];
+  const showFaultMarks = !useMeter && (DAILY.invFaultMax || 0) > 0;
+  const faultColor = "#f59e0b";
+  const powerPointRadius = showFaultMarks
+    ? DAILY.labels.map((_, i) => (invFaultArr[i] > 0 ? 2.6 : 0))
+    : 0;
+  const powerPointColor = showFaultMarks
+    ? DAILY.labels.map((_, i) => (invFaultArr[i] > 0 ? faultColor : "rgba(0,0,0,0)"))
+    : powerColor;
 
   // Expectativa: curva PVSyst (quando a usina tem no banco) ou linha reta
   // no capacity AC. Sem PVSyst, o capacity AC vira a expectativa padrão.
@@ -6850,7 +6940,10 @@ function renderDailyChart() {
           backgroundColor: greenGradient,
           fill: true,
           tension: 0.4,
-          pointRadius: 0,
+          pointRadius: powerPointRadius,
+          pointBackgroundColor: powerPointColor,
+          pointBorderColor: powerPointColor,
+          pointBorderWidth: 0,
           borderWidth: 2,
           yAxisID: "yPower",
           spanGaps: true,
@@ -6901,6 +6994,20 @@ function renderDailyChart() {
               if (label.includes("Potência") || label === "Multimedidor") return `${label}: ${formatKwPtBR(value)}`;
               if (label.includes("Irradiância")) return `${label}: ${formatWm2PtBR(value)}`;
               return `${label}: ${formatNumberPtBR(value)}`;
+            },
+            afterBody: (items) => {
+              if (!showFaultMarks) return "";
+              const i = items?.[0]?.dataIndex;
+              if (i == null) return "";
+              const fora = invFaultArr[i];
+              const dentro = invOkArr[i];
+              if (!(fora > 0) || dentro == null) return "";
+              const total = dentro + fora;
+              return [
+                "",
+                `⚠ ${fora} de ${total} inversores sem comunicação`,
+                `A curva soma só os ${dentro} que responderam`
+              ];
             }
           }
         },
