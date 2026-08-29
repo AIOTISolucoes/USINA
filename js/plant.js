@@ -8100,16 +8100,17 @@ async function refreshRealtimeEverything() {
       TRACKERS_PLANT_BOUNDS = trackersPayload?.plant_bounds ?? null;
 
       const catalogHasTracker = PLANT_CAPABILITIES.hasTracker === true;
-      if (!catalogHasTracker) {
+      const hasOrthomosaic = await ensureTrackersOrthomosaicForCurrentPlant();
+      if (!catalogHasTracker && !hasOrthomosaic) {
         setTrackersSectionVisible(false);
       } else {
         const hasTrackerData = TRACKERS_DATA.some(
           (t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude))
         );
-        if (hasTrackerData) TRACKERS_LAST_HAS_DATA = true;
+        if (hasTrackerData || hasOrthomosaic) TRACKERS_LAST_HAS_DATA = true;
 
         if (!TRACKERS_USER_OPENED) {
-          setTrackersSectionVisible(hasTrackerData);
+          setTrackersSectionVisible(hasTrackerData || hasOrthomosaic);
         } else {
           setTrackersSectionVisible(TRACKERS_LAST_HAS_DATA);
         }
@@ -8120,13 +8121,18 @@ async function refreshRealtimeEverything() {
             trackersSection &&
             !trackersSection.classList.contains("trackers-hidden") &&
             !trackersSection.classList.contains("is-collapsed");
-          if (trackersVisible && hasTrackerData) renderTrackersPanel();
+          if (trackersVisible && (hasTrackerData || hasOrthomosaic)) renderTrackersPanel();
         }
       }
     } else {
       TRACKERS_DATA = [];
       TRACKERS_PLANT_CENTER = null;
       TRACKERS_PLANT_BOUNDS = null;
+      const hasOrthomosaic = await ensureTrackersOrthomosaicForCurrentPlant();
+      if (hasOrthomosaic) {
+        TRACKERS_LAST_HAS_DATA = true;
+        setTrackersSectionVisible(true);
+      }
       renderTrackersPanel();
       console.error("[refreshRealtimeEverything][trackers] erro", trackersRes.reason);
     }
@@ -8179,6 +8185,220 @@ let TRACKERS_USER_OPENED = false;
 let TRACKERS_LAST_HAS_DATA = false;
 let TRACKERS_MAP = null;
 let TRACKERS_MARKERS_LAYER = null;
+let TRACKERS_ORTHO_LAYER = null;
+let TRACKERS_ORTHO_MANIFEST = null;
+let TRACKERS_ORTHO_ENTRY = null;
+let TRACKERS_ORTHO_VISIBLE = true;
+let TRACKERS_ORTHO_CATALOG_PROMISE = null;
+let TRACKERS_ORTHO_MANIFEST_PROMISE = null;
+const TRACKERS_ORTHO_TILES = new Map();
+const TRACKERS_ORTHO_CATALOG_URL = "assets/orthomosaics/catalog.json?v=20260828";
+
+function normalizeTrackerPlantName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+async function loadTrackersOrthomosaicCatalog() {
+  if (!TRACKERS_ORTHO_CATALOG_PROMISE) {
+    TRACKERS_ORTHO_CATALOG_PROMISE = fetch(TRACKERS_ORTHO_CATALOG_URL, { cache: "force-cache" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`catálogo de ortomosaicos: HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((payload) => Array.isArray(payload?.items) ? payload.items : [])
+      .catch((error) => {
+        TRACKERS_ORTHO_CATALOG_PROMISE = null;
+        console.warn("[trackers/orthomosaic] catálogo indisponível", error);
+        return [];
+      });
+  }
+  return TRACKERS_ORTHO_CATALOG_PROMISE;
+}
+
+function findTrackersOrthomosaicEntry(catalog) {
+  const plantId = Number(PLANT_ID);
+  const plantName = normalizeTrackerPlantName(PLANT_STATE?.name);
+  return (catalog || []).find((entry) => {
+    const idMatch = Number.isFinite(plantId)
+      && Array.isArray(entry?.plant_ids)
+      && entry.plant_ids.some((id) => Number(id) === plantId);
+    const names = [entry?.name, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])]
+      .map(normalizeTrackerPlantName)
+      .filter(Boolean);
+    return idMatch || (!!plantName && names.includes(plantName));
+  }) || null;
+}
+
+function trackerOrthoHasValidBounds(source = TRACKERS_ORTHO_MANIFEST) {
+  const bounds = source?.bounds;
+  return Array.isArray(bounds)
+    && bounds.length === 2
+    && bounds.every((point) => Array.isArray(point)
+      && point.length === 2
+      && point.every((value) => Number.isFinite(Number(value))));
+}
+
+function formatTrackersOrthomosaicDate(value) {
+  if (!value) return "Levantamento georreferenciado";
+  const [year, month, day] = String(value).split("-").map(Number);
+  if (!year || !month || !day) return "Levantamento georreferenciado";
+  return `Captura de ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
+}
+
+function updateTrackersOrthomosaicUi() {
+  const card = document.getElementById("trackersOrthoCard");
+  const toggle = document.getElementById("trackersOrthoToggle");
+  const meta = document.getElementById("trackersOrthoMeta");
+  const available = !!TRACKERS_ORTHO_ENTRY;
+  if (card) card.hidden = !available;
+  if (toggle) {
+    toggle.classList.toggle("is-active", available && TRACKERS_ORTHO_VISIBLE);
+    toggle.setAttribute("aria-pressed", available && TRACKERS_ORTHO_VISIBLE ? "true" : "false");
+    toggle.disabled = !available;
+    const label = toggle.querySelector("span");
+    if (label) label.textContent = TRACKERS_ORTHO_VISIBLE ? "Ortomosaico ligado" : "Ortomosaico desligado";
+  }
+  if (meta) {
+    meta.textContent = TRACKERS_ORTHO_MANIFEST
+      ? formatTrackersOrthomosaicDate(TRACKERS_ORTHO_MANIFEST.captured_at)
+      : "Carregando imagem aérea…";
+  }
+}
+
+function clearTrackersOrthomosaicTiles() {
+  TRACKERS_ORTHO_TILES.forEach((overlay) => {
+    if (TRACKERS_ORTHO_LAYER) TRACKERS_ORTHO_LAYER.removeLayer(overlay);
+  });
+  TRACKERS_ORTHO_TILES.clear();
+}
+
+function updateTrackersOrthomosaicTiles() {
+  if (!TRACKERS_MAP || !TRACKERS_ORTHO_LAYER || !TRACKERS_ORTHO_VISIBLE || !TRACKERS_ORTHO_MANIFEST) {
+    clearTrackersOrthomosaicTiles();
+    return;
+  }
+
+  const manifest = TRACKERS_ORTHO_MANIFEST;
+  const minLevel = Number(manifest.min_level) || 1;
+  const maxLevel = Number(manifest.max_level) || minLevel;
+  const offset = Number(manifest.zoom_level_offset) || 15;
+  const level = Math.max(minLevel, Math.min(maxLevel, Math.round(TRACKERS_MAP.getZoom() - offset)));
+  const tiles = Array.isArray(manifest.levels?.[String(level)]) ? manifest.levels[String(level)] : [];
+  const view = TRACKERS_MAP.getBounds().pad(0.18);
+  const wanted = new Map();
+
+  tiles.forEach((tile) => {
+    if (!Array.isArray(tile) || tile.length < 5) return;
+    const [south, west, north, east, path] = tile;
+    if (Number(north) < view.getSouth() || Number(south) > view.getNorth()
+      || Number(east) < view.getWest() || Number(west) > view.getEast()) return;
+    wanted.set(`${level}:${path}`, tile);
+  });
+
+  TRACKERS_ORTHO_TILES.forEach((overlay, key) => {
+    if (wanted.has(key)) return;
+    TRACKERS_ORTHO_LAYER.removeLayer(overlay);
+    TRACKERS_ORTHO_TILES.delete(key);
+  });
+
+  wanted.forEach((tile, key) => {
+    if (TRACKERS_ORTHO_TILES.has(key)) return;
+    const [south, west, north, east, path] = tile;
+    const url = encodeURI(`${manifest.tile_base_url}${path}`);
+    const overlay = L.imageOverlay(url, [[south, west], [north, east]], {
+      pane: "trackersOrthomosaicPane",
+      opacity: 1,
+      interactive: false,
+      className: "tracker-orthomosaic-tile"
+    });
+    overlay.addTo(TRACKERS_ORTHO_LAYER);
+    TRACKERS_ORTHO_TILES.set(key, overlay);
+  });
+}
+
+async function ensureTrackersOrthomosaicForCurrentPlant() {
+  const catalog = await loadTrackersOrthomosaicCatalog();
+  const entry = findTrackersOrthomosaicEntry(catalog);
+  if (!entry) {
+    TRACKERS_ORTHO_ENTRY = null;
+    TRACKERS_ORTHO_MANIFEST = null;
+    TRACKERS_ORTHO_MANIFEST_PROMISE = null;
+    clearTrackersOrthomosaicTiles();
+    updateTrackersOrthomosaicUi();
+    return false;
+  }
+
+  if (TRACKERS_ORTHO_ENTRY?.slug === entry.slug && TRACKERS_ORTHO_MANIFEST) {
+    updateTrackersOrthomosaicUi();
+    updateTrackersOrthomosaicTiles();
+    return true;
+  }
+  if (TRACKERS_ORTHO_ENTRY?.slug === entry.slug && TRACKERS_ORTHO_MANIFEST_PROMISE) {
+    try {
+      await TRACKERS_ORTHO_MANIFEST_PROMISE;
+      return !!TRACKERS_ORTHO_MANIFEST;
+    } catch {
+      return false;
+    }
+  }
+
+  TRACKERS_ORTHO_ENTRY = entry;
+  TRACKERS_ORTHO_MANIFEST = null;
+  clearTrackersOrthomosaicTiles();
+  updateTrackersOrthomosaicUi();
+  const expectedSlug = entry.slug;
+  TRACKERS_ORTHO_MANIFEST_PROMISE = fetch(`${entry.manifest_url}?v=20260828`, { cache: "force-cache" })
+    .then((res) => {
+      if (!res.ok) throw new Error(`${entry.name}: HTTP ${res.status}`);
+      return res.json();
+    });
+
+  try {
+    const manifest = await TRACKERS_ORTHO_MANIFEST_PROMISE;
+    if (TRACKERS_ORTHO_ENTRY?.slug !== expectedSlug) return false;
+    TRACKERS_ORTHO_MANIFEST = manifest;
+    updateTrackersOrthomosaicUi();
+    updateTrackersOrthomosaicTiles();
+    return true;
+  } catch (error) {
+    console.warn("[trackers/orthomosaic] manifest indisponível", error);
+    if (TRACKERS_ORTHO_ENTRY?.slug === expectedSlug) {
+      TRACKERS_ORTHO_ENTRY = null;
+      TRACKERS_ORTHO_MANIFEST = null;
+      updateTrackersOrthomosaicUi();
+    }
+    return false;
+  } finally {
+    TRACKERS_ORTHO_MANIFEST_PROMISE = null;
+  }
+}
+
+function fitTrackersMapToContent() {
+  if (!TRACKERS_MAP) return;
+  if (trackerOrthoHasValidBounds()) {
+    TRACKERS_MAP.fitBounds(TRACKERS_ORTHO_MANIFEST.bounds, { padding: [18, 18], maxZoom: 20 });
+  } else if (TRACKERS_PLANT_BOUNDS &&
+    Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
+    Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
+    Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
+    Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
+    TRACKERS_MAP.fitBounds([
+      [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
+      [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
+    ], { padding: [20, 20] });
+  } else if (TRACKERS_PLANT_CENTER &&
+    Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
+    Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
+    TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
+  } else {
+    TRACKERS_MAP.setView([-14.235, -51.9253], 4);
+  }
+}
 
 // 🔑 12/08/2026 — este vocabulário TEM que ser o mesmo que o
 // /trackers/realtime emite. Ele listava 10 estados copiados do gerador de
@@ -8396,7 +8616,11 @@ function renderTrackersNodes() {
 
   const fallback = document.getElementById("trackersMapFallback");
   if (!valid.length) {
-    if (fallback) fallback.hidden = false;
+    if (fallback) fallback.hidden = !!TRACKERS_ORTHO_MANIFEST;
+    if (TRACKERS_ORTHO_MANIFEST && !TRACKERS_HAS_FITTED_ONCE) {
+      fitTrackersMapToContent();
+      if (trackersMapIsSized()) TRACKERS_HAS_FITTED_ONCE = true;
+    }
     return;
   }
   if (fallback) fallback.hidden = true;
@@ -8434,19 +8658,8 @@ function renderTrackersNodes() {
   });
 
   if (!TRACKERS_HAS_FITTED_ONCE) {
-    if (TRACKERS_PLANT_BOUNDS &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
-      TRACKERS_MAP.fitBounds([
-        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
-        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
-      ], { padding: [20, 20] });
-    } else if (TRACKERS_PLANT_CENTER &&
-        Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
-        Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
-      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
+    if (trackerOrthoHasValidBounds() || TRACKERS_PLANT_BOUNDS || TRACKERS_PLANT_CENTER) {
+      fitTrackersMapToContent();
     } else if (bounds.length) {
       TRACKERS_MAP.fitBounds(bounds, { padding: [20, 20] });
     }
@@ -8459,6 +8672,8 @@ function renderTrackersNodes() {
 
 function renderTrackersPanel() {
   renderTrackersLegend();
+  updateTrackersOrthomosaicUi();
+  updateTrackersOrthomosaicTiles();
   renderTrackersNodes();
 }
 
@@ -8518,19 +8733,32 @@ function initTrackersPanel() {
   TRACKERS_HAS_FITTED_ONCE = false;
   TRACKERS_MAP = L.map(mapEl, {
     zoomControl: false,
-    attributionControl: false
+    attributionControl: false,
+    minZoom: 3,
+    maxZoom: 23
   }).setView([-14.235, -51.9253], 4);
 
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     subdomains: "abcd",
-    maxZoom: 20
+    maxNativeZoom: 20,
+    maxZoom: 23
   }).addTo(TRACKERS_MAP);
+  TRACKERS_MAP.createPane("trackersOrthomosaicPane");
+  TRACKERS_MAP.getPane("trackersOrthomosaicPane").style.zIndex = "250";
+  TRACKERS_ORTHO_LAYER = L.layerGroup().addTo(TRACKERS_MAP);
   TRACKERS_MARKERS_LAYER = L.layerGroup().addTo(TRACKERS_MAP);
+  TRACKERS_MAP.on("moveend zoomend", updateTrackersOrthomosaicTiles);
 
   document.getElementById("trackerModeState")?.addEventListener("click", () => setTrackerMode("state"));
   document.getElementById("trackerModeAngle")?.addEventListener("click", () => setTrackerMode("angle"));
   document.getElementById("trackerModeError")?.addEventListener("click", () => setTrackerMode("error"));
   document.getElementById("trackersSearchInput")?.addEventListener("input", (e) => filterTrackers(e.target.value));
+  document.getElementById("trackersOrthoToggle")?.addEventListener("click", () => {
+    if (!TRACKERS_ORTHO_ENTRY) return;
+    TRACKERS_ORTHO_VISIBLE = !TRACKERS_ORTHO_VISIBLE;
+    updateTrackersOrthomosaicUi();
+    updateTrackersOrthomosaicTiles();
+  });
 
   document.getElementById("trackersZoomIn")?.addEventListener("click", () => {
     if (TRACKERS_MAP) TRACKERS_MAP.zoomIn();
@@ -8539,25 +8767,10 @@ function initTrackersPanel() {
     if (TRACKERS_MAP) TRACKERS_MAP.zoomOut();
   });
   document.getElementById("trackersZoomReset")?.addEventListener("click", () => {
-    if (!TRACKERS_MAP) return;
-    if (TRACKERS_PLANT_BOUNDS &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lat)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lat)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.min_lng)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_BOUNDS.max_lng))) {
-      TRACKERS_MAP.fitBounds([
-        [Number(TRACKERS_PLANT_BOUNDS.min_lat), Number(TRACKERS_PLANT_BOUNDS.min_lng)],
-        [Number(TRACKERS_PLANT_BOUNDS.max_lat), Number(TRACKERS_PLANT_BOUNDS.max_lng)]
-      ], { padding: [20, 20] });
-    } else if (TRACKERS_PLANT_CENTER &&
-      Number.isFinite(Number(TRACKERS_PLANT_CENTER.latitude)) &&
-      Number.isFinite(Number(TRACKERS_PLANT_CENTER.longitude))) {
-      TRACKERS_MAP.setView([Number(TRACKERS_PLANT_CENTER.latitude), Number(TRACKERS_PLANT_CENTER.longitude)], 18);
-    } else {
-      TRACKERS_MAP.setView([-14.235, -51.9253], 4);
-    }
+    fitTrackersMapToContent();
   });
 
+  void loadTrackersOrthomosaicCatalog();
   renderTrackersPanel();
   setTrackersSectionVisible(false);
   setTrackersCollapsed(true);
