@@ -724,10 +724,12 @@
                 <small id="trackersOrthoMeta">Carregando imagem aérea…</small>
               </div>
             </div>
-            <button id="trackersOrthoToggle" class="trackers-ortho-toggle is-active" type="button" aria-pressed="true">
-              <i class="fa-solid fa-eye" aria-hidden="true"></i>
-              <span>Ortomosaico ligado</span>
-            </button>
+            <div class="trackers-ortho-modes" role="group" aria-label="Visualização do ortomosaico">
+              <button class="trackers-ortho-mode is-active" type="button" data-ortho-mode="original" aria-pressed="true">Original</button>
+              <button class="trackers-ortho-mode" type="button" data-ortho-mode="transparent" aria-pressed="false">Transparente</button>
+              <button class="trackers-ortho-mode" type="button" data-ortho-mode="hidden" aria-pressed="false">Oculto</button>
+            </div>
+            <small class="trackers-map-hint"><i class="fa-solid fa-hand" aria-hidden="true"></i> Arraste o mapa para navegar</small>
           </div>
 
           <div class="trackers-zoom-controls">

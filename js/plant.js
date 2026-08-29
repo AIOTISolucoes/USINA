@@ -8188,7 +8188,7 @@ let TRACKERS_MARKERS_LAYER = null;
 let TRACKERS_ORTHO_LAYER = null;
 let TRACKERS_ORTHO_MANIFEST = null;
 let TRACKERS_ORTHO_ENTRY = null;
-let TRACKERS_ORTHO_VISIBLE = true;
+let TRACKERS_ORTHO_MODE = "original";
 let TRACKERS_ORTHO_CATALOG_PROMISE = null;
 let TRACKERS_ORTHO_MANIFEST_PROMISE = null;
 const TRACKERS_ORTHO_TILES = new Map();
@@ -8250,19 +8250,23 @@ function formatTrackersOrthomosaicDate(value) {
   return `Captura de ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
 }
 
+function getTrackersOrthomosaicOpacity() {
+  if (TRACKERS_ORTHO_MODE === "transparent") return 0.56;
+  if (TRACKERS_ORTHO_MODE === "hidden") return 0;
+  return 1;
+}
+
 function updateTrackersOrthomosaicUi() {
   const card = document.getElementById("trackersOrthoCard");
-  const toggle = document.getElementById("trackersOrthoToggle");
   const meta = document.getElementById("trackersOrthoMeta");
   const available = !!TRACKERS_ORTHO_ENTRY;
   if (card) card.hidden = !available;
-  if (toggle) {
-    toggle.classList.toggle("is-active", available && TRACKERS_ORTHO_VISIBLE);
-    toggle.setAttribute("aria-pressed", available && TRACKERS_ORTHO_VISIBLE ? "true" : "false");
-    toggle.disabled = !available;
-    const label = toggle.querySelector("span");
-    if (label) label.textContent = TRACKERS_ORTHO_VISIBLE ? "Ortomosaico ligado" : "Ortomosaico desligado";
-  }
+  document.querySelectorAll("[data-ortho-mode]").forEach((button) => {
+    const active = available && button.dataset.orthoMode === TRACKERS_ORTHO_MODE;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+    button.disabled = !available;
+  });
   if (meta) {
     meta.textContent = TRACKERS_ORTHO_MANIFEST
       ? formatTrackersOrthomosaicDate(TRACKERS_ORTHO_MANIFEST.captured_at)
@@ -8278,7 +8282,7 @@ function clearTrackersOrthomosaicTiles() {
 }
 
 function updateTrackersOrthomosaicTiles() {
-  if (!TRACKERS_MAP || !TRACKERS_ORTHO_LAYER || !TRACKERS_ORTHO_VISIBLE || !TRACKERS_ORTHO_MANIFEST) {
+  if (!TRACKERS_MAP || !TRACKERS_ORTHO_LAYER || TRACKERS_ORTHO_MODE === "hidden" || !TRACKERS_ORTHO_MANIFEST) {
     clearTrackersOrthomosaicTiles();
     return;
   }
@@ -8287,6 +8291,7 @@ function updateTrackersOrthomosaicTiles() {
   const minLevel = Number(manifest.min_level) || 1;
   const maxLevel = Number(manifest.max_level) || minLevel;
   const offset = Number(manifest.zoom_level_offset) || 15;
+  const opacity = getTrackersOrthomosaicOpacity();
   const level = Math.max(minLevel, Math.min(maxLevel, Math.round(TRACKERS_MAP.getZoom() - offset)));
   const tiles = Array.isArray(manifest.levels?.[String(level)]) ? manifest.levels[String(level)] : [];
   const view = TRACKERS_MAP.getBounds().pad(0.18);
@@ -8301,7 +8306,10 @@ function updateTrackersOrthomosaicTiles() {
   });
 
   TRACKERS_ORTHO_TILES.forEach((overlay, key) => {
-    if (wanted.has(key)) return;
+    if (wanted.has(key)) {
+      overlay.setOpacity(opacity);
+      return;
+    }
     TRACKERS_ORTHO_LAYER.removeLayer(overlay);
     TRACKERS_ORTHO_TILES.delete(key);
   });
@@ -8312,7 +8320,7 @@ function updateTrackersOrthomosaicTiles() {
     const url = encodeURI(`${manifest.tile_base_url}${path}`);
     const overlay = L.imageOverlay(url, [[south, west], [north, east]], {
       pane: "trackersOrthomosaicPane",
-      opacity: 1,
+      opacity,
       interactive: false,
       className: "tracker-orthomosaic-tile"
     });
@@ -8733,15 +8741,22 @@ function initTrackersPanel() {
   TRACKERS_HAS_FITTED_ONCE = false;
   TRACKERS_MAP = L.map(mapEl, {
     zoomControl: false,
-    attributionControl: false,
+    attributionControl: true,
     minZoom: 3,
-    maxZoom: 23
+    maxZoom: 23,
+    dragging: true,
+    touchZoom: true,
+    scrollWheelZoom: true,
+    doubleClickZoom: true,
+    boxZoom: true,
+    keyboard: true
   }).setView([-14.235, -51.9253], 4);
+  TRACKERS_MAP.attributionControl.setPrefix(false);
 
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    subdomains: "abcd",
-    maxNativeZoom: 20,
-    maxZoom: 23
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxNativeZoom: 19,
+    maxZoom: 23,
+    attribution: "&copy; OpenStreetMap contributors"
   }).addTo(TRACKERS_MAP);
   TRACKERS_MAP.createPane("trackersOrthomosaicPane");
   TRACKERS_MAP.getPane("trackersOrthomosaicPane").style.zIndex = "250";
@@ -8753,11 +8768,15 @@ function initTrackersPanel() {
   document.getElementById("trackerModeAngle")?.addEventListener("click", () => setTrackerMode("angle"));
   document.getElementById("trackerModeError")?.addEventListener("click", () => setTrackerMode("error"));
   document.getElementById("trackersSearchInput")?.addEventListener("input", (e) => filterTrackers(e.target.value));
-  document.getElementById("trackersOrthoToggle")?.addEventListener("click", () => {
-    if (!TRACKERS_ORTHO_ENTRY) return;
-    TRACKERS_ORTHO_VISIBLE = !TRACKERS_ORTHO_VISIBLE;
-    updateTrackersOrthomosaicUi();
-    updateTrackersOrthomosaicTiles();
+  document.querySelectorAll("[data-ortho-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!TRACKERS_ORTHO_ENTRY) return;
+      const mode = button.dataset.orthoMode;
+      if (!['original', 'transparent', 'hidden'].includes(mode)) return;
+      TRACKERS_ORTHO_MODE = mode;
+      updateTrackersOrthomosaicUi();
+      updateTrackersOrthomosaicTiles();
+    });
   });
 
   document.getElementById("trackersZoomIn")?.addEventListener("click", () => {
