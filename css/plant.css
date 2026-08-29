@@ -3079,6 +3079,11 @@ body.plant-enter #relaySection{
   font-size:13px;
   background:rgba(3,7,6,.72);
   z-index: 350;
+  pointer-events:none;
+}
+
+.trackers-map-fallback[hidden]{
+  display:none;
 }
 
 .tracker-node{
@@ -3103,6 +3108,7 @@ body.plant-enter #relaySection{
 #trackersMap .tracker-orthomosaic-tile{
   image-rendering:auto;
   user-select:none;
+  pointer-events:none !important;
   transition:opacity .22s ease;
 }
 
