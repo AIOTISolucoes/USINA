@@ -7873,6 +7873,7 @@ body.plant-map-mode .cabine-map-stage {
 }
 .unif-side-status--online  { color: rgba(127,208,85,.95); background: rgba(127,208,85,.12); }
 .unif-side-status--alarm   { color: rgba(239,159,39,.95); background: rgba(239,159,39,.12); }
+.unif-side-status--fault   { color: #ff4d4f; background: rgba(255,77,79,.15); }
 .unif-side-status--offline { color: rgba(205,238,221,.45); background: rgba(80,100,90,.2); }
 .unif-side-row-action {
   width: 20px;

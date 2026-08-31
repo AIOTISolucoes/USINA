@@ -236,7 +236,37 @@ function fmtAmp(v) {
 // ======================================================
 // HELPERS — INVERTER STATUS (inverter_status / state_operation / working_status)
 // ======================================================
+function getInverterCommunicationFault(inv) {
+  const candidates = [
+    inv?.communication_fault_code,
+    inv?.communication_fault,
+    inv?.event?.communication_fault,
+    inv?.event?.raw?.communication_fault
+  ];
+
+  // normalizeCommunicationFault e o parser canonico da flag (ja usado por rele
+  // e medidor). Reusar em vez de duplicar: dois parsers para a mesma flag foi
+  // exatamente como o inversor e o rele acabaram com regras diferentes.
+  for (const value of candidates) {
+    const code = normalizeCommunicationFault(value);
+    if (code !== null) return code;
+  }
+  return null;
+}
+
 function getInverterStatusInfo(inv) {
+  // A flag de comunicacao tem precedencia sobre o ultimo estado operacional:
+  // com 28 o pacote e recente, mas os valores pertencem ao ultimo snapshot
+  // valido. Exibir Run/verde nesse caso esconde justamente a falha de campo.
+  //
+  // COR: cinza, junto com "desligado" -- NAO vermelho. 28 quer dizer que o CLP
+  // publicou no horario certo e nao conseguiu ler o equipamento; vermelho fica
+  // reservado ao Fault de verdade (state 3). Se "sem comunicacao" tambem pinta
+  // vermelho, o vermelho para de significar alguma coisa e ninguem mais olha.
+  if (getInverterCommunicationFault(inv) === 28) {
+    return { code: 28, label: "Sem comunicação", cls: "inv-st-off" };
+  }
+
   const raw = inv?.inverter_status ?? inv?.state_operation;
   const code = Number(raw);
   if (!Number.isFinite(code)) return { code: null, label: "—", cls: "inv-st-unknown" };
@@ -704,9 +734,15 @@ function relayOnlineFromPayload(relayItem) {
     eventRaw?.communication_fault
   ];
 
+  // 28 e decisivo e derruba na hora.
+  // 192 NAO pode decidir sozinho: ele diz apenas que a ULTIMA leitura foi
+  // valida, e essa leitura pode ser de dias atras -- o valor vem do evento,
+  // que so grava quando MUDA, e a consulta do evento nao tem limite de tempo.
+  // Antes o 192 dava `return true` aqui e o rele morto ficava VERDE para
+  // sempre, sobrescrevendo o is_online da API, que ja considera a janela.
+  // Com 192 seguimos adiante e deixamos a API decidir.
   for (const c of commCandidates) {
-    const commDecision = commFaultMeansOnline(c);
-    if (commDecision !== null) return commDecision;
+    if (commFaultMeansOnline(c) === false) return false;
   }
 
   const statusCandidates = [
@@ -763,9 +799,12 @@ function multimeterOnlineFromPayload(item) {
     data?.communication_fault
   ];
 
+  // Mesma regra do rele: 28 derruba na hora, 192 nao promove sozinho.
+  // O is_online que a API manda para o medidor ja exige leitura fresca E
+  // codigo diferente de 28; deixar o 192 sobrescrever isso ressuscitava
+  // medidor morto na tela.
   for (const c of commCandidates) {
-    const commDecision = commFaultMeansOnline(c);
-    if (commDecision !== null) return commDecision;
+    if (commFaultMeansOnline(c) === false) return false;
   }
 
   const statusCandidates = [
@@ -2031,24 +2070,13 @@ function dedupInvertersById(list) {
 
 function computeInverterChipsByTelemetry(invertersRaw) {
   const inverters = dedupInvertersById(invertersRaw);
-  const now = Date.now();
 
   let noComm = 0;
   let gen = 0;
   let off = 0;
 
   for (const inv of inverters) {
-    const lastMs = parseTsToMs(
-      inv.last_ts ??
-      inv.timestamp ??
-      inv.event_ts ??
-      inv.ts ??
-      inv.last_reading_at ??
-      inv.last_reading_ts
-    );
-    const age = lastMs ? (now - lastMs) : Number.POSITIVE_INFINITY;
-
-    if (age > INVERTER_NO_COMM_AFTER_MS) {
+    if (!isOnlineByFreshness(inv)) {
       noComm++;
       continue;
     }
@@ -4295,9 +4323,26 @@ function buildUnifDeviceList(cabinFilter, search) {
 }
 
 function buildUnifSideRow(d, deviceAlarms = []) {
-  const _sideStInfo = d.type === "inverter" ? getInverterStatusInfo(d) : null;
-  const sc = d.status === "alarm" ? "alarm" : (_sideStInfo ? _sideStInfo.cls : (d.status === "online" ? "online" : "offline"));
-  const sl = d.status === "alarm" ? "Alerta" : (_sideStInfo && _sideStInfo.label !== "—" ? _sideStInfo.label : (d.status === "online" ? "Online" : "Offline"));
+  const _sideStInfo = d.type === "inverter" ? getInverterStatusInfo(d.data ?? d) : null;
+  const _isCommFault = d.type === "inverter" && getInverterCommunicationFault(d.data ?? d) === 28;
+  // A pilula lateral so tem 4 estilos (--online/--alarm/--fault/--offline). As
+  // classes inv-st-* nao existem nesse namespace: passa-las direto deixava a
+  // pilula do inversor sem estilo nenhum. Traduz aqui.
+  const _sideCls = {
+    "inv-st-run": "online",
+    "inv-st-fault": "fault",
+    "inv-st-standby": "offline",
+    "inv-st-off": "offline",
+    "inv-st-unknown": "offline"
+  };
+  const sc = d.status === "alarm" ? "alarm"
+    : _isCommFault ? "offline"
+    : d.status === "offline" ? "offline"
+    : (_sideStInfo ? (_sideCls[_sideStInfo.cls] || "offline") : "online");
+  const sl = d.status === "alarm" ? "Alerta"
+    : _isCommFault ? "Sem comunicação"
+    : d.status === "offline" ? "Offline"
+    : (_sideStInfo && _sideStInfo.label !== "—" ? _sideStInfo.label : "Online");
   const iconMap = {
     inverter:    `<svg viewBox="0 0 20 20" fill="none"><rect x="1" y="3" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.2"/><path d="M10 5L8 10h3L7 15l9-7h-4l2-3z" fill="currentColor" opacity=".7"/></svg>`,
     multimeter:  `<svg viewBox="0 0 20 20" fill="none"><rect x="2" y="2" width="16" height="16" rx="2" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="9" y1="6" x2="9" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".7"/><line x1="12" y1="6" x2="12" y2="14" stroke="currentColor" stroke-width="1.1" opacity=".5"/></svg>`,
@@ -5799,7 +5844,14 @@ function setInverterMetricCell(cellEl, metricText) {
 
 function setRowOnlineUi(rowEl, online, inv) {
   const stInfo = inv ? getInverterStatusInfo(inv) : null;
-  const statusCls = stInfo ? stInfo.cls : (online ? "inv-st-run" : "inv-st-off");
+  // Offline nao pode herdar inv-st-run: essa classe usa !important e repintava
+  // de VERDE a bolinha de uma linha ja marcada como offline (era o bug).
+  // Mas offline tambem nao e "falha": cai em CINZA (inv-st-off), a mesma cor de
+  // desligado. O vermelho so sobrevive se o ultimo estado conhecido era Fault
+  // de verdade -- isso e informacao, nao ruido.
+  const statusCls = online
+    ? (stInfo ? stInfo.cls : "inv-st-run")
+    : (stInfo && stInfo.cls === "inv-st-fault" ? "inv-st-fault" : "inv-st-off");
 
   rowEl.classList.remove("online", "offline", "inv-st-off", "inv-st-standby", "inv-st-run", "inv-st-fault", "inv-st-unknown");
   rowEl.classList.add(online ? "online" : "offline", statusCls);
@@ -5812,6 +5864,11 @@ function setRowOnlineUi(rowEl, online, inv) {
 }
 
 function isOnlineByFreshness(inv) {
+  // Receber um pacote nao prova que o CLP conseguiu ler o equipamento.
+  // 28 e uma falha explicita e vence a heuristica temporal imediatamente.
+  if (getInverterCommunicationFault(inv) === 28) return false;
+  if (inv?.is_communication_ok === false) return false;
+
   const lastMs = getInvTsMs(inv);
   if (!lastMs) return false;
   const ageMs = Date.now() - lastMs;

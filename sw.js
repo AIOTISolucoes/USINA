@@ -1,4 +1,4 @@
-const CACHE_NAME = "aioti-v7";
+const CACHE_NAME = "aioti-v8";   // communication_fault=28 invalida o cache do plant.js
 // caminhos relativos ao sw.js: funcionam na raiz (produção) e em
 // subpath (pipeline de teste github.io/USINA/)
 const SHELL = [
