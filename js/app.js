@@ -9502,11 +9502,12 @@ function _appReportOpenFullPanel(data) {
         ${/* Sem pluviômetro o campo SOME. Antes ele mostrava "0 / 7 dias", que
               se lê como "não choveu em 7 dias" — uma afirmação que a plataforma
               não tinha como fazer, porque não havia sensor nenhum. */ ""}
-        ${/* `!== false` e não `truthy`: numa Lambda antiga o campo não existe e
-              vem `undefined`, que esconderia a chuva até nas usinas que TÊM
-              pluviômetro. Só o `false` explícito, que só a Lambda nova manda,
-              apaga o campo. */ ""}
-        ${w.has_rain_sensor !== false ? `<div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_days || 0}<span class="ronda-full-kpi-unit">/ ${w.total_days || 0} dias</span></div></div>` : ""}
+        ${/* Quem manda é `has_rain_gauge` (existe pluviômetro medindo), não
+              `has_rain_sensor` (o campo chega, o que é verdade na frota toda).
+              `!== false` e não `truthy` porque numa Lambda antiga o campo não
+              existe e vem `undefined` — aí mantém o comportamento anterior em
+              vez de sumir com tudo. */ ""}
+        ${w.has_rain_gauge !== false ? `<div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva ${_rondaInfoBtn(`${_rondaLabel('Chuva')} — Dias com chuva detectada no período.<br>${_rondaNote('Só aparece em usina com pluviômetro medindo de fato. Todas as estações publicam o campo de chuva mesmo sem instrumento instalado, então a plataforma confere o histórico do acumulador em milímetros antes de mostrar. Sem registro de milímetro, o card não aparece em vez de afirmar que não choveu.')}`)}</div><div class="ronda-full-kpi-value">${w.rain_days || 0}<span class="ronda-full-kpi-unit">/ ${w.total_days || 0} dias</span></div></div>` : ""}
       </div>
       ${w.daily_irradiance && w.daily_irradiance.length > 1 ? `<div style="margin-top:10px;">${_rpSparklineSVG(w.daily_irradiance, "#facc15", 260, 40)}</div>` : ""}
     </div>
@@ -9581,6 +9582,7 @@ function _appReportOpenFullPanel(data) {
                     : m < 1440 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`
                     : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
     const _abertos = _alEv.filter(e => e.still_open).length;
+    const _noturnos = _alEv.filter(e => e.nocturnal).length;
     body += `<div class="ronda-card span-full" style="${cardDelay()}">
       <div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes ${_rondaInfoBtn(`${_rondaLabel('Alarmes do período')} — Ordenados do mais crítico para o menos crítico e, dentro da mesma severidade, do mais recente para o mais antigo.<br>🔴 Crítico&emsp;🟡 Médio&emsp;🔵 Baixo<br><br>${_rondaLabel('Início e fim')}<br>O registro de alarme funciona como máquina de estado: grava uma linha quando o alarme abre e outra quando fecha. O par forma o episódio mostrado aqui.<br>${_rondaNote('Alarme que já estava aberto ANTES do início do período não aparece, porque a linha de abertura está fora da janela consultada. Alarme que ainda não fechou aparece como "em aberto" e sem duração — o sistema não supõe que ele fechou agora.')}`)}</div><div class="ronda-card-subtitle">${data.total_alarms || 0} ocorrências em ${alarms.length} dispositivo(s)${_abertos ? ` · <b style="color:#ef4444;">${_abertos} em aberto</b>` : ""}</div></div></div>
       <div class="ronda-card-body" style="padding:0;">`;
@@ -9603,13 +9605,16 @@ function _appReportOpenFullPanel(data) {
 
     if (_alEv.length) {
       body += `<div style="padding:12px 16px 14px 16px;border-top:1px solid rgba(255,255,255,0.06);">
-        <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:8px;">Ocorrências em detalhe, do mais crítico ao menos crítico</div>
+        <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:8px;">Ocorrências em detalhe${_noturnos ? `, com <b style="color:#60a5fa;">${_noturnos} falha(s) de comunicação noturna</b> recuadas para o fim` : ", do mais crítico ao menos crítico"}</div>
         <div style="max-height:320px;overflow-y:auto;">`;
       _alEv.forEach(e => {
-        body += `<div class="ronda-full-alarm">
-          <div class="ronda-full-alarm-severity ${_sevCls(e.severity)}"></div>
+        // Noturno fica visível mas recuado: opacidade menor e um rótulo
+        // próprio. O episódio continua no relatório, só não disputa atenção
+        // com falha de verdade.
+        body += `<div class="ronda-full-alarm"${e.nocturnal ? ' style="opacity:.55;"' : ""}>
+          <div class="ronda-full-alarm-severity ${e.nocturnal ? "sev-low" : _sevCls(e.severity)}"></div>
           <div class="ronda-full-alarm-body">
-            <div class="ronda-full-alarm-device">${e.device_name || "—"} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.35);">${_sevNome(e.severity)}</span></div>
+            <div class="ronda-full-alarm-device">${e.device_name || "—"} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.35);">${_sevNome(e.severity)}</span>${e.nocturnal ? ` <span style="font-weight:700;font-size:9px;color:#60a5fa;background:rgba(59,130,246,0.12);border-radius:4px;padding:1px 5px;margin-left:2px;">noturno</span>` : ""}</div>
             <div class="ronda-full-alarm-desc">${e.description || "—"}</div>
             <div class="ronda-full-alarm-ts">Início ${e.started_at || "—"}${e.ended_at ? ` · Fim ${e.ended_at}` : ""}${e.duration_min != null ? ` · ${_dur(e.duration_min)}` : ""}</div>
           </div>
