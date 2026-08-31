@@ -6931,6 +6931,23 @@ select.pem-ctrl option {
 .report-btn-pdf:hover { background: linear-gradient(135deg, rgba(239,68,68,0.22), rgba(239,68,68,0.12)); box-shadow: 0 0 12px rgba(239,68,68,0.15); }
 .robot-report-content { overflow-y: auto; padding: 0; }
 
+/* ── Relatório: gráfico de várias séries ──
+   Isolar uma linha entre dezenas é o problema real destes gráficos. A solução
+   é apagar as outras no hover, e não engrossar a de cima: com 40 inversores,
+   destacar sem apagar continua ilegível.
+   O hover pega numa linha invisível de 11px (.rp-hit) porque traço de 1,9px é
+   alvo pequeno demais para o mouse — a linha visível fica sem pointer-events
+   para não disputar o evento com ela. */
+.rp-chart .rp-serie { transition: opacity .18s ease-out; }
+.rp-chart .rp-hit   { pointer-events: stroke; }
+.rp-chart .rp-line  { pointer-events: none; transition: stroke-width .18s ease-out; }
+.rp-chart:hover .rp-serie { opacity: .18; }
+.rp-chart .rp-serie:hover { opacity: 1; }
+.rp-chart .rp-serie:hover .rp-line { stroke-width: 3.2; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-chart .rp-serie, .rp-chart .rp-line { transition: none; }
+}
+
 /* ── Robot: estado silenciado (espiando de baixo) ── */
 .robot-muted-peek #robotImg {
   opacity: 0.55;

@@ -8664,6 +8664,9 @@ let _APP_REPORT_PLANTS = [];
 let _APP_REPORT_PLANT_ID = null;
 let _APP_REPORT_DEEP_LOADING = false;
 
+// Espelha o gate do backend de ?view=report-deep. O 403 da API continua sendo
+// a seguranca; este teste apenas evita oferecer um botao que o usuario nao pode
+// usar na aba Relatorio do portfolio.
 function _appCanDeepReport() {
   let user = {};
   try { user = JSON.parse(localStorage.getItem("user") || "{}"); } catch { user = {}; }
@@ -8772,6 +8775,8 @@ function _rpSparklineSVG(values, color, w, h) {
   </svg>`;
 }
 
+// Sparkline de temperatura INTERNA de um inversor. Azul = media diaria;
+// laranja = maxima diaria. Cada ponto mantem data e valor no tooltip nativo.
 function _rpInverterTemperatureSparkSVG(series, w = 180, h = 46, fallbackAvg = null, fallbackMax = null) {
   const valid = value => value !== null && value !== undefined && value !== ""
     && Number.isFinite(Number(value));
@@ -9014,6 +9019,20 @@ function _rpTrendSVG(data) {
   const prVals = trend.map(d => d.pr_pct);
   const maxGen = Math.max(...genVals, 1);
   const maxPr = 100;
+  // Irradiação diária (kWh/m²) como terceira série. É o pedido que mais muda a
+  // leitura do gráfico: geração caindo COM a irradiação é clima, geração caindo
+  // com irradiação estável é a usina. Sem esta linha as duas se pareciam.
+  //
+  // Escala PRÓPRIA, não o eixo do PR: irradiação vive em 0–9 e, jogada num eixo
+  // 0–100, viraria uma linha rente ao chão sem informação nenhuma. O valor real
+  // vai no tooltip e o topo da escala fica escrito no canto, senão a linha
+  // viraria enfeite sem unidade.
+  // Amarelo #facc15 é o que o painel já usa para sol (ícone solar e sparkline
+  // da estação); o âmbar de aviso é outro tom, e misturar os dois quebraria a
+  // regra de "mesma cor, mesmo significado" que vale na plataforma inteira.
+  const irrVals = trend.map(d => (d.irradiation_kwh_m2 != null ? d.irradiation_kwh_m2 : null));
+  const hasIrr = irrVals.some(v => v != null && v > 0);
+  const maxIrr = hasIrr ? Math.max(...irrVals.filter(v => v != null), 0.1) : 1;
 
   function toXY(vals, maxV, i) {
     const x = PAD + (i / (trend.length - 1)) * (W - PAD - PADR);
@@ -9043,6 +9062,9 @@ function _rpTrendSVG(data) {
   const genPts = genVals.map((_, i) => toXY(genVals, maxGen, i).join(",")).join(" ");
   const genArea = `M${PAD},${H - PAD} ` + genVals.map((_, i) => `L${toXY(genVals, maxGen, i).join(",")}`).join(" ") + ` L${W - PADR},${H - PAD} Z`;
   const prPts = prVals.map((v, i) => v != null ? toXY(prVals, maxPr, i).join(",") : null).filter(Boolean).join(" ");
+  const irrPts = hasIrr
+    ? irrVals.map((v, i) => v != null ? toXY(irrVals, maxIrr, i).join(",") : null).filter(Boolean).join(" ")
+    : "";
 
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
     <defs>
@@ -9056,6 +9078,11 @@ function _rpTrendSVG(data) {
     <text x="${PAD - 6}" y="${PAD - 10}" text-anchor="end" font-size="10" fill="rgba(255,255,255,0.4)">kWh</text>
     <text x="${W - PADR + 6}" y="${PAD - 10}" text-anchor="start" font-size="10" fill="rgba(255,255,255,0.4)">PR%</text>
     <path d="${genArea}" fill="url(#rpGenGrad)"/>
+    ${irrPts ? `<polyline points="${irrPts}" fill="none" stroke="#facc15" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>` : ""}
+    ${/* Canto superior ESQUERDO, dentro da área do gráfico. À direita este
+          rótulo caía em cima do "PR%" e do "100%" do eixo direito — os três
+          ocupavam o mesmo ponto e o resultado ficava ilegível. */ ""}
+    ${hasIrr ? `<text x="${PAD + 6}" y="${PAD - 10}" text-anchor="start" font-size="9" fill="#facc15" opacity="0.85">Irrad. máx ${_rpFmt(maxIrr, 1)} kWh/m²</text>` : ""}
     <polyline points="${genPts}" fill="none" stroke="#39e58c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#rpGlow)"/>
     ${prPts ? `<polyline points="${prPts}" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6 3" stroke-linecap="round"/>` : ""}
     <defs><filter id="rpGlow"><feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#39e58c" flood-opacity="0.3"/></filter></defs>
@@ -9063,13 +9090,19 @@ function _rpTrendSVG(data) {
       const [gx, gy] = toXY(genVals, maxGen, i);
       const pr = prVals[i] != null ? prVals[i].toFixed(1) + "%" : "—";
       const dt = d.date ? d.date.slice(5).replace("-", "/") : "";
+      // A caixa cresce só quando existe irradiação para mostrar. Reservar a
+      // quarta linha sempre deixaria um vão vazio nas usinas sem estação.
+      const tipH = hasIrr ? 54 : 42;
+      const tipY = Number(gy) - (hasIrr ? 64 : 52);
+      const irrTxt = irrVals[i] != null ? _rpFmt(irrVals[i], 2) + " kWh/m²" : "—";
       return `<g class="rp-dot" style="cursor:pointer;" onmouseover="this.querySelector('.rp-tip').style.display='block';this.querySelector('circle').setAttribute('r','6')" onmouseout="this.querySelector('.rp-tip').style.display='none';this.querySelector('circle').setAttribute('r','4')">
         <circle cx="${gx}" cy="${gy}" r="4" fill="#39e58c" stroke="#1a1d23" stroke-width="2" opacity="0.7"/>
         <g class="rp-tip" style="display:none;">
-          <rect x="${Number(gx) - 60}" y="${Number(gy) - 52}" width="120" height="42" rx="6" fill="rgba(10,18,12,0.95)" stroke="rgba(57,229,140,0.3)" stroke-width="1"/>
-          <text x="${gx}" y="${Number(gy) - 36}" text-anchor="middle" font-size="9" font-weight="700" fill="#39e58c">${dt}</text>
-          <text x="${gx}" y="${Number(gy) - 24}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.85)">Ger: ${(genVals[i] || 0).toFixed(1)} kWh</text>
-          <text x="${gx}" y="${Number(gy) - 14}" text-anchor="middle" font-size="9" fill="#60a5fa">PR: ${pr}</text>
+          <rect x="${Number(gx) - 60}" y="${tipY}" width="120" height="${tipH}" rx="6" fill="rgba(10,18,12,0.95)" stroke="rgba(57,229,140,0.3)" stroke-width="1"/>
+          <text x="${gx}" y="${tipY + 16}" text-anchor="middle" font-size="9" font-weight="700" fill="#39e58c">${dt}</text>
+          <text x="${gx}" y="${tipY + 28}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.85)">Ger: ${(genVals[i] || 0).toFixed(1)} kWh</text>
+          <text x="${gx}" y="${tipY + 38}" text-anchor="middle" font-size="9" fill="#60a5fa">PR: ${pr}</text>
+          ${hasIrr ? `<text x="${gx}" y="${tipY + 48}" text-anchor="middle" font-size="9" fill="#facc15">Irrad: ${irrTxt}</text>` : ""}
         </g>
       </g>`;
     }).join("")}
@@ -9088,6 +9121,96 @@ function _rpMiniSparkline(values, color) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+}
+
+// Gráfico de várias séries no mesmo par de eixos. Atende três pedidos com um
+// componente só: energia por inversor, corrente por inversor e desvio por
+// tracker. São o mesmo problema — "comparar as unidades entre si" — e três
+// gráficos diferentes só criariam três jeitos de ler a mesma coisa.
+//
+// 🔑 A decisão que define este gráfico é a COR. Uma paleta de 40 cores (a GPS
+// tem 40 inversores) não é legível e ainda brigaria com a semântica de estado
+// da plataforma, onde vermelho já quer dizer uma coisa só. Então a cor aqui
+// não identifica a unidade, ela CLASSIFICA: quem está abaixo da frota sai em
+// vermelho, quem está acima em verde, o resto em azul. Quem é quem sai do
+// hover, não da legenda — e a pergunta que o cliente fez ("comparar um com os
+// outros") é justamente sobre o grupo, não sobre o nome.
+//
+// Séries com buraco viram segmentos separados em vez de linha reta ligando os
+// dois lados do buraco: dia sem leitura não pode virar uma reta que parece
+// medição.
+function _rpMultiSeriesSVG(series, labels, opts) {
+  const o = opts || {};
+  const dec = o.decimals != null ? o.decimals : 1;
+  const unit = o.unit || "";
+  const live = (series || []).filter(s => (s.values || []).some(v => v != null && v > 0));
+  if (!live.length || !labels || labels.length < 2) return "";
+
+  const W = 800, H = o.height || 260;
+  const PADL = 56, PADR = 18, PADT = 18, PADB = 32;
+  const n = labels.length;
+
+  let maxV = 0;
+  live.forEach(s => (s.values || []).forEach(v => { if (v != null && v > maxV) maxV = v; }));
+  if (!(maxV > 0)) return "";
+  const mag = Math.pow(10, Math.floor(Math.log10(maxV)));
+  const top = Math.max(Math.ceil(maxV / (mag / 2)) * (mag / 2), maxV) || maxV;
+
+  const px = i => PADL + (n === 1 ? 0 : (i / (n - 1)) * (W - PADL - PADR));
+  const py = v => H - PADB - (v / top) * (H - PADT - PADB);
+
+  let grid = "";
+  for (let i = 0; i <= 4; i++) {
+    const gy = PADT + (i / 4) * (H - PADT - PADB);
+    const val = top * (1 - i / 4);
+    grid += `<line x1="${PADL}" y1="${gy.toFixed(1)}" x2="${W - PADR}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,0.05)" stroke-dasharray="4 4"/>`
+         +  `<text x="${PADL - 7}" y="${(gy + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="rgba(255,255,255,0.35)">${val >= 100 ? _rpFmt(Math.round(val), 0) : _rpFmt(val, dec)}</text>`;
+  }
+
+  let xlab = "";
+  const everyN = Math.ceil(n / 10);
+  labels.forEach((lb, i) => {
+    if (n <= 10 || i % everyN === 0) {
+      xlab += `<text x="${px(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" font-size="9" fill="rgba(255,255,255,0.35)">${lb}</text>`;
+    }
+  });
+
+  const paths = live.map(s => {
+    const segs = [];
+    let cur = [];
+    (s.values || []).forEach((v, i) => {
+      if (v == null) { if (cur.length > 1) segs.push(cur); cur = []; return; }
+      cur.push(`${px(i).toFixed(1)},${py(v).toFixed(1)}`);
+    });
+    if (cur.length > 1) segs.push(cur);
+    if (!segs.length) return "";
+    const lines = segs.map(sg =>
+      `<polyline class="rp-hit" points="${sg.join(" ")}" fill="none" stroke="transparent" stroke-width="11"/>`
+      + `<polyline class="rp-line" points="${sg.join(" ")}" fill="none" stroke="${s.color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`
+    ).join("");
+    const last = (s.values || []).filter(v => v != null).slice(-1)[0];
+    return `<g class="rp-serie"><title>${s.name}${last != null ? " · " + _rpFmt(last, dec) + " " + unit : ""}</title>${lines}</g>`;
+  }).join("");
+
+  // Unidade alinhada à ESQUERDA a partir da borda. Ancorada no fim do eixo Y
+  // (text-anchor="end") ela crescia para a esquerda e unidade longa saía do
+  // viewBox: "graus de desvio" era renderizado como "us de desvio".
+  return `<svg class="rp-chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
+    <text x="2" y="${PADT - 6}" text-anchor="start" font-size="9.5" fill="rgba(255,255,255,0.4)">${unit}</text>
+    ${grid}${xlab}${paths}
+  </svg>`;
+}
+
+// Legenda em faixas, e não uma entrada por unidade. Com 40 inversores a
+// legenda nome-a-nome ocuparia mais espaço que o próprio gráfico e ninguém
+// consegue casar 40 tons de linha com 40 rótulos.
+function _rpLegendHTML(itens) {
+  const vis = itens.filter(i => i.n > 0);
+  if (!vis.length) return "";
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,0.06);">`
+    + vis.map(i => `<span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,0.55);">
+        <span style="width:14px;height:2.5px;border-radius:2px;background:${i.color};flex-shrink:0;"></span>${i.label} <b style="color:rgba(255,255,255,0.75);font-weight:700;">${i.n}</b></span>`).join("")
+    + `</div>`;
 }
 
 function _rpHeatmapHTML(sbData, dates) {
@@ -9172,7 +9295,12 @@ function _appReportOpenFullPanel(data) {
   // Card: Resumo
   const infoGen = _rondaInfoBtn(`${_rondaLabel('Geração Total')} — Soma da energia diária (kWh) de todos os dias do período selecionado.<br>${_rondaFormula('Geração Total = Σ generation_daily_kwh')}<br>${_rondaNote('Fonte: fct_power_plant_metrics_daily. Prioridade: daily_active_energy > daily_energy > delta acumulador > integração trapezoidal.')}`);
   const infoPR = _rondaInfoBtn(`${_rondaLabel('PR Médio')} — Performance Ratio médio do período. Mede eficiência real vs teórica.<br>${_rondaFormula('PR = Média(Geração_dia / (Potência_Nominal × Irradiação_dia)) × 100')}<br>🟢 ≥ 75% — Bom&emsp;🟡 60–75% — Atenção&emsp;🔴 < 60% — Crítico<br>${_rondaNote('Média aritmética dos PRs diários do período. Dias sem irradiação são excluídos.')}`);
-  const infoFC = _rondaInfoBtn(`${_rondaLabel('Fator de Capacidade Médio')} — Relação entre energia gerada e máximo teórico em 24h.<br>${_rondaFormula('FC = Média(Geração_dia / (Pot_Nominal × 24h)) × 100')}<br>${_rondaNote('Indica o aproveitamento da capacidade instalada. Valores típicos para solar: 15-25%.')}`);
+  // O texto antigo dizia só "em 24h" e o cliente entendeu, com razão, que o
+  // card mostrava as últimas 24 horas mesmo num relatório de vários dias. As
+  // 24h são o DIVISOR de cada dia, não a janela. Agora está escrito.
+  const infoFC = _rondaInfoBtn(`${_rondaLabel('Fator de Capacidade Médio')} — Média dos fatores de capacidade de <b>todos os dias do período selecionado</b>, e não das últimas 24h.<br>${_rondaFormula('FC do dia = Geração_dia / (Pot_Nominal × 24h) × 100')}<br>${_rondaFormula('FC Médio = média dos FC diários do período')}<br>${_rondaNote('As 24h são o divisor de cada dia, não o intervalo do relatório. Um período de 7 dias gera 7 valores diários e o card mostra a média deles. Média aritmética: um dia nublado pesa igual a um dia cheio. Valores típicos para solar: 15-25%.')}`);
+  const infoMedidor = _rondaInfoBtn(`${_rondaLabel('Geração pelo multimedidor')} — Energia líquida medida no ponto de conexão.<br>${_rondaFormula('Medidor = Σ (energia exportada − energia importada)')}<br>${_rondaNote('A Geração Total ao lado vem dos contadores dos inversores. Este card vem do multimedidor, que é outro instrumento e outro ponto de medição — diferença entre os dois é esperada e corresponde a perdas de transformador e consumo interno. Só aparece em usina com multimedidor cadastrado.')}`);
+  const infoMeta = _rondaInfoBtn(`${_rondaLabel('Meta do período')} — Energia esperada pela simulação PVsyst para os mesmos dias.<br>${_rondaNote('A simulação guarda um ano típico, então a meta é comparada por dia e mês do calendário. Só aparece em usina com simulação PVsyst cadastrada.')}`);
   body += `<div class="ronda-card" style="${cardDelay()}">
     <div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Resumo do Período</div><div class="ronda-card-subtitle">${p.start || ""} ~ ${p.end || ""} (${p.days || 0} dias)</div></div></div>
     <div class="ronda-card-body">
@@ -9186,16 +9314,40 @@ function _appReportOpenFullPanel(data) {
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Média</div><div class="ronda-full-kpi-value">${_rpFmt(s.avg_irradiance_wm2,0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Dias Oper.</div><div class="ronda-full-kpi-value">${s.operating_days || 0}<span class="ronda-full-kpi-unit">/ ${p.days||0}</span></div></div>
       </div>
+      ${(s.total_generation_meter_kwh != null || s.target_generation_kwh != null) ? `
+      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        ${s.total_generation_meter_kwh != null ? `
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Geração medidor ${infoMedidor}</div><div class="ronda-full-kpi-value">${_rpFmt(s.total_generation_meter_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div>
+          ${s.total_generation_kwh ? `<div style="font-size:9.5px;color:rgba(255,255,255,0.42);margin-top:3px;">${(() => { const d = 100 * (s.total_generation_meter_kwh - s.total_generation_kwh) / s.total_generation_kwh; return (d >= 0 ? "+" : "") + d.toFixed(1) + "% vs inversores"; })()}</div>` : ""}
+        </div>` : ""}
+        ${s.target_generation_kwh != null ? `
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Meta PVsyst ${infoMeta}</div><div class="ronda-full-kpi-value">${_rpFmt(s.target_generation_kwh, 1)}<span class="ronda-full-kpi-unit">kWh</span></div>
+          ${s.vs_target_pct != null ? `<div style="font-size:9.5px;font-weight:700;margin-top:3px;color:${s.vs_target_pct >= 0 ? "#39e58c" : "#ef4444"};">${s.vs_target_pct >= 0 ? "+" : ""}${_rpFmt(s.vs_target_pct, 1)}% vs meta</div>` : ""}
+        </div>` : ""}
+      </div>` : ""}
     </div>
   </div>`;
 
   // Card: Comparativo Mensal
-  const curLbl = mc.current_month ? mc.current_month.replace("-", "/") : "Atual";
-  const prevLbl = mc.previous_month ? mc.previous_month.replace("-", "/") : "Anterior";
+  // Contagem de dias no rótulo. A barra de Geração é SOMA, então enquanto o mês
+  // corre ela compara um mês pela metade com um mês inteiro: no dia 5 a queda
+  // apareceria perto de -80% e não seria queda nenhuma. PR e Fator de
+  // Capacidade são MÉDIAS diárias e não sofrem disso — por isso o aviso abaixo
+  // fala só da Geração e da Irradiação, em vez de desqualificar o card todo.
+  const _mLbl = (m, d) => (m ? m.replace("-", "/") : "") + (d ? ` (${d}d)` : "");
+  const curLbl = mc.current_month ? _mLbl(mc.current_month, mc.current_days) : "Atual";
+  const prevLbl = mc.previous_month ? _mLbl(mc.previous_month, mc.previous_days) : "Anterior";
+  const _mesParcial = (mc.current_days || 0) > 0 && (mc.previous_days || 0) > 0
+    && mc.current_days < mc.previous_days;
   body += `<div class="ronda-card" style="${cardDelay()}">
-    <div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal ${_rondaInfoBtn(`${_rondaLabel('Comparativo Mensal')} — Compara os indicadores do mês atual com o mês anterior.<br>${_rondaFormula('Delta% = ((Atual - Anterior) / |Anterior|) × 100')}<br>🟢 Positivo = melhoria&emsp;🔴 Negativo = queda<br>${_rondaNote('Geração, PR e Fator de Capacidade são calculados com as médias de cada mês completo.')}`)}</div><div class="ronda-card-subtitle">${curLbl} vs ${prevLbl}</div></div></div>
+    <div class="ronda-card-header"><div class="ronda-card-icon icon-weather">${svgBars}</div><div><div class="ronda-card-title">Comparativo Mensal ${_rondaInfoBtn(`${_rondaLabel('Comparativo Mensal')} — Compara os indicadores do mês atual com o mês anterior.<br>${_rondaFormula('Delta% = ((Atual - Anterior) / |Anterior|) × 100')}<br>🟢 Positivo = melhoria&emsp;🔴 Negativo = queda<br><br>${_rondaLabel('Atenção ao mês em curso')}<br>O mês atual vai do dia 1 até a data final do relatório, e não até o fim do mês.<br>● <b>Geração</b> e <b>Irradiação</b> são <b>somas</b>: enquanto o mês não fecha, comparam um mês parcial com um mês inteiro e a variação aparece pior do que é.<br>● <b>PR</b> e <b>Fator de Capacidade</b> são <b>médias diárias</b>: a comparação é válida mesmo com o mês em curso.<br>${_rondaNote('A quantidade de dias de cada mês aparece no rótulo das barras.')}`)}</div><div class="ronda-card-subtitle">${curLbl} vs ${prevLbl}</div></div></div>
     <div class="ronda-card-body">
+      ${_mesParcial ? `<div style="display:flex;gap:8px;align-items:flex-start;background:rgba(234,179,8,0.07);border:1px solid rgba(234,179,8,0.18);border-radius:7px;padding:8px 10px;margin-bottom:12px;">
+        <span style="color:#eab308;font-size:12px;line-height:1.2;flex-shrink:0;">&#9888;</span>
+        <span style="font-size:10.5px;line-height:1.5;color:rgba(255,255,255,0.62);">Mês em curso com <b style="color:rgba(255,255,255,0.85);">${mc.current_days} de ${mc.previous_days} dias</b>. Geração e Irradiação são somas e ainda vão crescer até o fim do mês. PR e Fator de Capacidade já são comparáveis.</span>
+      </div>` : ""}
       ${_rpCompBarHTML("Geração", mc.current_generation_kwh, mc.previous_generation_kwh, curLbl, prevLbl, "kWh", mc.delta_generation_pct)}
+      ${mc.current_irradiation_kwh_m2 != null || mc.previous_irradiation_kwh_m2 != null ? _rpCompBarHTML("Irradiação", mc.current_irradiation_kwh_m2, mc.previous_irradiation_kwh_m2, _mLbl(mc.current_month, mc.current_irradiation_days), _mLbl(mc.previous_month, mc.previous_irradiation_days), "kWh/m²", mc.delta_irradiation_pct) : ""}
       ${_rpCompBarHTML("PR", mc.current_pr_pct, mc.previous_pr_pct, curLbl, prevLbl, "%", mc.delta_pr_pct)}
       ${_rpCompBarHTML("Fator Capac.", mc.current_fc_pct, mc.previous_fc_pct, curLbl, prevLbl, "%", mc.delta_fc_pct)}
     </div>
@@ -9204,18 +9356,23 @@ function _appReportOpenFullPanel(data) {
   // Card: Tendência (full width)
   if (trend.length > 1) {
     body += `<div class="ronda-card span-full" style="${cardDelay()}">
-      <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária ${_rondaInfoBtn(`${_rondaLabel('Gráfico de Tendência')} — Evolução diária da geração e PR no período selecionado.<br>🟢 ${_rondaLabel('Linha verde')}: Geração (kWh) — eixo esquerdo<br>🔵 ${_rondaLabel('Linha azul tracejada')}: PR (%) — eixo direito<br>${_rondaNote('Passe o mouse sobre os pontos para ver valores exatos de cada dia. A área verde sombreada indica volume de geração.')}`)}</div><div class="ronda-card-subtitle">Geração (kWh) e PR (%)</div></div></div>
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgTrend}</div><div><div class="ronda-card-title">Tendência Diária ${_rondaInfoBtn(`${_rondaLabel('Gráfico de Tendência')} — Evolução diária da geração e PR no período selecionado.<br>🟢 ${_rondaLabel('Linha verde')}: Geração (kWh) — eixo esquerdo<br>🔵 ${_rondaLabel('Linha azul tracejada')}: PR (%) — eixo direito<br>🟡 ${_rondaLabel('Linha amarela')}: Irradiação (kWh/m² por dia) — escala própria, com o topo indicado à direita<br>${_rondaNote('Passe o mouse sobre os pontos para ver valores exatos de cada dia. Geração caindo junto com a irradiação indica clima; geração caindo com a irradiação estável indica a usina.')}`)}</div><div class="ronda-card-subtitle">Geração (kWh), PR (%) e irradiação</div></div></div>
       <div class="ronda-card-body" style="padding:10px 12px;">${_rpTrendSVG(data)}</div>
     </div>`;
   }
 
   // Card: Inversores (full width)
+  // Meta e Corrente só entram como coluna quando a usina realmente tem o dado.
+  // Coluna presente e vazia em toda a tabela é pior que coluna ausente: sugere
+  // que a informação existe e não chegou.
+  const _temMeta = invs.some(i => i.target_energy_kwh != null);
+  const _temCorrente = invs.some(i => i.avg_current_a != null);
   if (invs.length) {
     body += `<div class="ronda-card span-full" style="${cardDelay()}">
       <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Performance por Inversor ${_rondaInfoBtn(`${_rondaLabel('Performance por Inversor')} — Médias de cada inversor no período.<br>${_rondaFormula('PR Inv = Energia_Total / (Cap_por_Inv × Irrad_Média × Dias) × 100')}<br>${_rondaLabel('vs Média')}: compara o PR do inversor com a média da frota (±10%).<br>🟢 Acima (+10%)&emsp;🔵 Normal (±10%)&emsp;🔴 Abaixo (-10%)<br>${_rondaLabel('Tend.')}: sparkline de energia diária — mostra se o inversor está estável, subindo ou caindo.<br>${_rondaNote('Disponibilidade = % de amostras com estado "rodando". Inversores inativos são excluídos.')}`)}</div><div class="ronda-card-subtitle">${invs.length} unidades — médias do período</div></div></div>
       <div class="ronda-card-body" style="padding:0;"><div style="overflow-x:auto;">
         <table class="ronda-full-inv-table">
-          <thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th><th>PR Méd</th><th>Temp. média</th><th>Temp. máxima</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead>
+          <thead><tr><th>Inversor</th><th>Pot. Média</th><th>Energia</th>${_temMeta ? "<th>Meta</th><th>vs Meta</th>" : ""}<th>PR Méd</th>${_temCorrente ? "<th>Corrente</th>" : ""}<th>Temp. média</th><th>Temp. máxima</th><th>vs Média</th><th>Disponib.</th><th>Tend.</th></tr></thead>
           <tbody>`;
     invs.forEach(inv => {
       const vsCls = inv.vs_fleet && inv.vs_fleet !== "sem_dados" ? `ronda-full-perf-${inv.vs_fleet}` : "";
@@ -9225,7 +9382,10 @@ function _appReportOpenFullPanel(data) {
         <td style="font-weight:600;">${inv.inverter_name || "Inv" + inv.device_id}</td>
         <td>${_rpFmt(inv.avg_power_kw, 1)} kW</td>
         <td>${_rpFmt(inv.total_energy_kwh, 0)} kWh</td>
+        ${_temMeta ? `<td style="color:rgba(255,255,255,0.55);">${inv.target_energy_kwh != null ? _rpFmt(inv.target_energy_kwh, 0) + " kWh" : "—"}</td>
+        <td style="font-weight:700;color:${inv.vs_target_pct == null ? "rgba(255,255,255,0.35)" : inv.vs_target_pct >= 0 ? "#39e58c" : "#ef4444"};">${inv.vs_target_pct != null ? (inv.vs_target_pct >= 0 ? "+" : "") + _rpFmt(inv.vs_target_pct, 1) + "%" : "—"}</td>` : ""}
         <td style="font-weight:700;">${_rpFmt(inv.avg_pr_pct, 1)}%</td>
+        ${_temCorrente ? `<td style="color:#facc15;font-weight:700;">${inv.avg_current_a != null ? _rpFmt(inv.avg_current_a, 1) + " A" : "—"}</td>` : ""}
         <td style="color:#60a5fa;font-weight:700;">${_rpFmt(inv.avg_temp_c, 1)} °C</td>
         <td style="color:#f97316;font-weight:700;">${_rpFmt(inv.max_temp_c, 1)} °C</td>
         <td><span class="ronda-full-perf-badge ${vsCls}">${arrow} ${inv.vs_fleet === "sem_dados" ? "—" : inv.vs_fleet}</span></td>
@@ -9234,8 +9394,63 @@ function _appReportOpenFullPanel(data) {
       </tr>`;
     });
     body += `</tbody></table></div></div></div>`;
+
+    // ── Comparativo entre inversores (energia e corrente) ──
+    // Antes cada inversor tinha só o seu próprio risquinho na última coluna da
+    // tabela, cada um com escala própria — comparar um com o outro era
+    // impossível, que foi exatamente o pedido. Aqui todos dividem o mesmo eixo.
+    const _dias = (data.daily_trend || []).map(d => d.date).filter(Boolean);
+    const _rot = ds => ds.map(d => String(d).slice(5).replace("-", "/"));
+    const _corDe = inv => inv.vs_fleet === "abaixo" ? "#ef4444"
+                        : inv.vs_fleet === "acima" ? "#39e58c" : "#60a5fa";
+    // Alinhamento por DATA, não por posição: inversor que ficou um dia fora tem
+    // um ponto a menos e, alinhado por índice, desenharia deslocado dos demais.
+    const _porData = (datas, valores, eixo) => {
+      const mapa = new Map();
+      (datas || []).forEach((d, i) => mapa.set(String(d), valores[i]));
+      return eixo.map(d => { const v = mapa.get(String(d)); return v == null ? null : Number(v); });
+    };
+    const _legenda = [
+      { label: "abaixo da média", color: "#ef4444", n: invs.filter(i => i.vs_fleet === "abaixo").length },
+      { label: "normal",          color: "#60a5fa", n: invs.filter(i => i.vs_fleet === "normal").length },
+      { label: "acima da média",  color: "#39e58c", n: invs.filter(i => i.vs_fleet === "acima").length },
+    ];
+
+    if (_dias.length > 1) {
+      const serEnergia = invs.map(inv => ({
+        name: inv.inverter_name || ("Inv" + inv.device_id),
+        color: _corDe(inv),
+        values: _porData(inv.daily_energy_dates, inv.daily_energy || [], _dias),
+      }));
+      const svgE = _rpMultiSeriesSVG(serEnergia, _rot(_dias), { unit: "kWh", decimals: 0 });
+      if (svgE) {
+        body += `<div class="ronda-card span-full" style="${cardDelay()}">
+          <div class="ronda-card-header"><div class="ronda-card-icon icon-bolt">${svgBolt}</div><div><div class="ronda-card-title">Energia diária — todos os inversores ${_rondaInfoBtn(`${_rondaLabel('Comparativo entre inversores')} — A energia de cada inversor, dia a dia, na mesma escala.<br>A cor não identifica o inversor, ela classifica: 🔴 abaixo da média da frota&emsp;🔵 normal&emsp;🟢 acima.<br>${_rondaNote('Passe o mouse sobre uma linha para destacá-la e ver o nome do inversor. Linhas que caem juntas indicam causa comum (clima, rede, CLP); uma linha que se descola do grupo é do equipamento.')}`)}</div><div class="ronda-card-subtitle">${invs.length} unidades na mesma escala</div></div></div>
+          <div class="ronda-card-body" style="padding:10px 12px;">${svgE}${_rpLegendHTML(_legenda)}</div>
+        </div>`;
+      }
+
+      // Corrente CA por inversor. Mesmo componente, mesma leitura — e sem
+      // inventar um segundo jeito de mostrar a mesma comparação.
+      if (_temCorrente) {
+        const serCorrente = invs.map(inv => ({
+          name: inv.inverter_name || ("Inv" + inv.device_id),
+          color: _corDe(inv),
+          values: _porData((inv.daily_current || []).map(c => c.date),
+                           (inv.daily_current || []).map(c => c.current_a), _dias),
+        }));
+        const svgC = _rpMultiSeriesSVG(serCorrente, _rot(_dias), { unit: "A", decimals: 1 });
+        if (svgC) {
+          body += `<div class="ronda-card span-full" style="${cardDelay()}">
+            <div class="ronda-card-header"><div class="ronda-card-icon icon-solar">${svgSolar}</div><div><div class="ronda-card-title">Corrente diária — todos os inversores ${_rondaInfoBtn(`${_rondaLabel('Corrente CA por inversor')} — Média das três fases, apenas no horário solar (6h às 18h).<br>${_rondaFormula('Corrente = média das fases com leitura > 0')}<br>${_rondaNote('Fase sem leitura fica fora da média, senão um inversor com uma fase muda pareceria estar a um terço da corrente. Fora do horário solar o inversor está parado e a média do dia inteiro esconderia a diferença entre as unidades. Cores iguais às do gráfico de energia.')}`)}</div><div class="ronda-card-subtitle">média das 3 fases, 6h-18h</div></div></div>
+            <div class="ronda-card-body" style="padding:10px 12px;">${svgC}${_rpLegendHTML(_legenda)}</div>
+          </div>`;
+        }
+      }
+    }
   }
 
+  // Temperatura interna dos inversores: comparacao da frota e evolucao diaria.
   const _tempInvs = invs.filter(inv => inv.avg_temp_c !== null && inv.avg_temp_c !== undefined)
     .sort((a, b) => Number(b.avg_temp_c) - Number(a.avg_temp_c));
   if (_tempInvs.length) {
@@ -9265,7 +9480,7 @@ function _appReportOpenFullPanel(data) {
   // Card: String Box Heatmap (full width)
   if (sb && sb.length) {
     body += `<div class="ronda-card span-full" style="${cardDelay()}">
-      <div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">String Box — Heatmap ${_rondaInfoBtn(`${_rondaLabel('Heatmap de Strings')} — Cada quadrado = corrente média de uma string em um dia (6h-18h).<br>${_rondaFormula('Variação% = ((Corrente_String - Média_Inversor) / Média_Inversor) × 100')}<br>🟢 ≥ -5% — Normal&emsp;🟡 -5% a -15% — Atenção&emsp;🔴 < -15% — Crítico&emsp;⬜ Zerada/offline<br>${_rondaNote('Passe o mouse sobre os quadrados para ver o valor exato. Strings zeradas por 2+ dias geram alerta no diagnóstico.')}`)}</div><div class="ronda-card-subtitle">Corrente vs média do inversor por dia (6h-18h)</div></div></div>
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-string">${svgString}</div><div><div class="ronda-card-title">String Box — Heatmap ${_rondaInfoBtn(`${_rondaLabel('Heatmap de Strings')} — Cada quadrado = corrente média de uma string em um dia (6h-18h).<br>${_rondaFormula('Variação% = ((Corrente_String - Média_Inversor) / Média_Inversor) × 100')}<br>🟢 ≥ -5% — Normal&emsp;🟡 -5% a -15% — Atenção&emsp;🔴 < -15% — Crítico&emsp;⬜ Zerada/offline<br>${_rondaNote('Passe o mouse sobre os quadrados para ver o valor exato. Strings zeradas por 2+ dias geram alerta no diagnóstico. A corrente média da usina é a média das médias por inversor, e não a média de todas as strings: assim o valor não se desloca quando uma caixa deixa de publicar.')}`)}</div><div class="ronda-card-subtitle">Corrente vs média do inversor por dia (6h-18h)${data.string_box_plant_avg_current != null ? ` · média da usina <b style="color:#a855f7;font-weight:700;">${_rpFmt(data.string_box_plant_avg_current, 2)} A</b>` : ""}</div></div></div>
       <div class="ronda-card-body">${_rpHeatmapHTML(sb)}</div>
     </div>`;
   }
@@ -9279,12 +9494,19 @@ function _appReportOpenFullPanel(data) {
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Irrad. Máx</div><div class="ronda-full-kpi-value">${_rpFmt(w.max_irradiance_wm2, 0)}<span class="ronda-full-kpi-unit">W/m²</span></div></div>
       </div>
       <div class="ronda-full-kpi-row" style="margin-top:8px;">
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Média</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Máx</div><div class="ronda-full-kpi-value">${_rpFmt(w.max_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
-      </div>
-      <div class="ronda-full-kpi-row" style="margin-top:8px;">
+        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Ambiente</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div></div>
+        ${w.has_module_temp ? `<div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Temp. Módulo ${_rondaInfoBtn(`${_rondaLabel('Temperatura do módulo')} — Média do sensor de placa da estação solarimétrica no período.<br>${_rondaNote('Leituras em 0,0 °C são descartadas: existe estação publicando zero em todas as leituras, e zero não é temperatura, é quadro zerado do CLP. Este card só aparece quando a estação da usina realmente publica o sensor de placa.')}`)}</div><div class="ronda-full-kpi-value" style="color:#f97316;">${_rpFmt(w.avg_module_temp_c, 1)}<span class="ronda-full-kpi-unit">°C</span></div>
+          ${w.max_module_temp_c != null ? `<div style="font-size:9.5px;color:rgba(255,255,255,0.42);margin-top:3px;">máx ${_rpFmt(w.max_module_temp_c, 1)} °C${w.avg_temp_c != null ? ` · +${_rpFmt(w.avg_module_temp_c - w.avg_temp_c, 1)} °C vs ambiente` : ""}</div>` : ""}
+        </div>` : ""}
         <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Vento</div><div class="ronda-full-kpi-value">${_rpFmt(w.avg_wind_speed, 1)}<span class="ronda-full-kpi-unit">m/s</span></div></div>
-        <div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_days || 0}<span class="ronda-full-kpi-unit">/ ${w.total_days || 0} dias</span></div></div>
+        ${/* Sem pluviômetro o campo SOME. Antes ele mostrava "0 / 7 dias", que
+              se lê como "não choveu em 7 dias" — uma afirmação que a plataforma
+              não tinha como fazer, porque não havia sensor nenhum. */ ""}
+        ${/* `!== false` e não `truthy`: numa Lambda antiga o campo não existe e
+              vem `undefined`, que esconderia a chuva até nas usinas que TÊM
+              pluviômetro. Só o `false` explícito, que só a Lambda nova manda,
+              apaga o campo. */ ""}
+        ${w.has_rain_sensor !== false ? `<div class="ronda-full-kpi"><div class="ronda-full-kpi-label">Chuva</div><div class="ronda-full-kpi-value">${w.rain_days || 0}<span class="ronda-full-kpi-unit">/ ${w.total_days || 0} dias</span></div></div>` : ""}
       </div>
       ${w.daily_irradiance && w.daily_irradiance.length > 1 ? `<div style="margin-top:10px;">${_rpSparklineSVG(w.daily_irradiance, "#facc15", 260, 40)}</div>` : ""}
     </div>
@@ -9313,7 +9535,90 @@ function _appReportOpenFullPanel(data) {
         <td>${_rpMiniSparkline(t.daily_deviation || [], sparkColor)}</td>
       </tr>`;
     });
-    body += `</tbody></table></div></div></div>`;
+    body += `</tbody></table></div>`;
+
+    // Desvio de todos os trackers no mesmo eixo. A cor segue a mesma faixa já
+    // usada na coluna "Desvio Méd" da tabela acima — verde até 2°, amarelo até
+    // 5°, vermelho acima. Reusar a faixa importa: um tracker que está amarelo na
+    // tabela e outra cor no gráfico faria o leitor duvidar dos dois.
+    // O eixo aqui é o do próprio tracker (o desvio diário vem em `daily_deviation`,
+    // já alinhado dia a dia pelo backend), então o rótulo sai do maior vetor.
+    const _nTrk = Math.max(..._rpTrks.map(t => (t.daily_deviation || []).length), 0);
+    const _diasTrk = (data.daily_trend || []).map(d => d.date).filter(Boolean);
+    const _rotTrk = (_diasTrk.length === _nTrk
+        ? _diasTrk.map(d => String(d).slice(5).replace("-", "/"))
+        : Array.from({ length: _nTrk }, (_, i) => "D" + (i + 1)));
+    const svgTrkChart = _rpMultiSeriesSVG(_rpTrks.map(t => ({
+      name: t.tracker_name || "Tracker",
+      color: (t.avg_deviation || 0) > 5 ? "#ef4444" : (t.avg_deviation || 0) > 2 ? "#eab308" : "#39e58c",
+      values: (t.daily_deviation || []).map(v => (v == null ? null : Number(v))),
+    })), _rotTrk, { unit: "desvio (°)", decimals: 1, height: 230 });
+    if (svgTrkChart) {
+      body += `<div style="padding:12px 4px 4px 4px;border-top:1px solid rgba(255,255,255,0.06);margin-top:12px;">
+        <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:6px;">Desvio diário de todos os trackers na mesma escala</div>
+        ${svgTrkChart}
+        ${_rpLegendHTML([
+          { label: "≤ 2° normal",   color: "#39e58c", n: _rpTrks.filter(t => (t.avg_deviation || 0) <= 2).length },
+          { label: "2° a 5°",       color: "#eab308", n: _rpTrks.filter(t => (t.avg_deviation || 0) > 2 && (t.avg_deviation || 0) <= 5).length },
+          { label: "> 5° alto",     color: "#ef4444", n: _rpTrks.filter(t => (t.avg_deviation || 0) > 5).length },
+        ])}
+      </div>`;
+    }
+    body += `</div></div>`;
+  }
+
+  // ── Card: Alarmes ──
+  // O backend sempre calculou este resumo e nunca o enviava; o front declarava
+  // a variável e não a usava. As classes .ronda-full-alarm* já existiam no CSS
+  // desde o desenho original. Este bloco liga as três pontas que já existiam.
+  const _alEv = data.alarm_events || [];
+  if (alarms.length || _alEv.length) {
+    const _sevCls = s => (s === "high" || s === "critical") ? "sev-high"
+                       : s === "medium" ? "sev-medium" : "sev-low";
+    const _sevNome = s => (s === "high" || s === "critical") ? "Crítico"
+                        : s === "medium" ? "Médio" : s === "low" ? "Baixo" : "—";
+    const _dur = m => m == null ? "" : m < 60 ? `${m} min`
+                    : m < 1440 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`
+                    : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+    const _abertos = _alEv.filter(e => e.still_open).length;
+    body += `<div class="ronda-card span-full" style="${cardDelay()}">
+      <div class="ronda-card-header"><div class="ronda-card-icon icon-alarm">${svgAlarm}</div><div><div class="ronda-card-title">Alarmes ${_rondaInfoBtn(`${_rondaLabel('Alarmes do período')} — Ordenados do mais crítico para o menos crítico e, dentro da mesma severidade, do mais recente para o mais antigo.<br>🔴 Crítico&emsp;🟡 Médio&emsp;🔵 Baixo<br><br>${_rondaLabel('Início e fim')}<br>O registro de alarme funciona como máquina de estado: grava uma linha quando o alarme abre e outra quando fecha. O par forma o episódio mostrado aqui.<br>${_rondaNote('Alarme que já estava aberto ANTES do início do período não aparece, porque a linha de abertura está fora da janela consultada. Alarme que ainda não fechou aparece como "em aberto" e sem duração — o sistema não supõe que ele fechou agora.')}`)}</div><div class="ronda-card-subtitle">${data.total_alarms || 0} ocorrências em ${alarms.length} dispositivo(s)${_abertos ? ` · <b style="color:#ef4444;">${_abertos} em aberto</b>` : ""}</div></div></div>
+      <div class="ronda-card-body" style="padding:0;">`;
+
+    if (alarms.length) {
+      body += `<div style="overflow-x:auto;"><table class="ronda-full-inv-table">
+        <thead><tr><th>Dispositivo</th><th>Crítico</th><th>Médio</th><th>Baixo</th><th>Total</th><th>Alarme mais frequente</th></tr></thead><tbody>`;
+      alarms.forEach(a => {
+        body += `<tr>
+          <td style="font-weight:600;">${a.device_name || "—"}</td>
+          <td style="font-weight:800;color:${(a.critical_count || 0) > 0 ? "#ef4444" : "rgba(255,255,255,0.25)"};">${a.critical_count || 0}</td>
+          <td style="color:${(a.medium_count || 0) > 0 ? "#eab308" : "rgba(255,255,255,0.25)"};">${a.medium_count || 0}</td>
+          <td style="color:${(a.low_count || 0) > 0 ? "#60a5fa" : "rgba(255,255,255,0.25)"};">${a.low_count || 0}</td>
+          <td><span style="background:rgba(255,255,255,0.06);border-radius:10px;padding:2px 8px;">${a.total_count || 0}</span></td>
+          <td style="color:rgba(255,255,255,0.5);white-space:normal;">${a.top_alarm || "—"}</td>
+        </tr>`;
+      });
+      body += `</tbody></table></div>`;
+    }
+
+    if (_alEv.length) {
+      body += `<div style="padding:12px 16px 14px 16px;border-top:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-bottom:8px;">Ocorrências em detalhe, do mais crítico ao menos crítico</div>
+        <div style="max-height:320px;overflow-y:auto;">`;
+      _alEv.forEach(e => {
+        body += `<div class="ronda-full-alarm">
+          <div class="ronda-full-alarm-severity ${_sevCls(e.severity)}"></div>
+          <div class="ronda-full-alarm-body">
+            <div class="ronda-full-alarm-device">${e.device_name || "—"} <span style="font-weight:400;font-size:10px;color:rgba(255,255,255,0.35);">${_sevNome(e.severity)}</span></div>
+            <div class="ronda-full-alarm-desc">${e.description || "—"}</div>
+            <div class="ronda-full-alarm-ts">Início ${e.started_at || "—"}${e.ended_at ? ` · Fim ${e.ended_at}` : ""}${e.duration_min != null ? ` · ${_dur(e.duration_min)}` : ""}</div>
+          </div>
+          <span class="ronda-full-alarm-active ${e.still_open ? "is-active" : "is-resolved"}">${e.still_open ? "em aberto" : "encerrado"}</span>
+        </div>`;
+      });
+      body += `</div></div>`;
+    }
+    body += `</div></div>`;
   }
 
   // Card: Diagnóstico (full width)
