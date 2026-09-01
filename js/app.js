@@ -11230,6 +11230,48 @@ function _pwNum(v, dec) {
                                              maximumFractionDigits: dec || 0 });
 }
 
+// Minigrafico de andamento, em SVG inline.
+//
+// 🔑 ESCALA FIXA, nao auto-escala. Auto-escalar cada card no proprio min/max
+// faria a memoria -- que passeia entre 20,8% e 31,0% -- virar uma serra
+// alarmante identica a de uma CPU que bate 100%. Achatar ou esticar o eixo
+// muda a historia que o grafico conta; 0-100 deixa "estavel" parecer estavel e
+// permite comparar um card com o outro com o olho.
+//
+// Duas linhas: o PICO em tom fraco atras, a MEDIA solida na frente. A media
+// sozinha esconde o estouro (CPU: media 54, pico 100) e foi um pico sustentado
+// de iowait que denunciou a saturacao de EBS em 17/08.
+function _pwSpark(pts, escalaMax, teto, cor, uid) {
+  if (!Array.isArray(pts) || pts.length < 2) return "";
+  const W = 168, H = 36, P = 3;
+  const px = (i) => P + (i * (W - 2 * P)) / (pts.length - 1);
+  const py = (v) => {
+    const n = Math.max(0, Math.min(1, (Number(v) || 0) / escalaMax));
+    return (H - P - n * (H - 2 * P)).toFixed(1);
+  };
+  const pontos = (campo) => pts
+    .map((p, i) => `${px(i).toFixed(1)},${py(p[campo])}`).join(" ");
+  const linhaMedia = pontos("value");
+  const temPico = pts.some(p => p.peak != null && p.peak > p.value);
+  const area = `${P},${H - P} ${linhaMedia} ${W - P},${H - P}`;
+  const yTeto = (teto != null && teto <= escalaMax) ? py(teto) : null;
+
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+    style="width:100%;height:36px;display:block;margin-top:5px;overflow:visible;">
+    <defs><linearGradient id="pwg${uid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${cor}" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="${cor}" stop-opacity="0"/>
+    </linearGradient></defs>
+    ${yTeto !== null ? `<line x1="${P}" y1="${yTeto}" x2="${W - P}" y2="${yTeto}"
+      stroke="rgba(255,255,255,0.22)" stroke-width="1" stroke-dasharray="3 3"/>` : ""}
+    <polygon points="${area}" fill="url(#pwg${uid})"/>
+    ${temPico ? `<polyline points="${pontos("peak")}" fill="none" stroke="${cor}"
+      stroke-opacity="0.35" stroke-width="1" stroke-linejoin="round"/>` : ""}
+    <polyline points="${linhaMedia}" fill="none" stroke="${cor}" stroke-width="1.6"
+      stroke-linejoin="round" stroke-linecap="round"/>
+  </svg>`;
+}
+
 function _pwBytes(v) {
   const n = Number(v);
   if (!isFinite(n) || n <= 0) return "—";
@@ -11344,27 +11386,55 @@ function _pwRender(st) {
     });
   }
 
-  // 4. A maquina. Percentuais so; o numero cru de bytes vai nas tabelas.
+  // 4. A maquina -- valor do instante MAIS o andamento.
+  //
+  // O retrato do instante nunca responde "esta piorando?". Cada card carrega
+  // agora a serie das ultimas horas, que ja vinha sendo gravada de 5 em 5 min
+  // pelo pipeline_watch.py e so nao era mostrada.
+  //
+  // ⚠️ `host_series` pode nao existir (Lambda anterior a esta mudanca). Nesse
+  // caso o card degrada para o que era antes -- so o numero -- em vez de sumir.
+  const hs = st.host_series || {};
   const host = [
-    ["CPU", val("host:cpu_pct"), "%", 80],
-    ["Espera de disco", val("host:iowait_pct"), "%", 40],
-    ["Disco usado", val("host:disk_pct"), "%", 85],
-    ["Memória usada", val("host:mem_used_pct"), "%", 90],
-    ["Carga por núcleo", val("host:load_por_nucleo"), "", 1.5],
-  ].filter(x => x[1] !== null);
+    ["CPU", "host:cpu_pct", val("host:cpu_pct"), "%", 80, 100],
+    ["Espera de disco", "host:iowait_pct", val("host:iowait_pct"), "%", 40, 100],
+    ["Disco usado", "host:disk_pct", val("host:disk_pct"), "%", 85, 100],
+    ["Memória usada", "host:mem_used_pct", val("host:mem_used_pct"), "%", 90, 100],
+    ["Carga por núcleo", "host:load_por_nucleo", val("host:load_por_nucleo"), "", 1.5, 2],
+  ].filter(x => x[2] !== null);
   if (host.length) {
+    const jan = Number(st.hours) || 24;
     html += `<div class="ronda-section-title" style="font-size:10px;letter-spacing:.06em;
-      text-transform:uppercase;color:rgba(255,255,255,0.5);margin:12px 0 6px;">Servidor</div>
+      text-transform:uppercase;color:rgba(255,255,255,0.5);margin:12px 0 6px;
+      display:flex;justify-content:space-between;align-items:baseline;">
+      <span>Servidor</span>
+      <span style="text-transform:none;letter-spacing:0;font-size:9.5px;
+        color:rgba(255,255,255,0.35);">últimas ${jan} h</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">`;
-    host.forEach(([nome, v, un, teto]) => {
+    host.forEach(([nome, chave, v, un, teto, escala], idx) => {
       const alto = Number(v) >= teto;
+      const perto = !alto && Number(v) >= teto * 0.8;
+      const cor = alto ? "#ef4444" : (perto ? "#eab308" : "#39e58c");
+      const pts = Array.isArray(hs[chave]) ? hs[chave] : [];
+      const pico = pts.reduce((mx, p) => {
+        const n = Number(p.peak != null ? p.peak : p.value);
+        return isFinite(n) && n > mx ? n : mx;
+      }, -Infinity);
       html += `<div style="background:rgba(255,255,255,0.04);border-radius:8px;padding:7px 9px;">
-        <div style="font-size:9.5px;color:rgba(255,255,255,0.5);">${nome}</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;">
+          <span style="font-size:9.5px;color:rgba(255,255,255,0.5);">${nome}</span>
+          ${isFinite(pico) ? `<span style="font-size:9px;color:rgba(255,255,255,0.35);
+            font-family:'Space Mono',monospace;" title="maior valor da janela">pico ${_pwNum(pico, un ? 1 : 2)}${un}</span>` : ""}
+        </div>
         <div style="font-size:14px;font-weight:700;font-family:'Space Mono',monospace;
                     color:${alto ? "#ef4444" : "#e8ecf5"};">${_pwNum(v, un ? 1 : 2)}${un}</div>
+        ${_pwSpark(pts, escala, teto, cor, idx)}
       </div>`;
     });
     html += `</div>`;
+    html += `<div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:5px;line-height:1.5;">
+      Linha cheia é a média do período; a fraca atrás é o pico. O tracejado marca o limite
+      que dispara alerta. Escala fixa de 0 a ${host[0][5] === 100 ? "100%" : host[0][5]}.</div>`;
   }
 
   // 5. Tabelas que mais ocupam. Serve para responder "esta crescendo?", que e
