@@ -2631,6 +2631,49 @@ tbody tr:hover td {
   box-shadow: 0 0 0 3px rgba(57,229,140,0.08);
 }
 
+.portfolio-sort-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.portfolio-sort-icon {
+  position: absolute;
+  left: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.portfolio-sort-select {
+  background: rgba(57,229,140,0.05);
+  border: 1px solid rgba(57,229,140,0.18);
+  border-radius: 8px;
+  padding: 7px 12px 7px 30px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text-main);
+  outline: none;
+  cursor: pointer;
+  /* Sem a seta nativa: no Windows ela vem branca sobre o fundo escuro do
+     tema e some. O icone da esquerda ja indica que o campo e de ordenacao. */
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.portfolio-sort-select:focus {
+  border-color: rgba(57,229,140,0.45);
+  box-shadow: 0 0 0 3px rgba(57,229,140,0.08);
+}
+
+/* A lista suspensa e desenhada pelo SISTEMA, nao pelo tema: sem estas duas
+   linhas o menu abre com texto claro sobre fundo claro no Windows. */
+.portfolio-sort-select option {
+  background: #12181f;
+  color: var(--text-main);
+}
+
 .portfolio-view-toggle {
   display: flex;
   gap: 4px;
@@ -5515,6 +5558,18 @@ body.ds-comparando {
     width: 100%;
   }
   .portfolio-search-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* A ordenacao continua disponivel no celular, ao contrario do
+     .portfolio-view-toggle logo acima: no mobile a tela ja e forcada em cards,
+     entao escolher a VISUALIZACAO nao faz sentido, mas escolher a ORDEM faz --
+     e a lista rolada no telefone e justamente onde a ordem alfabetica ajuda. */
+  .portfolio-sort-wrap {
+    width: 100%;
+  }
+  .portfolio-sort-select {
     width: 100%;
     box-sizing: border-box;
   }

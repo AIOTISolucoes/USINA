@@ -1931,27 +1931,82 @@ function getPortfolioPlantVisualState(plant) {
   return { priority: 1, kind: "standby", activePower, energyToday, irradiance, isOffline: false };
 }
 
-function sortPortfolioPlants(plants) {
+function portfolioPlantName(plant) {
+  return String(plant?.power_plant_name ?? plant?.plant_name ?? plant?.name ?? "");
+}
+
+// Comparacao por nome usada como criterio de DESEMPATE em todos os modos, e
+// como criterio principal no modo alfabetico.
+//
+// numeric: true e o que importa nesta base, e foi MEDIDO: 9 das 22 usinas
+// terminam em numero (GPS1-3, Massape1-2, Pacajus1-2, Varzea1-2). Sem ele a
+// ordem "alfabetica" sai Pacajus1, Pacajus10, Pacajus2 assim que existir uma
+// decima usina da mesma familia -- exatamente o tipo de lista que geraria a
+// mesma reclamacao de novo.
+//
+// sensitivity "base" e defensivo, nao corretivo: hoje nenhum power_plant.name
+// tem acento (conferido em 04/09), mas o display_name e livre e a tela cai
+// para ele. Se um dia entrar "Massape" com acento, a ordem nao quebra.
+function portfolioCompareByName(a, b) {
+  return portfolioPlantName(a).localeCompare(portfolioPlantName(b), "pt-BR", {
+    sensitivity: "base",
+    numeric: true,
+  });
+}
+
+function portfolioAlarmPriority(plant) {
+  const pid = plant.power_plant_id ?? plant.plant_id ?? plant.id;
+  const pname = plant.power_plant_name ?? plant.plant_name ?? plant.name;
+  const sev = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pid))
+    || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
+    || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
+    || null;
+  if (sev === "critical") return 0;
+  if (sev === "high") return 1;
+  if (sev === "medium") return 2;
+  if (sev === "low") return 3;
+  return 4;
+}
+
+function sortPortfolioPlants(plants, mode) {
   const validPlants = Array.isArray(plants) ? [...plants] : [];
+  const sortMode = mode || _portfolioSortMode || "alarms";
 
-  const getAlarmPriority = (plant) => {
-    const pid = plant.power_plant_id ?? plant.plant_id ?? plant.id;
-    const pname = plant.power_plant_name ?? plant.plant_name ?? plant.name;
-    const sev = normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pid))
-      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(pname))
-      || normalizeAlarmSeverity(lastAlarmSeverityByPlant.get(Number(pid)))
-      || null;
-    if (sev === "critical") return 0;
-    if (sev === "high") return 1;
-    if (sev === "medium") return 2;
-    if (sev === "low") return 3;
-    return 4;
-  };
+  if (sortMode === "name") {
+    validPlants.sort(portfolioCompareByName);
+    return validPlants;
+  }
 
+  if (sortMode === "production") {
+    // Producao = potencia ativa AGORA, com a energia do dia como desempate.
+    // A energia do dia sozinha nao serve para "maior producao" as 8h da manha,
+    // e a potencia sozinha empata todo mundo em zero a noite -- os dois juntos
+    // dao uma ordem estavel nas 24 horas.
+    // Os dois valores saem de getPortfolioPlantVisualState de proposito: e ele
+    // que ja resolve a cadeia de nomes do campo (energy_today_kwh antes de
+    // daily_energy_kwh). Reimplementar a cadeia aqui criaria uma segunda fonte
+    // de verdade que envelhece sozinha -- e invertida ela ordenaria pelo campo
+    // errado sem dar erro nenhum.
+    validPlants.sort((a, b) => {
+      const stateA = getPortfolioPlantVisualState(a);
+      const stateB = getPortfolioPlantVisualState(b);
+
+      if (stateA.activePower !== stateB.activePower) {
+        return stateB.activePower - stateA.activePower;
+      }
+      if (stateA.energyToday !== stateB.energyToday) {
+        return stateB.energyToday - stateA.energyToday;
+      }
+      return portfolioCompareByName(a, b);
+    });
+    return validPlants;
+  }
+
+  // Modo "alarms" — o comportamento que ja estava no ar, preservado inteiro.
   validPlants.sort((a, b) => {
     // Alarmes primeiro: high → medium → sem alarme
-    const alarmA = getAlarmPriority(a);
-    const alarmB = getAlarmPriority(b);
+    const alarmA = portfolioAlarmPriority(a);
+    const alarmB = portfolioAlarmPriority(b);
     if (alarmA !== alarmB) return alarmA - alarmB;
 
     const stateA = getPortfolioPlantVisualState(a);
@@ -1969,9 +2024,7 @@ function sortPortfolioPlants(plants) {
       return stateB.energyToday - stateA.energyToday;
     }
 
-    const nameA = String(a?.power_plant_name ?? a?.plant_name ?? a?.name ?? "");
-    const nameB = String(b?.power_plant_name ?? b?.plant_name ?? b?.name ?? "");
-    return nameA.localeCompare(nameB, "pt-BR", { sensitivity: "base" });
+    return portfolioCompareByName(a, b);
   });
 
   return validPlants;
@@ -5175,6 +5228,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 // =============================================================================
 
 let _portfolioCurrentView = localStorage.getItem("portfolioView") || "card";
+
+// Ordenacao da lista de usinas. Pedido da Amanda (Goener) em 03/09: ela pediu
+// ordem alfabetica, e como o codigo ja calculava alarme e producao para ordenar,
+// os tres modos sairam pelo mesmo preco.
+//
+// O padrao continua "alarms" DE PROPOSITO: e o comportamento que estava no ar
+// antes desta tela existir, entao quem nao mexer em nada nao percebe mudanca
+// nenhuma. Trocar o padrao para alfabetica esconderia usina em alarme no meio
+// da lista para todos os outros clientes, que nao pediram isso.
+const PORTFOLIO_SORT_MODES = ["alarms", "name", "production"];
+let _portfolioSortMode = localStorage.getItem("portfolioSort") || "alarms";
+if (!PORTFOLIO_SORT_MODES.includes(_portfolioSortMode)) _portfolioSortMode = "alarms";
 let _portfolioMiniCharts = new Map();
 // capacity_ac por usina (vem do GET /plants) — fallback da linha de expectativa
 // no mini chart quando a usina não tem PVSyst (mesma regra do gráfico diário)
@@ -5266,22 +5331,43 @@ function portfolioFilterPlants(plants) {
   });
 }
 
+function portfolioRerender() {
+  const filtered = portfolioFilterPlants(lastValidPlants);
+  if (_portfolioCurrentView === "list") {
+    renderPortfolioTable(filtered);
+  } else {
+    renderPortfolioCards(filtered);
+  }
+}
+
+function portfolioSetSort(mode) {
+  if (!PORTFOLIO_SORT_MODES.includes(mode)) return;
+  _portfolioSortMode = mode;
+  localStorage.setItem("portfolioSort", mode);
+
+  // Basta re-renderizar: renderPortfolioTable e renderPortfolioCards chamam
+  // sortPortfolioPlants por conta propria, e ela le _portfolioSortMode. Nao
+  // reordeno lastValidPlants aqui de proposito -- seria uma segunda ordenacao
+  // que nao muda nada e daria a impressao falsa de que a ordem da lista bruta
+  // importa para a tela.
+  portfolioRerender();
+}
+
 function wirePortfolioControls() {
   const btnList = document.getElementById("btnViewList");
   const btnCard = document.getElementById("btnViewCard");
   const searchInput = document.getElementById("portfolioSearchInput");
+  const sortSelect = document.getElementById("portfolioSortSelect");
 
   btnList?.addEventListener("click", () => portfolioSetView("list"));
   btnCard?.addEventListener("click", () => portfolioSetView("card"));
 
-  searchInput?.addEventListener("input", () => {
-    const filtered = portfolioFilterPlants(lastValidPlants);
-    if (_portfolioCurrentView === "list") {
-      renderPortfolioTable(filtered);
-    } else {
-      renderPortfolioCards(filtered);
-    }
-  });
+  if (sortSelect) {
+    sortSelect.value = _portfolioSortMode;
+    sortSelect.addEventListener("change", (e) => portfolioSetSort(e.target.value));
+  }
+
+  searchInput?.addEventListener("input", portfolioRerender);
 
   portfolioSetView(_portfolioCurrentView);
 }
