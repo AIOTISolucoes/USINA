@@ -8671,7 +8671,10 @@ function renderTrackersNodes() {
   const filterText = TRACKERS_FILTER_TEXT.trim().toLowerCase();
   const filtered = TRACKERS_DATA.filter((t) => {
     if (!filterText) return true;
-    const hay = `${t.name || ""} ${t.id || ""} ${t.tracker_id || ""} ${t.kind || ""} ${t.tracker_type || ""}`.toLowerCase();
+    // tracker_code entrou em 04/09: agora que `name` mostra o rotulo
+    // ("Tracker 55"), o codigo do topico ("TCU70") sairia da busca -- e e por
+    // ele que a gente cruza com o CLP quando algo nao bate.
+    const hay = `${t.name || ""} ${t.tracker_code || ""} ${t.id || ""} ${t.tracker_id || ""} ${t.kind || ""} ${t.tracker_type || ""}`.toLowerCase();
     return hay.includes(filterText);
   });
 
