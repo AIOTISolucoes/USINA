@@ -10704,3 +10704,83 @@ body:not(.plant-map-mode) .plant-chart-card canvas {
   .field-maintenance-banner .fmb-sub { display: block; width: 100%; }
   .fmb-action { margin-left: 0; padding: 4px 12px; font-size: 0.7rem; }
 }
+
+/* AIOTI-RESP-PLANT-2026-09-21-INICIO
+   ==========================================================================
+   RESPONSIVIDADE — TELA DE USINA (plant.html)          21/09/2026
+   ==========================================================================
+   ⚠️ ESTE BLOCO VAI NO FIM DE `css/plant.css`, NAO no layout.css.
+      `plant.html` NAO CARREGA `layout.css`. Medido listando
+      `document.styleSheets` na pagina publicada: plant.css, all.min.css,
+      leaflet.css e injetadas por JS -- so isso.
+      Eu escrevi este conserto no layout.css primeiro e ele ficou INERTE.
+      Cada pagina desta plataforma tem seu proprio conjunto de folhas.
+
+   Aditivo e no fim, de proposito: a arvore local diverge dos repos, entao
+   acrescentar so pode SOBREPOR, nunca remover.
+   ↩️ DESFAZER = apagar deste comentario ate o fim do arquivo.
+   ==========================================================================
+
+   O DEFEITO: A PAGINA ROLAVA DE LADO
+   ----------------------------------
+   `#plantAlarmMenuPanel` fica FECHADO com `visibility:hidden; opacity:0` --
+   mas continua `display:block`, `position:absolute`, `width:380px`, e a regra
+   `.plant-header-actions--inline-left .plant-alarm-menu-panel{left:0;right:auto}`
+   o ancora pela ESQUERDA dentro de um pai que comeca em x=153.
+   Resultado: ocupa 153..533 e estica o DOCUMENTO para 533px numa tela de 397.
+   🔑 Um elemento INVISIVEL empurrando a pagina: nada na tela denuncia a causa,
+      so a medicao de `document.documentElement.scrollWidth`.
+
+   ESPECIFICIDADE: a regra que manda e `--inline-left` (0,2,0). Um seletor
+   `.plant-header-actions .plant-alarm-menu-panel` empata e depende de ordem;
+   casar a MESMA classe evita a aposta.
+
+   MEDIDO (412px, o celular do evento): documento 533 -> 397, e a rolagem
+   lateral sumiu em 390px e 412px.
+
+   ⚠️ NAO RESOLVE TUDO, e isto fica registrado:
+      em 320px e a partir de 480px a pagina AINDA passa 6 a 39px da borda.
+      Causa OUTRA e ANTERIOR a este bloco (medida antes de qualquer alteracao
+      minha): `section.card.plant-header-card`, `.plant-charts-grid`,
+      `.plant-device-nav-card` e `.plant-devices-card` terminam ~6px alem da
+      largura util. Pede revisao de largura/padding dos cards, nao remendo de
+      media query.
+
+   🔑 E O QUE EU QUASE "CONSERTEI" SEM ESTAR QUEBRADO
+      A primeira sonda acusou `.monthly-kpi-label` truncado (97px para 199).
+      FALSO: dentro do rotulo ha `span.monthly-help-tip`, balao de ajuda
+      `position:absolute` de 220px com `visibility:hidden`, que inflava o
+      `scrollWidth` do ancestral. Medindo a LINHA DE TEXTO real
+      (Range.getClientRects sobre os nos de texto proprios), o rotulo ocupa
+      79px numa caixa de 95 -- cabe. Por isso nao ha regra de KPI aqui.
+   ========================================================================== */
+
+/* em qualquer largura: ancora pela direita, para nao crescer para fora */
+.plant-header-actions--inline-left .plant-alarm-menu-panel{
+  left: auto;
+  right: 0;
+}
+
+@media (max-width: 640px){
+  /* no celular vira folha fixa de margem a margem, que e o formato certo
+     para um menu de alarmes em tela pequena */
+  .plant-header-actions--inline-left .plant-alarm-menu-panel{
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-width: none;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  /* Carimbo do multimedidor: cortava em telas <=390px.
+     ⚠️ Especificidade: o elemento e `.device-metric-cell.relay-timestamp-cell`
+        e a regra que o prende e (0,2,0). Um seletor com uma classe so EMPATA
+        e depende de ordem -- medido: com `.relay-timestamp-cell` sozinho o
+        corte permanecia em 360px e 390px. Casar as DUAS classes vence. */
+  .device-metric-cell.relay-timestamp-cell{
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

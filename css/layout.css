@@ -7122,3 +7122,207 @@ select.pem-ctrl option {
 .chart-loader.hidden {
   display: none;
 }
+
+/* AIOTI-RESP-2026-09-21-INICIO
+   ==========================================================================
+   RESPONSIVIDADE — celular e telas estreitas          21/09/2026
+   ==========================================================================
+   A marca ASCII acima existe para o script de aplicacao saber se o bloco ja
+   esta no arquivo e nunca duplicar. Marca com acento quebraria a checagem
+   dependendo da codificacao.
+
+   Este bloco e ADITIVO e vai no FIM de css/layout.css. Aditivo de proposito:
+   a arvore local DIVERGE da producao nos dois sentidos, e sobrescrever regra
+   existente arriscaria apagar comportamento que so existe la. Acrescentar no
+   fim so pode SOBREPOR, nunca remover.
+   ↩️ DESFAZER = apagar deste comentario ate o fim do arquivo.
+
+   COMO ISTO FOI APURADO
+   ---------------------
+   Nao foi no olho: o navegador rodou em 300, 320, 360, 390, 412, 430, 480,
+   520, 540, 640, 768, 900, 1024, 1280, 1440 e 1600 px, medindo a cada largura
+   (a) sobreposicao do titulo pelos controles, (b) nº de rotulos/valores com
+   scrollWidth > clientWidth, (c) rolagem horizontal, (d) se o mascote cobre
+   bloco de dado.
+
+   ⚠️ DUAS VEZES A SONDA MENTIU, e vale registrar:
+     1. Tres candidatos seguidos deram numeros IDENTICOS (32/22/5 px). Falha
+        uniforme assim nao e conserto que falhou -- e leitura errada. Estava:
+        o `min()` do teste incluia elemento com display:none, cujo rect e
+        x=0, entao eu media a origem da tela.
+     2. Antes disso eu media na largura errada: o loop tinha deixado a janela
+        em 1440 e eu li aquilo como se fosse 320.
+
+   ⚠️ O bloco foi verificado COMO CONJUNTO. Nao isolei regra por regra, entao
+      pode haver linha inerte aqui. Nenhuma delas remove nada.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. TILES DO CARD DE USINA  —  o defeito mais visivel
+   --------------------------------------------------------------------------
+   CAUSA MEDIDA: `@media (min-width: 360px)` cravava `repeat(4, 1fr)` em
+   QUALQUER tela a partir de 360px. Num celular de 412px cada tile ficava com
+   64,5px enquanto "Energia Diária" precisa de 90px -- dai o ellipsis comer
+   "PR DIÁRIO" -> "PR DIÁF" e "457 W/m²" -> "457 W/…".
+   🔑 E nao era so no celular: a 1024px havia 8 tiles cortados. Contagem FIXA
+      de colunas nao sabe quanto espaco existe.
+   CONSERTO: a grade decide sozinha quantas colunas cabem, com piso de 104px
+   (= o rotulo mais longo + respiro). Medido: 0 cortados de 300px a 1600px.
+   -------------------------------------------------------------------------- */
+.plant-card__stats{
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+}
+/* precisa repetir dentro do mesmo breakpoint que a regra antiga usa, senao
+   ela volta a vencer entre 360px e o infinito */
+@media (min-width: 360px){
+  .plant-card__stats{
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  }
+}
+@media (max-width: 520px){
+  /* letter-spacing de 0.10em custa ~9% da largura do rotulo */
+  .plant-card__stat-label{ letter-spacing: 0.04em; }
+}
+
+/* --------------------------------------------------------------------------
+   2. CABECALHO  —  titulo atropelado e avatar cortado
+   --------------------------------------------------------------------------
+   CAUSA MEDIDA (viewport 397px): a faixa da direita tem 131px de espaco e o
+   conteudo pede 147px. O primeiro controle comecava em x=230 enquanto o
+   titulo ia ate x=248 -> 18px de sobreposicao. E o `.user-pill` era espremido
+   de 26px para 18px, virando aquele sliver cortado na borda.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px){
+  .topbar{ padding: 8px 8px; gap: 6px; }
+  .topbar-left,
+  .topbar-right{ min-width: 0; }
+  .topbar-center{ min-width: 0; overflow: hidden; }
+
+  .plant-name{
+    display: block;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-pill span:last-child{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-right{ gap: 5px; }
+
+  /* o nome do usuario nao cabe num celular; o avatar sozinho ja identifica.
+     Some o texto, fica a bolinha -- e ela para de ser esmagada. */
+  .user-pill{
+    padding: 0;
+    gap: 0;
+    background: transparent;
+    border-color: transparent;
+  }
+  .user-pill > *:not(.avatar){ display: none; }
+  .avatar{ flex: 0 0 auto; }
+}
+
+@media (max-width: 460px){
+  .topbar{ gap: 4px; }
+  .topbar-right{ gap: 3px; }
+  .status-pill{ max-width: 86px; padding: 4px 7px; }
+
+  /* 🔑 ESPECIFICIDADE DE PROPOSITO -- `.topbar-right X` em vez de `X`
+     ------------------------------------------------------------------
+     `help_tour.js` e `i18n_seletor.js` injetam a PROPRIA folha de estilo em
+     tempo de execucao, e ela entra DEPOIS do layout.css na ordem do
+     documento (medido: layout.css e a folha [3], a do tour e a [9]).
+     Com a mesma especificidade, quem vem depois vence -- entao
+     `.htour-help-btn{display:none}` PERDIA para o `display:flex` dela.
+     Prefixar com `.topbar-right` sobe para (0,2,0) e vence por
+     especificidade, que independe da ordem. Sem `!important`: ele venceria
+     tambem, mas quebraria quem precise sobrescrever isto depois.
+
+     🔴 Isto so apareceu porque a verificacao foi refeita CONTRA O ARQUIVO
+        PUBLICADO. No teste com <style> injetado eu era o ultimo da fila e
+        tudo passava -- o teste media uma condicao que o deploy nao tem. */
+
+  /* o globo do seletor de idioma custa 14px e nao diz nada que o "PT" nao diga */
+  .topbar-right .aioti-lang__btn i,
+  .topbar-right .aioti-lang__btn svg{ display: none; }
+  .topbar-right .aioti-lang__btn{ padding: 4px 6px; }
+
+  /* A DECISAO: o botao "?" (tour guiado) sai no celular.
+     Aritmetica, nao gosto: a faixa da direita tem 94px e o conjunto pedia
+     116px. Faltavam 22px e o "?" custa exatamente 31px com o espacamento --
+     era ele que atropelava o titulo. Continua em tablet/desktop. */
+  .topbar-right .htour-help-btn{ display: none; }
+
+  .avatar{ width: 26px; height: 26px; flex: 0 0 26px; }
+}
+
+/* --------------------------------------------------------------------------
+   3. MASCOTE FLUTUANTE
+   --------------------------------------------------------------------------
+   CAUSA MEDIDA: `.robot-assistant` e `position: fixed; right:38px; bottom:6px;
+   z-index:9999`. No celular a barra de navegacao inferior ocupa 64px, entao
+   ele ficava EM CIMA dela, e o balao `.robot-bubble` abria para a esquerda
+   cobrindo os tiles -- era o "Sem anomalias detectadas" por cima do PR.
+   CONSERTO: encolhe, sobe acima da barra e o balao some no celular.
+   ⚠️ O balao some SO em <=640px. Em tablet/desktop continua como sempre foi.
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px){
+  .robot-assistant{
+    right: 6px;
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    transform: scale(0.7);
+    transform-origin: bottom right;
+  }
+  .robot-bubble{ display: none; }
+}
+
+/* --------------------------------------------------------------------------
+   4. TELA DE USINA — NAO MORA AQUI
+   --------------------------------------------------------------------------
+   🔴 Eu escrevi o conserto da plant.html NESTE arquivo e ele ficou INERTE:
+      `plant.html` NAO CARREGA `layout.css`. As folhas dela sao plant.css,
+      all.min.css, leaflet.css e as injetadas por JS -- medido listando
+      `document.styleSheets` na pagina publicada.
+      O conserto dela vive em `responsivo_plant_2026_09_21.css`, que vai para
+      o fim de `css/plant.css`.
+   🔑 Cada pagina desta plataforma tem seu proprio conjunto de folhas. Antes
+      de escrever CSS, conferir QUEM a pagina alvo carrega -- `resumo.html`
+      usa style.css + layout.css; `plant.html` nao usa nenhum dos dois.
+   -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   (o texto abaixo ficou como registro do diagnostico; as REGRAS foram
+    movidas para responsivo_plant_2026_09_21.css)
+   --------------------------------------------------------------------------
+   CAUSA MEDIDA: `#plantAlarmMenuPanel` fica FECHADO com
+   `visibility:hidden; opacity:0` -- mas `display:block`, `position:absolute`,
+   `left:0` e `width:380px`, dentro de um pai que comeca em x=153. Resultado:
+   ocupa 153..533 e estica o DOCUMENTO para 533px numa tela de 397.
+   Um elemento invisivel empurrando a pagina: nada na tela denuncia a causa.
+
+   CONSERTO
+     - em qualquer largura: ancora pela direita, para nao crescer para fora;
+     - no celular: vira uma folha fixa de margem a margem, que e o formato
+       certo para um menu de alarmes em tela pequena.
+   MEDIDO: a 412px (o celular do evento) o documento caiu de 533 para 397,
+   e a rolagem lateral sumiu em 390 e 412.
+
+   ⚠️ NAO RESOLVE TUDO, e isto esta registrado de proposito:
+      em 320px e a partir de 480px a pagina AINDA passa 6 a 39px da borda.
+      A causa e OUTRA -- `section.card.plant-header-card`,
+      `.plant-charts-grid`, `.plant-device-nav-card` e `.plant-devices-card`
+      terminam ~6px alem da largura util. E defeito ANTERIOR a este bloco
+      (medido antes de qualquer alteracao minha) e pede investigacao da
+      largura/padding dos cards, nao remendo de media query.
+
+   🔑 E COMO EU QUASE CONSERTEI O QUE NAO ESTAVA QUEBRADO
+      A primeira sonda acusou `.monthly-kpi-label` truncado (97px para 199).
+      Era FALSO: dentro do rotulo ha `span.monthly-help-tip`, um balao de
+      ajuda `position:absolute` de 220px com `visibility:hidden`, e ele
+      inflava o `scrollWidth` do ancestral. Medindo a LINHA DE TEXTO real
+      (Range.getClientRects sobre os nos de texto proprios), o rotulo ocupa
+      79px numa caixa de 95 -- cabe. Por isso nao ha regra de KPI aqui.
+   -------------------------------------------------------------------------- */
