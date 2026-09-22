@@ -306,3 +306,354 @@
 
   window.HelpTour = { start, end };
 })();
+
+/* AIOTI-DEMOTOUR-2026-09-21-INICIO
+   ==========================================================================
+   TOUR DE APRESENTACAO — SOMENTE NA DEMONSTRACAO          21/09/2026
+   ==========================================================================
+   Vai no FIM de `js/help_tour.js`. Esse arquivo ja e carregado pelo
+   resumo.html, entao NENHUM HTML precisa ser alterado -- nem em producao.
+
+   🔑 COMO ISTO NAO VAZA PARA A PRODUCAO
+   O `demo.html` grava `localStorage.demo_tour = "1"` antes de redirecionar.
+   So quem passou pela landing do evento tem essa marca. Usuario de producao
+   nunca a tem, entao este bloco inteiro e um `return` silencioso para ele.
+   ⚠️ localStorage e POR ORIGEM -- e por isso que a landing e o app moram no
+      MESMO host. Se um dia a landing mudar de dominio, o tour para de
+      aparecer e nada no console vai dizer por que.
+
+   🔑 POR QUE APPEND NUM JS EXISTENTE, E NAO UM <script> NOVO
+   Acrescentar `<script>` no resumo.html obrigaria a editar um arquivo que
+   serve a producao. Append no fim de um arquivo que a pagina JA carrega e
+   aditivo: so pode somar comportamento, e desfazer e apagar o bloco.
+
+   ↩️ DESFAZER: apagar deste comentario ate o fim do arquivo.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  // ---- PORTAO -------------------------------------------------------------
+  // Duas condicoes, as duas necessarias:
+  //  1. veio da landing do evento (a marca);
+  //  2. esta na tela de portfolio -- o tour fala do que se ve AQUI.
+  try {
+    if (localStorage.getItem("demo_tour") !== "1") return;
+  } catch (e) { return; }                       // navegador sem localStorage
+  if (!/resumo\.html|\/$/.test(window.location.pathname)) return;
+
+  // ---- O ROTEIRO ----------------------------------------------------------
+  // `alvo` null = cartao central, sem holofote. Passo cujo alvo NAO EXISTE e
+  // PULADO -- a tela muda conforme o cliente e o horario, e um tour que
+  // aponta para o vazio e pior que nenhum tour.
+  var PASSOS = [
+    { alvo: null,
+      titulo: "Bem-vindo à AIOTI",
+      texto: "Esta é a plataforma que monitora usinas solares em tempo real. Em um minuto eu mostro o essencial." },
+
+    { alvo: ".psf-inner",
+      titulo: "A frota inteira, num relance",
+      texto: "Potência gerada agora, capacidade instalada e o quanto disso está em uso. Atualiza sozinho, a cada poucos minutos." },
+
+    { alvo: ".psf-status-icons",
+      titulo: "Estado dos equipamentos",
+      texto: "Quantos inversores estão gerando, quantos pararam de comunicar e quantos estão desligados. É o primeiro lugar onde um problema aparece." },
+
+    { alvo: ".plant-card__top",
+      titulo: "Cada usina, um cartão",
+      texto: "Uma linha por usina. A cor da borda e o ícone já dizem se há alarme ativo." },
+
+    { alvo: ".plant-card__stats",
+      titulo: "Os números que importam",
+      texto: "Potência, energia do dia, irradiância e Performance Ratio — o indicador que diz se a usina entrega o que o sol ofereceu." },
+
+    { alvo: ".plant-card canvas",
+      titulo: "A curva do dia",
+      texto: "Geração e irradiância lado a lado. Quando a linha verde descola da laranja, algo está segurando a usina." },
+
+    { alvo: ".plant-card__status",
+      titulo: "Alarmes com contexto",
+      texto: "A plataforma cruza a medição elétrica antes de alarmar, para não acordar ninguém por causa de um sensor mudo." },
+
+    { alvo: null,
+      titulo: "Sua vez",
+      texto: "Toque em uma usina para abrir os detalhes: inversores, strings, trackers e o histórico completo." }
+  ];
+
+  var VEL_DIGITACAO = 18;   // ms por caractere
+
+  // ---- ESTILO (injetado: nao depende de nenhum .css) ----------------------
+  var css = document.createElement("style");
+  css.textContent = [
+    // 🔑 O FUNDO NAO ESCURECE. Ele so apanha o toque.
+    //    A v1 tinha fundo em rgba(0,0,0,.55) cobrindo a tela INTEIRA **e** a
+    //    sombra do holofote escurecendo o entorno. Resultado: a area em
+    //    destaque levava a camada do fundo por cima e saia escura tambem --
+    //    o holofote iluminava e o fundo apagava de novo.
+    //    Agora quem escurece e SO a sombra de `.dtour-foco`, que tem o buraco
+    //    no lugar certo por construcao.
+    ".dtour-fundo{position:fixed;inset:0;z-index:100000;background:transparent;",
+    "  opacity:0;transition:opacity .25s,background .25s;cursor:pointer;}",
+    ".dtour-fundo.on{opacity:1;}",
+    // Passo SEM alvo nao tem holofote, logo nao tem sombra para escurecer.
+    // So nesse caso o fundo assume o escurecimento.
+    ".dtour-fundo--cheio{background:rgba(0,0,0,.72);}",
+    ".dtour-foco{position:fixed;z-index:100001;border-radius:14px;pointer-events:none;",
+    "  box-shadow:0 0 0 9999px rgba(0,0,0,.72),0 0 0 2px #39e58c,0 0 22px rgba(57,229,140,.55);",
+    "  transition:all .35s cubic-bezier(.4,0,.2,1);}",
+    ".dtour-cartao{position:fixed;z-index:100002;left:12px;right:12px;",
+    "  background:rgba(4,14,7,.985);border:1px solid rgba(57,229,140,.30);border-radius:16px;",
+    "  padding:18px 18px 14px;color:#d4f5e4;box-shadow:0 12px 40px rgba(0,0,0,.6);",
+    "  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;",
+    "  max-width:520px;margin:0 auto;transition:top .35s,bottom .35s;}",
+    ".dtour-passo{font-size:.7rem;letter-spacing:.14em;color:#39e58c;opacity:.85;",
+    "  text-transform:uppercase;margin-bottom:7px;}",
+    ".dtour-titulo{font-size:1.12rem;font-weight:700;margin-bottom:8px;line-height:1.25;}",
+    ".dtour-texto{font-size:.96rem;line-height:1.55;color:#a9cdb9;min-height:4.6em;}",
+    ".dtour-cursor{display:inline-block;width:8px;background:#39e58c;margin-left:2px;",
+    "  animation:dtourPisca .7s steps(1) infinite;}",
+    "@keyframes dtourPisca{50%{opacity:0}}",
+    ".dtour-rodape{display:flex;align-items:center;justify-content:space-between;",
+    "  margin-top:14px;gap:12px;}",
+    ".dtour-pontos{display:flex;gap:5px;}",
+    ".dtour-ponto{width:6px;height:6px;border-radius:50%;background:rgba(57,229,140,.25);}",
+    ".dtour-ponto.on{background:#39e58c;box-shadow:0 0 8px rgba(57,229,140,.8);}",
+    ".dtour-btn{background:#39e58c;color:#04180d;border:0;border-radius:11px;",
+    "  padding:11px 18px;font-size:.95rem;font-weight:700;font-family:inherit;cursor:pointer;}",
+    "@media (prefers-reduced-motion: reduce){.dtour-foco{transition:none}}",
+    // ---- convite: o que o cliente ve primeiro ----------------------------
+    ".dtour-convite{position:fixed;z-index:99990;left:10px;right:10px;",
+    "  bottom:calc(74px + env(safe-area-inset-bottom,0px));max-width:520px;margin:0 auto;",
+    "  background:rgba(4,14,7,.985);border:1px solid rgba(57,229,140,.45);border-radius:16px;",
+    "  padding:14px 16px;color:#d4f5e4;display:flex;align-items:center;gap:12px;",
+    "  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;",
+    "  animation:dtourPulsa 2s ease-in-out infinite;}",
+    "@keyframes dtourPulsa{",
+    "  0%,100%{box-shadow:0 0 0 0 rgba(57,229,140,.42),0 8px 26px rgba(0,0,0,.5);}",
+    "  50%    {box-shadow:0 0 0 12px rgba(57,229,140,0),0 8px 26px rgba(0,0,0,.5);}}",
+    ".dtour-convite-txt{flex:1;min-width:0;font-size:.92rem;line-height:1.35;}",
+    ".dtour-convite-txt b{display:block;font-size:1rem;color:#d4f5e4;margin-bottom:2px;}",
+    ".dtour-convite-txt span{color:#8fb9a3;font-size:.82rem;}",
+    ".dtour-sim{background:#39e58c;color:#04180d;border:0;border-radius:11px;",
+    "  padding:11px 16px;font-size:.93rem;font-weight:700;font-family:inherit;",
+    "  cursor:pointer;flex:0 0 auto;}",
+    ".dtour-nao{background:transparent;border:0;color:#6f8e7e;font-size:1.4rem;",
+    "  line-height:1;padding:4px 6px;cursor:pointer;font-family:inherit;flex:0 0 auto;}",
+    "@media (prefers-reduced-motion: reduce){.dtour-convite{animation:none}}",
+    // ---- modal de novidades fora do caminho -------------------------------
+    // 🔑 CLICAR NO "Entendido" NAO BASTA: medido em 21/09, o modal renderiza
+    //    DEPOIS do convite e volta a cobrir tudo -- a dispensa por clique
+    //    corre antes de ele existir. Regra de CSS e imune a isso, porque vale
+    //    para qualquer instancia que apareca, agora ou daqui a 5 segundos.
+    // ⚠️ Escopo `body.dtour-ativo`: essa classe so existe na demo, entao o
+    //    modal continua normal para o cliente de producao.
+    "body.dtour-ativo .notif-modal-overlay{display:none !important;}"
+  ].join("");
+  document.head.appendChild(css);
+
+  // ---- ELEMENTOS ----------------------------------------------------------
+  var fundo, foco, cartao, elPasso, elTitulo, elTexto, elPontos, elBtn;
+  var i = 0, digitando = false, timerDigit = null;
+
+  function montar() {
+    fundo = document.createElement("div");
+    fundo.className = "dtour-fundo";
+
+    foco = document.createElement("div");
+    foco.className = "dtour-foco";
+
+    cartao = document.createElement("div");
+    cartao.className = "dtour-cartao";
+    cartao.innerHTML =
+      '<div class="dtour-passo"></div>' +
+      '<div class="dtour-titulo"></div>' +
+      '<div class="dtour-texto"></div>' +
+      '<div class="dtour-rodape"><div class="dtour-pontos"></div>' +
+      '<button class="dtour-btn" type="button">Continuar</button></div>';
+
+    document.body.appendChild(fundo);
+    document.body.appendChild(foco);
+    document.body.appendChild(cartao);
+
+    elPasso  = cartao.querySelector(".dtour-passo");
+    elTitulo = cartao.querySelector(".dtour-titulo");
+    elTexto  = cartao.querySelector(".dtour-texto");
+    elPontos = cartao.querySelector(".dtour-pontos");
+    elBtn    = cartao.querySelector(".dtour-btn");
+
+    PASSOS.forEach(function () {
+      var p = document.createElement("div");
+      p.className = "dtour-ponto";
+      elPontos.appendChild(p);
+    });
+
+    // Um toque em qualquer lugar avanca. Se ainda esta digitando, o primeiro
+    // toque COMPLETA o texto -- quem le rapido nao deve esperar a animacao.
+    fundo.addEventListener("click", avancar);
+    elBtn.addEventListener("click", function (ev) { ev.stopPropagation(); avancar(); });
+
+    requestAnimationFrame(function () { fundo.classList.add("on"); });
+  }
+
+  // ---- DIGITACAO ----------------------------------------------------------
+  function digitar(texto) {
+    clearInterval(timerDigit);
+    digitando = true;
+    elTexto.textContent = "";
+    var cursor = document.createElement("span");
+    cursor.className = "dtour-cursor";
+    cursor.innerHTML = "&nbsp;";
+    elTexto.appendChild(cursor);
+
+    var n = 0;
+    timerDigit = setInterval(function () {
+      n++;
+      cursor.remove();
+      elTexto.textContent = texto.slice(0, n);
+      elTexto.appendChild(cursor);
+      if (n >= texto.length) {
+        clearInterval(timerDigit);
+        digitando = false;
+        cursor.remove();
+      }
+    }, VEL_DIGITACAO);
+  }
+
+  function completarTexto() {
+    clearInterval(timerDigit);
+    digitando = false;
+    elTexto.textContent = PASSOS[i].texto;
+  }
+
+  // ---- POSICIONAMENTO -----------------------------------------------------
+  function posicionar(alvo) {
+    if (!alvo) {
+      // sem holofote -> quem escurece e o fundo (ver comentario no CSS)
+      fundo.classList.add("dtour-fundo--cheio");
+      foco.style.opacity = "0";
+      foco.style.width = "0px";
+      foco.style.height = "0px";
+      cartao.style.top = "50%";
+      cartao.style.bottom = "auto";
+      cartao.style.transform = "translateY(-50%)";
+      return;
+    }
+    // com holofote -> o fundo precisa ficar LIMPO, senao escurece o destaque
+    fundo.classList.remove("dtour-fundo--cheio");
+    var r = alvo.getBoundingClientRect();
+    foco.style.opacity = "1";
+    foco.style.left   = (r.left - 6) + "px";
+    foco.style.top    = (r.top - 6) + "px";
+    foco.style.width  = (r.width + 12) + "px";
+    foco.style.height = (r.height + 12) + "px";
+
+    // o cartao vai para o lado OPOSTO do alvo, para nao cobrir o que aponta
+    cartao.style.transform = "none";
+    var meio = window.innerHeight / 2;
+    if (r.top + r.height / 2 < meio) {
+      cartao.style.top = "auto";
+      cartao.style.bottom = "18px";
+    } else {
+      cartao.style.top = "18px";
+      cartao.style.bottom = "auto";
+    }
+  }
+
+  // ---- FLUXO --------------------------------------------------------------
+  function mostrar() {
+    // pula passo cujo alvo nao existe nesta tela
+    while (i < PASSOS.length && PASSOS[i].alvo && !document.querySelector(PASSOS[i].alvo)) i++;
+    if (i >= PASSOS.length) return encerrar();
+
+    var p = PASSOS[i];
+    var alvo = p.alvo ? document.querySelector(p.alvo) : null;
+
+    elPasso.textContent = (i + 1) + " de " + PASSOS.length;
+    elTitulo.textContent = p.titulo;
+    elBtn.textContent = (i === PASSOS.length - 1) ? "Explorar a plataforma" : "Continuar";
+    [].forEach.call(elPontos.children, function (d, k) {
+      d.classList.toggle("on", k <= i);
+    });
+
+    if (alvo) {
+      alvo.scrollIntoView({ behavior: "smooth", block: "center" });
+      // espera a rolagem assentar antes de medir: posicionar antes daria o
+      // retangulo ANTIGO e o holofote cairia no lugar errado.
+      setTimeout(function () { posicionar(alvo); }, 380);
+    } else {
+      posicionar(null);
+    }
+    digitar(p.texto);
+  }
+
+  function avancar() {
+    if (digitando) { completarTexto(); return; }
+    i++;
+    if (i >= PASSOS.length) return encerrar();
+    mostrar();
+  }
+
+  function encerrar() {
+    clearInterval(timerDigit);
+    if (convite && convite.parentNode) convite.remove();
+    // "feito" em vez de apagar: recarregar a pagina nao reinicia o tour, e
+    // ainda fica o registro de que este aparelho ja viu.
+    try { localStorage.setItem("demo_tour", "feito"); } catch (e) {}
+    [fundo, foco, cartao].forEach(function (el) { if (el && el.parentNode) el.remove(); });
+  }
+
+  // ---- CONVITE ------------------------------------------------------------
+  // 🔑 DECISAO REVISTA (21/09): a 1a versao ABRIA o tour sozinho, sem escapatoria.
+  //    Virou CONVITE por pedido do dono do produto: um botao bem visivel,
+  //    pulsando, perguntando se a pessoa quer a apresentacao. Quem so quer
+  //    mexer na plataforma nao fica preso em 8 passos.
+  //    O pulso e `box-shadow` expandindo -- nao mexe no layout, entao nao
+  //    empurra conteudo nem dispara reflow a cada 2 s.
+  var convite;
+
+  function convidar() {
+    // 🔑 A classe fica no body pelo RESTO DA SESSAO, de proposito. Devolver o
+    //    modal de novidades ao visitante depois do tour nao serve a ninguem:
+    //    ele e changelog interno, nao material de demonstracao.
+    document.body.classList.add("dtour-ativo");
+
+    // O clique continua, para o caso de o modal JA estar aberto -- a regra de
+    // CSS esconde, mas o clique tambem marca como lido do lado da aplicacao.
+    var fechar = [].filter.call(document.querySelectorAll("button"), function (b) {
+      return /entendido/i.test(b.textContent || "");
+    })[0];
+    if (fechar) { try { fechar.click(); } catch (e) {} }
+
+    convite = document.createElement("div");
+    convite.className = "dtour-convite";
+    convite.innerHTML =
+      '<div class="dtour-convite-txt"><b>Quer uma apresentação guiada?</b>' +
+      '<span>1 minuto, mostrando o essencial da tela.</span></div>' +
+      '<button class="dtour-sim" type="button">Começar</button>' +
+      '<button class="dtour-nao" type="button" aria-label="Agora não">&times;</button>';
+    document.body.appendChild(convite);
+
+    convite.querySelector(".dtour-sim").addEventListener("click", function () {
+      convite.remove();
+      montar();
+      mostrar();
+    });
+    convite.querySelector(".dtour-nao").addEventListener("click", function () {
+      convite.remove();
+      // "recusado", nao "feito": fica registrado que a pessoa viu o convite e
+      // disse nao -- diferente de ter percorrido o tour.
+      try { localStorage.setItem("demo_tour", "recusado"); } catch (e) {}
+    });
+  }
+
+  // Espera o primeiro cartao de usina existir: o tour fala de dados, e comecar
+  // com a tela vazia mostraria holofote em cima de nada. Teto de 12s para nao
+  // ficar refem de uma tela que nunca carrega.
+  var esperou = 0;
+  var aguarde = setInterval(function () {
+    esperou += 250;
+    if (document.querySelector(".plant-card") || esperou >= 12000) {
+      clearInterval(aguarde);
+      setTimeout(convidar, 450);
+    }
+  }, 250);
+})();
